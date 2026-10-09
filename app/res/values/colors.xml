@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Pi 官方 logo 三色：https://pi.dev/logo.svg -->
+    <color name="pi_salmon">#F09082</color>
+    <color name="pi_blue">#4D9ABF</color>
+    <color name="pi_amber">#F1BE58</color>
+
+    <color name="bg_base">#0E1116</color>
+    <color name="bg_elevated">#161B22</color>
+    <color name="bg_bubble_user">#1F3A6E</color>
+    <color name="bg_bubble_agent">#1A2029</color>
+    <color name="bg_code">#0B0E13</color>
+    <color name="text_primary">#E6EDF3</color>
+    <color name="text_secondary">#8B949E</color>
+    <color name="divider">#242C38</color>
+    <color name="md_theme_primary">#4D9ABF</color>
+    <color name="md_theme_onPrimary">#0E1116</color>
+    <color name="md_theme_secondary">#F09082</color>
+    <color name="md_theme_tertiary">#F1BE58</color>
+</resources>

@@ -1,0 +1,7 @@
+app/libs/
+app/build/
+app/out/
+app/*.jks
+bridge/node_modules/
+bridge/run/
+docs/*.png

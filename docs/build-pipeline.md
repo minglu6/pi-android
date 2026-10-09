@@ -1,0 +1,105 @@
+# pi-android 构建流水线（本机无 gradle / Android SDK 的替代方案）
+
+本机 Termux 只有 `aapt2 / javac / d8 / apksigner / python3`，没有 gradle、没有 Android SDK、
+也没有 apktool（见 AGENTS.md「Android reverse engineering」）。所以 gradle 干的活拆成四个脚本：
+
+```
+app/tools/fetch-aars.py    ← 替代 gradle 的依赖解析（Google Maven + Maven Central，传递依赖 + 版本择优）
+app/tools/gen-dep-r.py     ← 替代 AGP 的依赖 R 类生成
+app/tools/assemble.py      ← 替代 AGP 的打包（dex + AAR 的 assets/.so 合并）
+app/build.sh               ← 串起来：aapt2 → javac → d8 → assemble → apksigner
+```
+
+不可省的工具适配器。`app/tools/lib-resources.py`（把依赖做成 `aapt2 link --static-lib` 静态库）
+**当前不在主构建路径里**，保留它只是作为记录与备用：见下 §3 结论。
+
+```sh
+cd ~/projects/pi-android/app && bash build.sh            # 产出 out/pi-android.apk
+adb -s <serial> install -r out/pi-android.apk
+PHONE_VD_SERIAL=<serial> phone-vd-start --app dev.pi.android   # 必须在虚拟屏验证
+```
+
+依赖是 `aapt2/../libs/`（56 个构件，含 `manifest.json` 的 sha256 审计清单），
+重新取用同一条 `--root` 命令；`libs/*` 不进 git，任何机器重建都靠脚本 + 清单。
+
+## 依赖清单（一次即可）
+
+```sh
+python3 tools/fetch-aars.py \
+  --root androidx.appcompat:appcompat:1.7.0 \
+  --root androidx.recyclerview:recyclerview:1.3.2 \
+  --root androidx.constraintlayout:constraintlayout:2.2.1 \
+  --root com.google.android.material:material:1.12.0 \
+  --root org.jetbrains.kotlin:kotlin-stdlib:1.9.24 \
+  --exclude org.jetbrains.kotlin:kotlin-stdlib-jdk7 \
+  --exclude org.jetbrains.kotlin:kotlin-stdlib-jdk8 \
+  --exclude org.jetbrains.kotlin:kotlin-stdlib-common
+python3 tools/axml-package.py --all --libs libs      # 读每个 AAR 的 package（生成 libs/packages.json）
+```
+
+## 坑目录（全部实证，按被踩顺序）
+
+### P1 · AndroidX 是 Kotlin 写的，`kotlin-stdlib` 必须自己加
+POM 依赖图里不声明它（但 bytecode 用了 `kotlin.jvm.internal.Intrinsics`）。
+症状：`ClassNotFoundException: kotlin.jvm.internal.Intrinsics`（发生在 `AppCompatActivity` 构造里）。
+而且 gradle 会把 `kotlin-stdlib-jdk7/jdk8` 提升到同一版本（那两个包 1.8 之后是空壳），
+我们按最高版本择优会留下 1.6.21 的旧版 → d8 报 `Type ... is defined multiple times`，
+所以必须 `--exclude` 掉 `kotlin-stdlib-jdk7/jdk8/common`。
+
+### P2 · 版本号要从两段剥 `[]`，POM 里的版本写成 `[2.6.2]`
+只 `lstrip` 会留下 `2.6.2]`，于是下载目录叫 `libs/.../2.6.2]/`，下次按内存路径找不到
+→ 症状是某个 jar 静默缺失，最后在运行时炸 `NoClassDefFound: LifecycleOwner`。现已 `strip`。
+
+### P3 · 依赖既有 AAR 也有 JAR，classpath 不能只搜 `classes.jar`
+`androidx.annotation`、`kotlin-stdlib`、`error_prone_annotations` 是纯 jar；
+`find "$LIBS" -name '*.jar'` 才覆盖得到（`classes.jar` 也是 `.jar`，一并被捡到）。
+
+### P4 · **最关键**：依赖的 `R` 类不会随 AAR 来，必须补生成
+AAR 的 `classes.jar` 引用 `androidx.appcompat.R`，但 AAR 不带 R 类（Gradle 会按最终合并的
+资源表给每个依赖包生成一份）。没有这一步的运行时症状：
+`ClassNotFoundException: androidx.appcompat.R$drawable` —— 从错误信息完全看不出是资源问题。
+`gen-dep-r.py` 的做法：
+
+1. `libs/packages.json`（由 `axml-package.py` 读 AAR 的 AndroidManifest.xml 得到包名
+   —— 不能靠 groupId 猜：`core` 是 `androidx.core`，`core-ktx` 却是 `androidx.core.ktx`）；
+2. AAR 里的 `R.txt` 给出该库的资源名清单（type + name，忽略其中的旧 id）；
+3. aapt2 link 生成的 `dev/pi/android/R.java` 里有合并后的最终 id；
+4. 按名字取值，写出 `<pkg>.R`。`styleable` 是 `int[]`，必须单独认出来，
+   否则 Material3 会缺 1600+ 个样式数组（表现为主题相关的神秘崩溃）。
+
+### P5 · 包名要真读 manifest，别猜
+见 P4 括号里的两个例子。另外 AndroidX 的 AAR manifest 是**未编译的文本 XML**
+（`<?xml` 开头，不是 `03 00 08 00`），所以 `axml-package.py` 两条路都支持。
+
+### P6 · 别指望保留各自包名：依赖资源直接 `-R` 给应用 link 的后果
+这条路（每个依赖 `aapt2 compile` 后直接喂给应用的 link）的结果是资源被合并进应用包，
+同时刷出 1200 条 `No package ID 7f found for resource ID 0x7f…`。
+实测：多数资源其实合并成功（应用表里 7233 个 id，material 的 color/dimen/layout/id
+一个不缺），所以这些报错更像"把跨库引用烘成数字 id 时无处查找"的告警，不是资源丢失。
+目前的成品 APK 就是这条路径的产物，已在虚拟屏上验证渲染正确（见 §验证）。
+若后续某个依赖开始出现资源解析失败，再改用 `lib-resources.py` 的静态库路径。
+
+### P7 · 若真走静态库路径，依赖要用 `-I` 而不是 `-R`
+`aapt2 link --static-lib -I android.jar -I dep.apk -R own.zip`。
+用 `-R dep.apk` 会把依赖的资源并入本库包名，反而让 core 引用自己的资源时找不到：
+`resource id/normal (aka androidx.drawerlayout:id/normal) not found`。
+即便如此，`appcompat` 仍会失败：`res/color/*.xml` 里的 `app:alpha` 是一个
+**core 声明的 attr**（`libs/androidx/core/core/1.13.0/res/values/values.xml` 第 117 行），
+res-auto 在本库 link 时解析到 `androidx.appcompat:alpha` 就找不到；
+material 又依赖 appcompat，一并失败。这也是 P6 决定先不走这条路的原因。
+
+### P8 · `adb` 本机连了两个 serial，`install` 必须带 `-s`
+`127.0.0.1:5555` 与 `emulator-5554` 都是本机虚拟屏/ADB 自连；phone-* 脚本要用
+`PHONE_VD_SERIAL` 指定，否则报「检测到多个 ADB device」。
+
+### P9 · 单个 dex 目前够用，超过 64K 方法要手动开 multidex
+现在产一棵 `classes.dex`（含全部 AndroidX），没触发上限。真到那一步，
+d8 默认不会自己拆 dex，需要显式切 multi-dex 并在 Application 里挂 `MultiDex`。
+
+## 验证（2026-10-10）
+
+安装后在虚拟屏启动 `dev.pi.android`，`dumpsys activity` 显示
+`topResumedActivity=... dev.pi.android/.ui.MainActivity`；
+抓屏 + `tesseract -l chi_sim+eng` 读出屏幕上确有工具栏状态 "Connecting…"、
+INFO 文案与输入框 hint "Message Pi…"。**判断 UI 是否真的渲染出来要用 OCR/窗口 dumpsys 取证，
+不要只凭截图文件大小**（见可见czy记忆 #56：虚拟屏熄屏时最后一帧仍可能很大）。

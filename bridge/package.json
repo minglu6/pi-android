@@ -1,0 +1,8 @@
+{
+  "name": "pi-android-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "WebSocket ↔ Pi RPC (pi --mode rpc) 桥，给 pi-android APK 用",
+  "dependencies": { "ws": "^8.18.0" }
+}

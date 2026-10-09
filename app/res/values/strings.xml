@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Pi</string>
+    <string name="hint_message">Message Pi…</string>
+    <string name="action_send">Send</string>
+    <string name="action_stop">Stop</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_online">Connected</string>
+    <string name="status_offline">Disconnected</string>
+    <string name="settings">Settings</string>
+    <string name="sessions">Sessions</string>
+    <string name="model">Model</string>
+    <string name="action_new_session">New session</string>
+    <string name="action_reload">Reload</string>
+    <string name="status_starting_pi">Pi 启动中…</string>
+    <string name="status_idle">ready</string>
+    <string name="status_offline_with">未连接（%1$s）</string>
+    <string name="action_model">Model</string>
+    <string name="action_thinking">Thinking</string>
+</resources>
