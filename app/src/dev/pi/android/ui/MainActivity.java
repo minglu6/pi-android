@@ -216,8 +216,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         LinearLayoutManager lm = new LinearLayoutManager(this);
         lm.setStackFromEnd(false);
         list.setLayoutManager(lm);
-        // 每个增量都触发 change cross-fade 会闪烁/滞后；流式列表直接绘制最新内容。
-        list.setItemAnimator(null);
+        // 空闲时轻量 fade；流式更新关闭动画以免闪烁。
+        list.setItemAnimator(new androidx.recyclerview.widget.DefaultItemAnimator());
         adapter = new MessageAdapter(size -> {
             refreshEmptyState();
             maybeScrollToBottom(false);
@@ -585,6 +585,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             if (on && (changed || generationStatus.length() == 0)) generationStatus.setText(R.string.generation_active);
         }
         if (steerToggle != null) steerToggle.setVisibility(on ? View.VISIBLE : View.GONE);
+        if (list != null) {
+            list.setItemAnimator(on ? null : new androidx.recyclerview.widget.DefaultItemAnimator());
+        }
         if (!on) flushTranscriptPaint();
         main.removeCallbacks(thinkingTimeout);
         if (on) main.postDelayed(thinkingTimeout, THINKING_TIMEOUT_MS);

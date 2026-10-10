@@ -116,6 +116,7 @@ gh run watch
 - 首启空状态（无 Token / 未连接引导）、adaptive + monochrome 图标
 - GitHub Actions 自动打 APK
 - 日用聊天打磨：Markdown/代码块、时间戳、断线横幅、粘底滚动、会话重命名/删除
+- Tokyo Night 风格聊天 UI（简洁顶栏 / 无气泡消息 / 工具时间线 / 卡片输入框）；MesloLGLDZ Nerd Font Mono
 
 ### 已知限制 / 未做
 
