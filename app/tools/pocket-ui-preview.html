@@ -29,9 +29,10 @@
   .label { color: #888; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
   .phone {
     width: 320px; height: 660px; border-radius: 28px; overflow: hidden;
-    background: var(--bg); border: 1px solid #333; box-shadow: 0 18px 48px #0009;
-    display: flex; flex-direction: column;
+    background: var(--bg); color: var(--fg); border: 1px solid #333;
+    box-shadow: 0 18px 48px #0009; display: flex; flex-direction: column;
   }
+  .phone .bar .titles strong { color: var(--fg); }
   .bar {
     display: flex; align-items: center; gap: 4px; padding: 10px 6px 8px;
     min-height: 56px;
@@ -126,10 +127,6 @@
   .sessions .search {
     margin: 8px 16px; height: 40px; border-radius: 10px; background: var(--chip);
     display: flex; align-items: center; padding: 0 12px; color: var(--muted); font-size: 14px;
-  }
-  .sessions .search kbd {
-    margin-left: auto; font-family: ui-monospace, monospace; font-size: 10px;
-    background: var(--elev); padding: 2px 6px; border-radius: 6px; color: var(--faint);
   }
   .srow {
     display: flex; align-items: center; gap: 12px; padding: 12px 16px; min-height: 52px;
