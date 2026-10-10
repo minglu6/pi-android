@@ -121,6 +121,7 @@ public class SessionListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
         final View card;
         final View dot;
         final TextView title;
+        final View previewRow;
         final TextView preview;
         final TextView time;
         final TextView model;
@@ -131,6 +132,7 @@ public class SessionListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
             card = itemView.findViewById(R.id.session_card);
             dot = itemView.findViewById(R.id.session_dot);
             title = itemView.findViewById(R.id.session_title);
+            previewRow = itemView.findViewById(R.id.session_preview_row);
             preview = itemView.findViewById(R.id.session_preview);
             time = itemView.findViewById(R.id.session_time);
             model = itemView.findViewById(R.id.session_model);
@@ -142,11 +144,21 @@ public class SessionListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
 
         void bind(SessionEntry entry, Listener listener) {
             title.setText(entry.title);
-            if (entry.preview == null || entry.preview.isEmpty()) {
-                preview.setVisibility(View.GONE);
-            } else {
-                preview.setVisibility(View.VISIBLE);
-                preview.setText(entry.preview);
+            boolean sameAsTitle = entry.preview != null && entry.title != null
+                    && entry.preview.equals(entry.title);
+            boolean showPreview = entry.preview != null && !entry.preview.isEmpty() && !sameAsTitle;
+            boolean showCount = entry.messageCount >= 0;
+            if (previewRow != null) {
+                previewRow.setVisibility(showPreview || showCount ? View.VISIBLE : View.GONE);
+            }
+            if (preview != null) {
+                if (showPreview) {
+                    preview.setVisibility(View.VISIBLE);
+                    preview.setText(entry.preview);
+                } else {
+                    preview.setVisibility(View.GONE);
+                    preview.setText("");
+                }
             }
             String when = relativeTime(entry.mtimeMs);
             if (when.isEmpty()) {
@@ -164,11 +176,11 @@ public class SessionListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
                 }
             }
             if (msgCount != null) {
-                if (entry.messageCount < 0) {
-                    msgCount.setVisibility(View.GONE);
-                } else {
+                if (showCount) {
                     msgCount.setVisibility(View.VISIBLE);
                     msgCount.setText(String.valueOf(entry.messageCount));
+                } else {
+                    msgCount.setVisibility(View.GONE);
                 }
             }
             card.setBackgroundResource(entry.current

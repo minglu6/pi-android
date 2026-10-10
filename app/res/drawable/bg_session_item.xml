@@ -4,10 +4,10 @@
     <item>
         <shape android:shape="rectangle">
             <solid android:color="@color/bg_elevated" />
-            <corners android:radius="14dp" />
+            <corners android:radius="12dp" />
             <stroke
                 android:width="1dp"
-                android:color="@color/divider" />
+                android:color="@color/session_card_stroke" />
         </shape>
     </item>
 </ripple>
