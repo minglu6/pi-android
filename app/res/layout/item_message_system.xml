@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Pocket-style notice card: accent bar + title + detail + optional action -->
+<!-- Pocket-style notice card: accent bar + title + detail + expand + optional action -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -40,7 +40,7 @@
 
                 <TextView
                     android:id="@+id/notice_icon"
-                    style="@style/MonoMetaText"
+                    style="@style/MonoMetaText.Line"
                     android:layout_width="18dp"
                     android:layout_height="wrap_content"
                     android:gravity="center"
@@ -62,18 +62,36 @@
                     android:textStyle="bold" />
             </LinearLayout>
 
-            <TextView
-                android:id="@+id/notice_detail"
-                style="@style/MonoMetaText"
+            <!-- Nested scroll so long detail / fenced code never hard-clips the card. -->
+            <androidx.core.widget.NestedScrollView
+                android:id="@+id/notice_detail_scroll"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="24dp"
                 android:layout_marginTop="4dp"
-                android:lineSpacingMultiplier="1.25"
-                android:textColor="@color/text_secondary"
-                android:textIsSelectable="true"
-                android:textSize="11.5sp"
-                android:visibility="gone" />
+                android:fillViewport="false"
+                android:overScrollMode="ifContentScrolls"
+                android:scrollbars="vertical"
+                android:visibility="gone">
+
+                <LinearLayout
+                    android:id="@+id/notice_detail_body"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/notice_detail"
+                        style="@style/MonoMetaText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:breakStrategy="simple"
+                        android:lineSpacingMultiplier="1.25"
+                        android:textColor="@color/text_secondary"
+                        android:textIsSelectable="true"
+                        android:textSize="11.5sp" />
+                </LinearLayout>
+            </androidx.core.widget.NestedScrollView>
 
             <!-- Legacy plain text fallback (hidden when structured notice binds) -->
             <TextView
@@ -87,8 +105,23 @@
                 android:visibility="gone" />
 
             <TextView
+                android:id="@+id/notice_expand"
+                style="@style/MonoMetaText.Line"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="24dp"
+                android:layout_marginTop="4dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:paddingTop="4dp"
+                android:paddingBottom="2dp"
+                android:text="@string/notice_expand"
+                android:textColor="@color/pi_blue"
+                android:textSize="11.5sp"
+                android:visibility="gone" />
+
+            <TextView
                 android:id="@+id/notice_action"
-                style="@style/MonoMetaText"
+                style="@style/MonoMetaText.Line"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="24dp"

@@ -71,6 +71,10 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
 
     /** 输出预览行数（pi-pocket SHELL_LINES 的移动端收缩版）。 */
     private static final int PREVIEW_LINES = 6;
+    /** Notice detail collapsed preview lines before「展开全文». */
+    private static final int NOTICE_PREVIEW_LINES = 14;
+    /** Nested scroll cap inside notice / tool cards (~40% screen). */
+    private static final float CARD_SCROLL_MAX_SCREEN = 0.40f;
 
     // 单线程、有界队列：历史里的原生图片绝不在主线程做 base64/摘要/Bitmap 解码。
     private static final int THUMB_EDGE = 256;
@@ -173,6 +177,10 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
     @Nullable private AgentActionListener agentActions;
     /** 工具卡片展开状态，key 为 tool id（legacy 为派生 key）。 */
     private final Map<String, Boolean> toolExpanded = new HashMap<>();
+    /** Notice「展开全文」状态，key 为 detail hash. */
+    private final Map<String, Boolean> noticeExpanded = new HashMap<>();
+    /** Assistant code-block fold state (adapter-scoped so recycle keeps it). */
+    private final Map<String, Boolean> codeBlockExpanded = new HashMap<>();
 
     public MessageAdapter(OnMessageChanged listener) {
         this.listener = listener;
@@ -228,11 +236,15 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
     /** 只在确认切换会话时清除用户的工具展开选择。 */
     public void clearToolExpansions() {
         toolExpanded.clear();
+        noticeExpanded.clear();
+        codeBlockExpanded.clear();
     }
 
     public void clear() {
         items.clear();
         toolExpanded.clear();
+        noticeExpanded.clear();
+        codeBlockExpanded.clear();
         notifyDataSetChanged();
         if (listener != null) listener.onChanged(0);
     }
@@ -398,7 +410,6 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
         TextView agentActionRetry;
         TextView agentActionFork;
         TextView agentActionMore;
-        final Map<String, Boolean> codeExpanded = new HashMap<>();
 
         // SYSTEM notice card
         View noticeAccent;
@@ -406,6 +417,9 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
         TextView noticeTitle;
         TextView noticeDetail;
         TextView noticeAction;
+        TextView noticeExpand;
+        androidx.core.widget.NestedScrollView noticeDetailScroll;
+        View toolOutputVScroll;
 
         VH(@NonNull View itemView, int type) {
             super(itemView);
@@ -431,7 +445,13 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                 noticeTitle = itemView.findViewById(R.id.notice_title);
                 noticeDetail = itemView.findViewById(R.id.notice_detail);
                 noticeAction = itemView.findViewById(R.id.notice_action);
-                if (noticeDetail != null) noticeDetail.setTypeface(AppFonts.mono(ctx, false));
+                noticeExpand = itemView.findViewById(R.id.notice_expand);
+                noticeDetailScroll = itemView.findViewById(R.id.notice_detail_scroll);
+                if (noticeDetail != null) {
+                    noticeDetail.setTypeface(AppFonts.mono(ctx, false));
+                    noticeDetail.setMaxLines(Integer.MAX_VALUE);
+                    noticeDetail.setEllipsize(null);
+                }
                 if (noticeAction != null) noticeAction.setTypeface(AppFonts.mono(ctx, false));
                 if (noticeIcon != null) noticeIcon.setTypeface(AppFonts.mono(ctx, true));
             }
@@ -445,6 +465,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                 toolStatus = itemView.findViewById(R.id.tool_status);
                 toolChevron = itemView.findViewById(R.id.tool_chevron);
                 toolOutputScroll = itemView.findViewById(R.id.tool_output_scroll);
+                toolOutputVScroll = itemView.findViewById(R.id.tool_output_vscroll);
                 toolCommand = itemView.findViewById(R.id.tool_command);
                 toolOutput = itemView.findViewById(R.id.tool_output);
                 toolFooter = itemView.findViewById(R.id.tool_footer);
@@ -453,7 +474,11 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                 android.graphics.Typeface mono = AppFonts.mono(ctx, false);
                 if (toolGlyph != null) toolGlyph.setTypeface(mono);
                 if (toolCommand != null) toolCommand.setTypeface(mono);
-                if (toolOutput != null) toolOutput.setTypeface(mono);
+                if (toolOutput != null) {
+                    toolOutput.setTypeface(mono);
+                    toolOutput.setMaxLines(Integer.MAX_VALUE);
+                    toolOutput.setEllipsize(null);
+                }
                 if (toolName != null) toolName.setTypeface(mono);
                 if (toolSubject != null) toolSubject.setTypeface(mono);
                 if (toolStatus != null) toolStatus.setTypeface(mono);
@@ -559,7 +584,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                     lang.setText(langLabel);
                     body.setTypeface(AppFonts.mono(ctx, false));
                     final String key = "code|" + si + "|" + seg.body.hashCode();
-                    boolean expanded = Boolean.TRUE.equals(codeExpanded.get(key));
+                    boolean expanded = Boolean.TRUE.equals(codeBlockExpanded.get(key));
                     int lines = countLines(seg.body);
                     boolean foldable = lines > CODE_FOLD_LINES;
                     String shown = (!foldable || expanded) ? seg.body
@@ -568,13 +593,16 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                     int str = ContextCompat.getColor(ctx, R.color.status_online);
                     int cmt = ContextCompat.getColor(ctx, R.color.text_muted);
                     int num = ContextCompat.getColor(ctx, R.color.pi_amber);
+                    body.setMaxLines(Integer.MAX_VALUE);
+                    body.setEllipsize(null);
                     body.setText(SyntaxLite.highlight(shown, langLabel, kw, str, cmt, num));
                     body.setBackgroundColor(codeBg);
                     if (foldable) {
                         fold.setVisibility(View.VISIBLE);
                         fold.setText(expanded ? R.string.code_fold : R.string.code_show_all);
                         fold.setOnClickListener(v -> {
-                            codeExpanded.put(key, !Boolean.TRUE.equals(codeExpanded.get(key)));
+                            codeBlockExpanded.put(key,
+                                    !Boolean.TRUE.equals(codeBlockExpanded.get(key)));
                             int pos = getBindingAdapterPosition();
                             if (pos != RecyclerView.NO_POSITION) notifyItemChanged(pos);
                         });
@@ -801,15 +829,56 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                         ? ctx.getString(R.string.notice_title_info) : n.title);
                 noticeTitle.setTextColor(ContextCompat.getColor(ctx, R.color.text_primary));
             }
-            if (noticeDetail != null) {
-                if (n.detail.isEmpty()) {
+            if (text != null) text.setVisibility(View.GONE);
+
+            final String detail = n.detail == null ? "" : n.detail;
+            final String key = "notice|" + Integer.toHexString(detail.hashCode());
+            final int lines = countLines(detail);
+            final boolean foldable = lines > NOTICE_PREVIEW_LINES;
+            final boolean expanded = Boolean.TRUE.equals(noticeExpanded.get(key));
+
+            if (noticeDetailScroll != null && noticeDetail != null) {
+                if (detail.isEmpty()) {
+                    noticeDetailScroll.setVisibility(View.GONE);
                     noticeDetail.setVisibility(View.GONE);
                 } else {
+                    noticeDetailScroll.setVisibility(View.VISIBLE);
                     noticeDetail.setVisibility(View.VISIBLE);
-                    noticeDetail.setText(n.detail);
+                    noticeDetail.setMaxLines(Integer.MAX_VALUE);
+                    noticeDetail.setEllipsize(null);
+                    String shown = (!foldable || expanded) ? detail
+                            : firstNLines(detail, NOTICE_PREVIEW_LINES);
+                    noticeDetail.setText(shown);
+                    // Cap expanded long bodies so the list stays scrollable with IME open.
+                    int maxH = cardScrollMaxPx();
+                    ViewGroup.LayoutParams lp = noticeDetailScroll.getLayoutParams();
+                    if (expanded && foldable && lines > NOTICE_PREVIEW_LINES) {
+                        lp.height = maxH;
+                        noticeDetailScroll.setLayoutParams(lp);
+                        noticeDetailScroll.setNestedScrollingEnabled(true);
+                    } else {
+                        lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
+                        noticeDetailScroll.setLayoutParams(lp);
+                        noticeDetailScroll.setNestedScrollingEnabled(false);
+                    }
                 }
             }
-            if (text != null) text.setVisibility(View.GONE);
+
+            if (noticeExpand != null) {
+                if (!foldable || detail.isEmpty()) {
+                    noticeExpand.setVisibility(View.GONE);
+                    noticeExpand.setOnClickListener(null);
+                } else {
+                    noticeExpand.setVisibility(View.VISIBLE);
+                    noticeExpand.setText(expanded ? R.string.notice_collapse : R.string.notice_expand);
+                    noticeExpand.setOnClickListener(v -> {
+                        noticeExpanded.put(key, !expanded);
+                        int pos = getBindingAdapterPosition();
+                        if (pos != RecyclerView.NO_POSITION) notifyItemChanged(pos);
+                    });
+                }
+            }
+
             if (noticeAction != null) {
                 if (n.actionCommand.isEmpty()) {
                     noticeAction.setVisibility(View.GONE);
@@ -828,6 +897,11 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                     });
                 }
             }
+        }
+
+        private int cardScrollMaxPx() {
+            return Math.max(dp(160),
+                    Math.round(ctx.getResources().getDisplayMetrics().heightPixels * CARD_SCROLL_MAX_SCREEN));
         }
 
         private int noticeAccentColor(String level) {
@@ -975,17 +1049,26 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
             toolOutputScroll.setVisibility(showBody ? View.VISIBLE : View.GONE);
             toolCommand.setVisibility(showCommand ? View.VISIBLE : View.GONE);
             if (showCommand) toolCommand.setText(command);
+            if (toolOutputVScroll != null) {
+                toolOutputVScroll.setVisibility(expanded && hasOutput ? View.VISIBLE : View.GONE);
+            }
             toolOutput.setVisibility(expanded && hasOutput ? View.VISIBLE : View.GONE);
+            int outLines = countLines(output);
             if (expanded && hasOutput) {
+                // Preview first PREVIEW_LINES when collapsed-into-card; full text when user
+                // already expanded the tool row. Cap height so IME-open lists stay scrollable.
+                boolean longOut = outLines > PREVIEW_LINES;
+                String shownOut = output;
+                // Always show full text inside the nested scroll — never hard-clip mid-line.
                 boolean isEdit = "edit".equals(name) || "write".equals(name);
-                if (isEdit && DiffLite.looksLikeDiff(output)) {
-                    toolOutput.setText(DiffLite.render(output,
+                if (isEdit && DiffLite.looksLikeDiff(shownOut)) {
+                    toolOutput.setText(DiffLite.render(shownOut,
                             ContextCompat.getColor(ctx, R.color.diff_add),
                             ContextCompat.getColor(ctx, R.color.diff_del),
                             ContextCompat.getColor(ctx, R.color.text_muted),
                             ContextCompat.getColor(ctx, R.color.text_secondary)));
                 } else {
-                    toolOutput.setText(output);
+                    toolOutput.setText(shownOut);
                     toolOutput.setTextColor(ContextCompat.getColor(ctx,
                             isThinking ? R.color.text_muted
                                     : ChatMessage.ToolData.STATE_ERROR.equals(state)
@@ -993,16 +1076,34 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                                     : R.color.text_secondary));
                 }
                 toolOutput.setMaxLines(Integer.MAX_VALUE);
+                toolOutput.setEllipsize(null);
+                if (toolOutputVScroll != null) {
+                    ViewGroup.LayoutParams lp = toolOutputVScroll.getLayoutParams();
+                    if (longOut) {
+                        lp.height = cardScrollMaxPx();
+                        toolOutputVScroll.setLayoutParams(lp);
+                        if (toolOutputVScroll instanceof androidx.core.widget.NestedScrollView) {
+                            ((androidx.core.widget.NestedScrollView) toolOutputVScroll)
+                                    .setNestedScrollingEnabled(true);
+                        }
+                    } else {
+                        lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
+                        toolOutputVScroll.setLayoutParams(lp);
+                    }
+                }
             }
 
-            int outLines = countLines(output);
             boolean expandable = outLines > 0 || !command.isEmpty();
             toolFooter.setVisibility(expanded && (expandable || hasOutput) ? View.VISIBLE : View.GONE);
             toolToggle.setVisibility(expandable ? View.VISIBLE : View.GONE);
             if (expandable) {
-                toolToggle.setText(expanded
-                        ? ctx.getString(R.string.tool_collapse)
-                        : ctx.getString(R.string.tool_expand));
+                if (!expanded && outLines > PREVIEW_LINES) {
+                    toolToggle.setText(ctx.getString(R.string.tool_expand_lines, outLines));
+                } else {
+                    toolToggle.setText(expanded
+                            ? ctx.getString(R.string.tool_collapse)
+                            : ctx.getString(R.string.tool_expand));
+                }
             }
             toolCopy.setVisibility(hasOutput ? View.VISIBLE : View.GONE);
 

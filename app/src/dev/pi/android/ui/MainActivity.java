@@ -1626,6 +1626,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             if (composerBar != null) {
                 composerBar.setPadding(padH, padTop, padEnd, bottom + padTop);
             }
+            // Keep the transcript scrollable under the IME so truncated notice/tool
+            // regions remain reachable; only auto-follow when already stuck to bottom.
+            if (list != null) {
+                list.setNestedScrollingEnabled(true);
+                list.setClipToPadding(false);
+            }
             if (ime.bottom > bars.bottom && stickToBottom) {
                 maybeScrollToBottom(true);
             }

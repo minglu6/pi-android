@@ -52,7 +52,7 @@
 
                 <TextView
                     android:id="@+id/session_meta"
-                    style="@style/MonoMetaText"
+                    style="@style/MonoMetaText.Line"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:ellipsize="middle"
@@ -64,7 +64,7 @@
 
             <TextView
                 android:id="@+id/diff_badge"
-                style="@style/MonoMetaText"
+                style="@style/MonoMetaText.Line"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="2dp"
@@ -136,7 +136,7 @@
 
                 <TextView
                     android:id="@+id/reconnect_icon"
-                    style="@style/MonoMetaText"
+                    style="@style/MonoMetaText.Line"
                     android:layout_width="18dp"
                     android:layout_height="wrap_content"
                     android:gravity="center"
@@ -170,7 +170,7 @@
 
             <TextView
                 android:id="@+id/reconnect_btn"
-                style="@style/MonoMetaText"
+                style="@style/MonoMetaText.Line"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="24dp"
@@ -368,7 +368,7 @@
 
     <TextView
         android:id="@+id/generation_status"
-        style="@style/MonoMetaText"
+        style="@style/MonoMetaText.Line"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:ellipsize="end"
@@ -457,7 +457,7 @@
 
                 <TextView
                     android:id="@+id/model_chip"
-                    style="@style/MonoMetaText"
+                    style="@style/MonoMetaText.Line"
                     android:layout_width="0dp"
                     android:layout_height="26dp"
                     android:layout_marginStart="2dp"
@@ -488,7 +488,7 @@
 
                     <TextView
                         android:id="@+id/steer_mode_plan"
-                        style="@style/MonoMetaText"
+                        style="@style/MonoMetaText.Line"
                         android:layout_width="wrap_content"
                         android:layout_height="match_parent"
                         android:gravity="center"
@@ -500,7 +500,7 @@
 
                     <TextView
                         android:id="@+id/steer_mode_steer"
-                        style="@style/MonoMetaText"
+                        style="@style/MonoMetaText.Line"
                         android:layout_width="wrap_content"
                         android:layout_height="match_parent"
                         android:background="@drawable/bg_segmented_on"
@@ -513,7 +513,7 @@
 
                     <TextView
                         android:id="@+id/steer_mode_queue"
-                        style="@style/MonoMetaText"
+                        style="@style/MonoMetaText.Line"
                         android:layout_width="wrap_content"
                         android:layout_height="match_parent"
                         android:gravity="center"
@@ -569,7 +569,7 @@
 
             <TextView
                 android:id="@+id/status_text"
-                style="@style/MonoMetaText"
+                style="@style/MonoMetaText.Line"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="5dp"
@@ -583,7 +583,7 @@
 
             <TextView
                 android:id="@+id/footer_sep"
-                style="@style/MonoMetaText"
+                style="@style/MonoMetaText.Line"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:paddingStart="4dp"
@@ -610,7 +610,7 @@
 
             <TextView
                 android:id="@+id/footer_stats"
-                style="@style/MonoMetaText"
+                style="@style/MonoMetaText.Line"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:ellipsize="end"

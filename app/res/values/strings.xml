@@ -120,6 +120,8 @@
     <string name="picker_default_saved">已设为默认模型</string>
     <string name="code_show_all">显示全部</string>
     <string name="code_fold">收起</string>
+    <string name="notice_expand">展开全文</string>
+    <string name="notice_collapse">收起</string>
     <string name="find_in_session">在会话中查找</string>
     <string name="find_hint">搜索消息与工具输出…</string>
     <string name="find_empty">没有匹配</string>

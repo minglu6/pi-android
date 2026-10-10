@@ -18,7 +18,7 @@
 
         <TextView
             android:id="@+id/code_lang"
-            style="@style/MonoMetaText"
+            style="@style/MonoMetaText.Line"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
@@ -27,7 +27,7 @@
 
         <TextView
             android:id="@+id/code_copy"
-            style="@style/MonoMetaText"
+            style="@style/MonoMetaText.Line"
             android:layout_width="wrap_content"
             android:layout_height="match_parent"
             android:background="?attr/selectableItemBackgroundBorderless"
@@ -39,22 +39,32 @@
             android:textSize="11sp" />
     </LinearLayout>
 
-    <TextView
-        android:id="@+id/code_body"
-        style="@style/MonoMetaText"
+    <!-- Horizontal scroll for long lines; never mid-line clip. -->
+    <HorizontalScrollView
+        android:id="@+id/code_hscroll"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:paddingStart="10dp"
-        android:paddingEnd="10dp"
-        android:paddingBottom="8dp"
-        android:scrollHorizontally="false"
-        android:textColor="@color/text_secondary"
-        android:textIsSelectable="true"
-        android:textSize="12sp" />
+        android:fillViewport="true"
+        android:overScrollMode="ifContentScrolls"
+        android:scrollbars="horizontal">
+
+        <TextView
+            android:id="@+id/code_body"
+            style="@style/MonoMetaText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:breakStrategy="simple"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="8dp"
+            android:textColor="@color/text_secondary"
+            android:textIsSelectable="true"
+            android:textSize="12sp" />
+    </HorizontalScrollView>
 
     <TextView
         android:id="@+id/code_fold"
-        style="@style/MonoMetaText"
+        style="@style/MonoMetaText.Line"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="?attr/selectableItemBackground"
