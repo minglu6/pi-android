@@ -1155,7 +1155,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         addOverflowItem(m, 7, 5, R.string.menu_files, R.drawable.ic_menu_files);
         addOverflowItem(m, 8, 6, R.string.menu_changes, R.drawable.ic_menu_changes);
         if (mcpSupported) {
-            addOverflowItem(m, 9, 7, R.string.menu_mcp, R.drawable.ic_menu_mcp);
+            addOverflowItem(m, 9, 7, R.string.menu_mcp, R.drawable.ic_mcp);
         }
         if (skillsSupported) {
             addOverflowItem(m, 10, 8, R.string.menu_skills, R.drawable.ic_menu_skills);
