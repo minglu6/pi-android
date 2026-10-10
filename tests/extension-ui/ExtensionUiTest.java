@@ -57,8 +57,10 @@ public final class ExtensionUiTest {
         assert "original user input".equals(HistoryPresentation.displayText(new JSONObject().put("role", "user"), "original user input"));
         assert HistoryPresentation.hidden(new JSONObject().put("role", "custom").put("display", false));
         assert !HistoryPresentation.hidden(new JSONObject().put("role", "user").put("display", false));
-        assert HistoryPresentation.statusLabel("provider / model · high", "mc: idle").startsWith("provider / model · high");
-        assert HistoryPresentation.statusLabel("provider / model", "provider / model").equals("provider / model");
+        // Footer no longer prefixes model — that lives on the composer chip.
+        assert HistoryPresentation.statusLabel("provider / model · high", "mc: idle").equals("mc: idle");
+        assert HistoryPresentation.statusLabel("provider / model", "就绪").equals("就绪");
+        assert HistoryPresentation.statusLabel("x", null).equals("");
         System.out.println("ExtensionUiTest: timeout/duplicate/reconnect/renderer/history/status regressions passed");
     }
 }

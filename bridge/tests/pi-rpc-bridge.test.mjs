@@ -41,13 +41,15 @@ test('unmatched IDs and missing IDs cannot steal pending requests or become broa
   assert(!c.frames.some(f => f.kind === 'event' && f.event.type === 'response'));
 });
 
-test('params cannot override command type or ordinary ID; direct bash remains disabled', async t => {
+test('params cannot override command type or ordinary ID; bash is whitelisted for Pocket', async t => {
   const h = await harness(t), c = await h.connect();
   c.rpc('type', 'get_state', {type: 'bash', command: 'synthetic-never-executed'});
   c.rpc('id', 'get_state', {id: 'override'});
-  c.rpc('bash', 'bash', {command: 'synthetic-never-executed'});
-  for (const id of ['type', 'id', 'bash']) assert.equal((await c.response(id)).ok, false);
-  assert.deepEqual(await h.commands(), []);
+  for (const id of ['type', 'id']) assert.equal((await c.response(id)).ok, false);
+  c.rpc('bash', 'bash', {command: 'echo pocket'});
+  const bash = await c.response('bash');
+  // Must not be rejected by the bridge allow-list (Pi fixture may still fail the command).
+  assert.notEqual(bash.error, '命令不允许: bash');
 });
 
 test('UI answer uses Pi UI ID, has no regular pending response, and is consumed exactly once', async t => {
@@ -153,4 +155,24 @@ test('session deletion refuses a symlink parent escape and a leaf symlink', asyn
   const normal = path.join(h.sessions, 'normal.jsonl'); await fs.writeFile(normal, '{}\n');
   c.rpc('normal', 'delete_session', {sessionPath: normal}); assert.equal((await c.response('normal')).ok, true);
   await assert.rejects(fs.access(normal)); assert.deepEqual(await h.commands(), []);
+});
+
+test('Pocket local RPCs: list_project_files + git_status (bridge-local, not Pi)', async t => {
+  const h = await harness(t), c = await h.connect();
+  await fs.writeFile(path.join(h.dir, 'pocket-a.txt'), 'hello\n');
+  await fs.mkdir(path.join(h.dir, 'sub'));
+  await fs.writeFile(path.join(h.dir, 'sub', 'pocket-b.java'), 'class B {}\n');
+  c.rpc('files', 'list_project_files', {query: 'pocket', limit: 50});
+  const files = await c.response('files');
+  assert.equal(files.ok, true);
+  assert.ok(Array.isArray(files.data.files));
+  assert.ok(files.data.files.some(f => String(f.path).includes('pocket-a.txt')));
+  c.rpc('read', 'read_project_file', {path: 'pocket-a.txt'});
+  const read = await c.response('read');
+  assert.equal(read.ok, true);
+  assert.match(read.data.content, /hello/);
+  // git may be unavailable in the sandbox — failure must not be allow-list reject.
+  c.rpc('gst', 'git_status', {});
+  const gst = await c.response('gst');
+  assert.notEqual(gst.error, '命令不允许: git_status');
 });

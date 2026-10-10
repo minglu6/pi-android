@@ -190,6 +190,21 @@
                 android:text="@string/tool_copy_output"
                 android:textColor="@color/pi_blue"
                 android:textSize="11sp" />
+
+            <TextView
+                android:id="@+id/tool_stop"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/shell_stop_cd"
+                android:gravity="center_vertical"
+                android:minHeight="28dp"
+                android:paddingStart="6dp"
+                android:paddingEnd="6dp"
+                android:text="@string/shell_stop"
+                android:textColor="@color/status_offline"
+                android:textSize="11sp"
+                android:visibility="gone" />
         </LinearLayout>
     </LinearLayout>
 </LinearLayout>

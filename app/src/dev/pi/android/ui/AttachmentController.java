@@ -15,6 +15,7 @@ import android.util.AtomicFile;
 
 import android.media.ExifInterface;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import org.json.JSONArray;
@@ -160,6 +161,51 @@ public final class AttachmentController {
         worker.execute(() -> {
             for (Uri uri : uris) addOne(uri, asImages);
             finishPrepare();
+        });
+    }
+
+    /** Long paste / @-mention: store plain text as a draft file attachment. */
+    public void addTextContent(@NonNull String name, @NonNull String body, @NonNull String mimeType) {
+        final String safeName = name == null || name.trim().isEmpty() ? "paste.txt" : name.trim();
+        final String text = body == null ? "" : body;
+        final String mime = mimeType == null || mimeType.isEmpty() ? "text/plain" : mimeType;
+        worker.execute(() -> {
+            synchronized (lock) {
+                if (items.size() >= MAX_ITEMS) {
+                    postError("最多添加 " + MAX_ITEMS + " 个附件");
+                    return;
+                }
+                preparing = true;
+                status = "正在准备附件…";
+            }
+            notifyChanged();
+            String tmpId = UUID.randomUUID().toString().replace("-", "");
+            File out = null;
+            try {
+                ensureDir();
+                byte[] bytes = text.getBytes("UTF-8");
+                if (bytes.length > MAX_FILE_BYTES) {
+                    postError("文件超过 50MB：" + safeName);
+                    return;
+                }
+                out = new File(dir, tmpId + ".txt");
+                try (FileOutputStream fos = new FileOutputStream(out)) {
+                    fos.write(bytes);
+                }
+                String sha = sha256(out);
+                Item item = new Item(tmpId, safeName, mime, "file", bytes.length, sha, "", out);
+                synchronized (lock) {
+                    items.add(item);
+                    status = "";
+                }
+                persistMeta();
+                notifyChanged();
+            } catch (IOException e) {
+                postError("附件写入失败");
+                cleanup(out);
+            } finally {
+                finishPrepare();
+            }
         });
     }
 

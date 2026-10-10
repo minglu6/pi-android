@@ -98,9 +98,9 @@ gh run watch
 ## Connector / 连接器 (Termux)
 
 APK talks to `bridge/pi-rpc-bridge.mjs` on loopback + token（用户可见文案称「连接器」；
-代码里仍用 `BridgeService` 等标识符）。Keep it bound to `127.0.0.1` and do **not**
-enable `--allow-bash` by default. See README「安全边界」and `NOTICE.md` for trademark /
-logo rules.
+代码里仍用 `BridgeService` 等标识符）。Keep it bound to `127.0.0.1`. Official
+`bash` / `abort_bash` are whitelisted for Pocket `!shell` / `!!shell`（`--allow-bash`
+仍为同义词）。See README「安全边界」and `NOTICE.md` for trademark / logo rules.
 
 ## Style
 

@@ -116,6 +116,24 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private String stateCwd = "";
     private String stateBranch = "";
     private String stateDiffBadge = "";
+    /** Pocket ports: pending RPC ids / shell state. */
+    private String pendingFilesRpc = "";
+    private String pendingChangesRpc = "";
+    private String pendingBranchesRpc = "";
+    private String pendingDiffRpc = "";
+    private String pendingDiffPath = "";
+    private String pendingMentionRpc = "";
+    private String pendingBashRpc = "";
+    private String pendingBashCommand = "";
+    private boolean pendingBashExclude;
+    private boolean bashRunning;
+    private String pendingReadRpc = "";
+    private String pendingReadPath = "";
+    private String pendingCheckoutRpc = "";
+    private boolean pendingReadAsAttach;
+    private String lastMentionQuery = "";
+    private long lastMentionAt;
+    private int pasteGuard;
     private View emptyState;
     private TextView emptyTitle;
     private TextView emptyBody;
@@ -261,6 +279,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             @Override public void onNoticeAction(@NonNull String command) {
                 runNoticeCommand(command);
             }
+            @Override public void onShellStop(@NonNull String toolId) {
+                abortShell(toolId);
+            }
+            @Override public void onImageFullscreen(@NonNull ChatMessage.AttachmentData attachment) {
+                showImageFullscreen(attachment);
+            }
         });
         list.setAdapter(adapter);
         restoreChatSnapshot();
@@ -331,6 +355,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         if (btnStop != null) {
             btnStop.setOnClickListener(v -> {
+                if (bashRunning) {
+                    abortShell(pendingBashRpc);
+                    return;
+                }
                 rpc("clear_queue", null);
                 rpc("abort", null);
             });
@@ -380,11 +408,37 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         composer.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                // Long paste → placeholder attachment (Pocket).
+                if (count > 800 && before == 0 && pasteGuard == 0 && s != null) {
+                    CharSequence inserted = s.subSequence(start, Math.min(s.length(), start + count));
+                    if (inserted.length() > 800) {
+                        pasteGuard++;
+                        main.post(() -> {
+                            try {
+                                convertLongPasteToAttachment(start, inserted.length(), inserted.toString());
+                            } finally {
+                                pasteGuard = Math.max(0, pasteGuard - 1);
+                            }
+                        });
+                        return;
+                    }
+                }
                 updateSendEnabled();
-                updateSlashSuggestions(s == null ? "" : s.toString());
+                String text = s == null ? "" : s.toString();
+                updateSlashSuggestions(text);
+                maybeOfferFileMention(text);
             }
             @Override public void afterTextChanged(Editable s) {}
         });
+        if (diffBadge != null) {
+            diffBadge.setOnClickListener(v -> {
+                if (!isConnected()) {
+                    Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                openBranchSwitcher();
+            });
+        }
 
         handleIntentExtras(getIntent());
         restoreFromAgentState();
@@ -408,7 +462,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             modelStatus = name + (st.thinking().isEmpty() ? "" : " · " + st.thinking());
             if ("online".equals(st.status()) || "starting".equals(st.status())
                     || (service != null && service.isConnected())) {
-                setConnectionVisual("online", modelStatus);
+                // Footer: connection only — model lives on the composer chip.
+                setConnectionVisual("online", getString(R.string.status_idle));
             }
         }
         if (!st.chatSessionPath().isEmpty()) currentSessionPath = st.chatSessionPath();
@@ -670,11 +725,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private void restoreStatusChip() {
-        if (!modelStatus.isEmpty()) {
-            setConnectionVisual("online", modelStatus);
-        } else {
-            setConnectionVisual("online", getString(R.string.status_idle));
-        }
+        setConnectionVisual("online", getString(R.string.status_idle));
     }
 
     private void failPrompt(@Nullable String detail) {
@@ -960,7 +1011,40 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         String name = !st.modelLabel().isEmpty() ? st.modelLabel()
                 : (!modelStatus.isEmpty() ? modelStatus.split(" · ")[0] : getString(R.string.action_model));
         String think = !st.thinking().isEmpty() ? st.thinking() : currentThinking;
-        modelChip.setText(think.isEmpty() ? name : name + " " + think);
+        String text = think.isEmpty() ? name : name + " " + think;
+        modelChip.setText(text);
+        fitModelChipText(text);
+    }
+
+    /** Shrink chip text (max ~11.5sp → min ~10sp) so provider+model+thinking fit on one line. */
+    private void fitModelChipText(String text) {
+        if (modelChip == null || text == null) return;
+        final String sample = text;
+        modelChip.post(() -> {
+            if (modelChip == null) return;
+            int avail = modelChip.getWidth() - modelChip.getPaddingStart() - modelChip.getPaddingEnd();
+            if (avail <= 0) {
+                modelChip.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 11.5f);
+                return;
+            }
+            float density = getResources().getDisplayMetrics().scaledDensity;
+            android.text.TextPaint paint = new android.text.TextPaint(modelChip.getPaint());
+            float sp = 11.5f;
+            final float minSp = 10f;
+            while (sp > minSp + 0.05f) {
+                paint.setTextSize(sp * density);
+                if (paint.measureText(sample) <= avail) break;
+                sp -= 0.5f;
+            }
+            paint.setTextSize(Math.max(minSp, sp) * density);
+            if (paint.measureText(sample) > avail) {
+                sp = minSp;
+                modelChip.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            } else {
+                modelChip.setEllipsize(null);
+            }
+            modelChip.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, Math.max(minSp, sp));
+        });
     }
 
     private void refreshSessionChrome() {
@@ -995,6 +1079,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         menu.getMenu().add(0, 4, 2, R.string.menu_fork);
         menu.getMenu().add(0, 5, 3, R.string.menu_find);
         menu.getMenu().add(0, 6, 4, R.string.menu_export);
+        menu.getMenu().add(0, 7, 5, R.string.menu_files);
+        menu.getMenu().add(0, 8, 6, R.string.menu_changes);
         menu.setOnMenuItemClickListener(this::onOverflowItem);
         menu.show();
     }
@@ -1020,6 +1106,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 return true;
             case 6:
                 exportSessionMarkdown();
+                return true;
+            case 7:
+                openFilesSheet();
+                return true;
+            case 8:
+                openChangesSheet();
                 return true;
             default:
                 return false;
@@ -1448,6 +1540,20 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         String text = composer.getText().toString().trim();
         boolean hasAttach = attachmentsCtl != null && attachmentsCtl.hasAttachments();
         if (text.isEmpty() && !hasAttach) return;
+        // Pocket !shell / !!shell — run via Pi bash RPC (excludeFromContext for !!).
+        if (!hasAttach && (text.startsWith("!!") || text.startsWith("!"))) {
+            if (!isConnected()) {
+                Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+                return;
+            }
+            boolean exclude = text.startsWith("!!");
+            String cmd = text.substring(exclude ? 2 : 1).trim();
+            if (!cmd.isEmpty()) {
+                runShellCommand(cmd, exclude);
+                composer.setText("");
+                return;
+            }
+        }
         // 完整匹配已知斜杠命令 → App 动作或 prompt /name
         if (slashStore != null && text.startsWith("/") && !hasAttach) {
             for (SlashCommand c : slashStore.current()) {
@@ -1541,12 +1647,13 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private void setConnectionVisual(String state, String label) {
-        // starting ≡ running: keep 运行中 (or model · 运行中); only online shows sync spinner copy.
+        // Footer shows connection/activity only (cost/cache stay in footer_stats).
+        // Model + thinking belong on the composer chip — never prefix them here.
         if ("online".equals(state) || "starting".equals(state)) {
-            if (AgentState.get().isFresh()) {
-                label = HistoryPresentation.statusLabel(modelStatus, label);
-            } else if ("online".equals(state)) {
+            if (!AgentState.get().isFresh() && "online".equals(state)) {
                 label = getString(R.string.generation_model_sync);
+            } else {
+                label = HistoryPresentation.statusLabel(modelStatus, label);
             }
         }
         if (statusText != null) statusText.setText(label);
@@ -1689,7 +1796,14 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         return "get_session_name".equals(command)
                 || "get_session_stats".equals(command)
                 || "export_html".equals(command)
-                || "get_commands".equals(command);
+                || "get_commands".equals(command)
+                || "list_project_files".equals(command)
+                || "read_project_file".equals(command)
+                || "git_status".equals(command)
+                || "git_branches".equals(command)
+                || "git_checkout".equals(command)
+                || "git_diff".equals(command)
+                || "abort_bash".equals(command);
     }
 
     private static String friendlyConnectionError(@Nullable Throwable t) {
@@ -1756,6 +1870,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     public void onResponse(String id, boolean ok, String command, @Nullable JSONObject data, @Nullable String error) {
         if (!ok) {
             android.util.Log.w(TAG, "rpc fail " + command + ": " + error);
+            if (handlePocketRpcFailure(id, command, error)) return;
             if (isOptionalRpc(command)) return;
             if ("list_sessions".equals(command)) {
                 ensureSessionsSheet().showError(error);
@@ -1913,6 +2028,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
             return;
         }
+        if (handlePocketRpcResponse(id, command, data, error, true)) return;
         if ("get_available_models".equals(command) && data != null) {
             ModelRpc.Catalog cat = ModelRpc.parseAvailableModels(data);
             modelLabels.clear();
@@ -1937,6 +2053,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         if ("get_state".equals(command) && data != null) {
             applyGetStateModel(data);
             applyGetStateWorkspace(data);
+            refreshGitChrome();
             // BridgeService 只交付最新、且未跨模型/会话/运行状态变更的 get_state。
             String path = data.optString("sessionFile", data.optString("sessionPath", ""));
             if (!path.equals(currentSessionPath)) {
@@ -2054,12 +2171,16 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         String name = !st.modelLabel().isEmpty() ? st.modelLabel() : getString(R.string.status_online);
         modelStatus = name + (currentThinking.isEmpty() ? "" : " · " + currentThinking);
         refreshSessionChrome();
-        if (!streaming) setConnectionVisual("online", modelStatus);
+        if (!streaming) setConnectionVisual("online", getString(R.string.status_idle));
     }
 
     @Override
     public void onEvent(@NonNull JSONObject ev) {
         String type = ev.optString("type");
+        if ("bash_execution_update".equals(type)) {
+            applyBashDelta(ev);
+            return;
+        }
         if ("extension_notify".equals(type)) {
             adapter.add(ChatMessage.notice(dev.pi.android.util.NoticeLite.fromNotify(
                     ev.optString("message", ""),
@@ -2232,8 +2353,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     private void renderExtStatus() {
         if (extStatuses.isEmpty()) {
-            if (!modelStatus.isEmpty()) setConnectionVisual("online", modelStatus);
-            else rpc("get_state", null);
+            restoreStatusChip();
             return;
         }
         StringBuilder sb = new StringBuilder();
@@ -2493,5 +2613,450 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     static String textOfContent(JSONArray content) {
         return TranscriptReducer.textOfContent(content);
     }
+
+
+    // ---------- Pocket ports: @ / !shell / paste / Files / Changes / git ----------
+
+    private void runShellCommand(String cmd, boolean exclude) {
+        JSONObject params = new JSONObject();
+        try {
+            params.put("command", cmd);
+            if (exclude) params.put("excludeFromContext", true);
+        } catch (Exception e) {
+            throw new IllegalStateException("bash params", e);
+        }
+        pendingBashCommand = cmd;
+        pendingBashExclude = exclude;
+        String id = rpc("bash", params);
+        if (id == null || id.isEmpty()) {
+            Toast.makeText(this, R.string.rpc_failed, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        pendingBashRpc = id;
+        String summary = exclude ? getString(R.string.shell_exclude_hint) : "";
+        ChatMessage.ToolData td = new ChatMessage.ToolData(id, "bash", cmd, "",
+                ChatMessage.ToolData.STATE_RUNNING, 0, -1, -1, summary);
+        adapter.add(ChatMessage.tool(td, System.currentTimeMillis()));
+        setBashRunning(true);
+        maybeScrollToBottom(true);
+    }
+
+    private void abortShell(@Nullable String toolId) {
+        if (!bashRunning && (pendingBashRpc == null || pendingBashRpc.isEmpty())) return;
+        rpc("abort_bash", null);
+        String id = toolId != null && !toolId.isEmpty() ? toolId : pendingBashRpc;
+        ChatMessage.ToolData prev = adapter.findTool(id);
+        if (prev != null) {
+            adapter.replaceToolById(id, new ChatMessage.ToolData(prev.id, prev.name, prev.command,
+                    prev.output, ChatMessage.ToolData.STATE_CANCELLED, prev.durationMs,
+                    prev.additions, prev.deletions,
+                    getString(R.string.shell_cancelled)));
+        }
+        setBashRunning(false);
+        pendingBashRpc = "";
+    }
+
+    private void setBashRunning(boolean on) {
+        bashRunning = on;
+        if (btnStop == null) return;
+        boolean show = on || streaming;
+        btnStop.setVisibility(show ? View.VISIBLE : View.GONE);
+        btnStop.setEnabled(show);
+        btnStop.setAlpha(show ? 1f : 0.4f);
+    }
+
+    private void applyBashDelta(JSONObject ev) {
+        String id = ev.optString("id", "");
+        if (id.isEmpty()) id = pendingBashRpc;
+        if (id.isEmpty()) return;
+        String delta = ev.optString("delta", "");
+        if (delta.isEmpty()) delta = ev.optString("output", "");
+        ChatMessage.ToolData prev = adapter.findTool(id);
+        if (prev == null) return;
+        String out = prev.output + delta;
+        // Cap live preview to keep UI responsive
+        if (out.length() > 200_000) out = out.substring(out.length() - 200_000);
+        adapter.replaceToolById(id, new ChatMessage.ToolData(prev.id, prev.name, prev.command, out,
+                ChatMessage.ToolData.STATE_RUNNING, prev.durationMs, prev.additions, prev.deletions,
+                prev.summary));
+        maybeScrollToBottom(false);
+    }
+
+    private boolean handlePocketRpcFailure(String id, String command, @Nullable String error) {
+        if ("bash".equals(command) && id.equals(pendingBashRpc)) {
+            ChatMessage.ToolData prev = adapter.findTool(id);
+            String detail = error != null ? error : getString(R.string.shell_failed);
+            if (prev != null) {
+                adapter.replaceToolById(id, new ChatMessage.ToolData(prev.id, prev.name, prev.command,
+                        prev.output.isEmpty() ? detail : prev.output + "\n" + detail,
+                        ChatMessage.ToolData.STATE_ERROR, prev.durationMs, -1, -1,
+                        getString(R.string.shell_failed)));
+            }
+            setBashRunning(false);
+            pendingBashRpc = "";
+            return true;
+        }
+        if ("list_project_files".equals(command) || "git_status".equals(command)
+                || "git_branches".equals(command) || "git_checkout".equals(command)
+                || "git_diff".equals(command) || "read_project_file".equals(command)) {
+            // Hide missing RPCs — only toast when user explicitly opened a sheet.
+            if (("git_branches".equals(command) && id.equals(pendingBranchesRpc))
+                    || ("git_status".equals(command) && id.equals(pendingChangesRpc))
+                    || ("list_project_files".equals(command) && id.equals(pendingFilesRpc))
+                    || ("read_project_file".equals(command) && id.equals(pendingReadRpc))
+                    || ("git_diff".equals(command) && id.equals(pendingDiffRpc))
+                    || ("git_checkout".equals(command) && id.equals(pendingCheckoutRpc))) {
+                if (resumed) Toast.makeText(this,
+                        "git_branches".equals(command) || "git_status".equals(command)
+                                || "git_checkout".equals(command) || "git_diff".equals(command)
+                                ? R.string.git_unavailable : R.string.file_viewer_failed,
+                        Toast.LENGTH_SHORT).show();
+            }
+            clearPendingPocketId(command, id);
+            return true;
+        }
+        return false;
+    }
+
+    private boolean handlePocketRpcResponse(String id, String command, @Nullable JSONObject data,
+                                            @Nullable String error, boolean ok) {
+        if ("bash".equals(command) && id.equals(pendingBashRpc)) {
+            ChatMessage.ToolData prev = adapter.findTool(id);
+            String output = data != null ? data.optString("output", "") : "";
+            if (output.isEmpty() && prev != null) output = prev.output;
+            boolean cancelled = data != null && data.optBoolean("cancelled", false);
+            int exit = data != null ? data.optInt("exitCode", 0) : 0;
+            boolean truncated = data != null && data.optBoolean("truncated", false);
+            String state = cancelled ? ChatMessage.ToolData.STATE_CANCELLED
+                    : (exit != 0 ? ChatMessage.ToolData.STATE_ERROR : ChatMessage.ToolData.STATE_DONE);
+            String summary = cancelled ? getString(R.string.shell_cancelled)
+                    : (exit != 0 ? getString(R.string.shell_failed) : getString(R.string.shell_done));
+            if (truncated) summary = summary + " · trunc";
+            if (pendingBashExclude && !cancelled) {
+                summary = getString(R.string.shell_exclude_hint) + " · " + summary;
+            }
+            String cmd = prev != null ? prev.command : pendingBashCommand;
+            String toolId = prev != null ? prev.id : id;
+            adapter.replaceToolById(toolId, new ChatMessage.ToolData(toolId, "bash", cmd, output,
+                    state, 0, -1, -1, summary));
+            setBashRunning(false);
+            pendingBashRpc = "";
+            maybeScrollToBottom(false);
+            return true;
+        }
+        if ("list_project_files".equals(command)
+                && (id.equals(pendingFilesRpc) || id.equals(pendingMentionRpc))) {
+            boolean mention = id.equals(pendingMentionRpc);
+            clearPendingPocketId(command, id);
+            List<dev.pi.android.model.PickerItem> items = ProjectSheets.filesFromResponse(data);
+            if (mention) {
+                ProjectSheets.showFilePicker(this, items, path -> onFileMentionPicked(path));
+            } else {
+                ProjectSheets.showFilePicker(this, items, this::openProjectFile);
+            }
+            return true;
+        }
+        if ("read_project_file".equals(command) && id.equals(pendingReadRpc)) {
+            String path = pendingReadPath;
+            boolean asAttach = pendingReadAsAttach;
+            pendingReadAsAttach = false;
+            clearPendingPocketId(command, id);
+            if (data == null) {
+                Toast.makeText(this, R.string.file_viewer_failed, Toast.LENGTH_SHORT).show();
+                return true;
+            }
+            String content = data.optString("content", "");
+            boolean truncated = data.optBoolean("truncated", false);
+            if (asAttach) {
+                String name = path;
+                int slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+                if (slash >= 0 && slash < path.length() - 1) name = path.substring(slash + 1);
+                if (attachmentsCtl != null) {
+                    attachmentsCtl.addTextContent(name, content, "text/plain");
+                    Toast.makeText(this, getString(R.string.paste_as_file, name), Toast.LENGTH_SHORT).show();
+                }
+                return true;
+            }
+            showTextViewer(getString(R.string.file_viewer_title) + " · " + path,
+                    truncated ? content + "\n" + getString(R.string.file_viewer_truncated) : content);
+            return true;
+        }
+        if ("git_status".equals(command)) {
+            if (id.equals(pendingChangesRpc)) {
+                clearPendingPocketId(command, id);
+                List<dev.pi.android.model.PickerItem> items = ProjectSheets.changesFromResponse(data);
+                ProjectSheets.showChanges(this, items, path -> {
+                    pendingDiffPath = path;
+                    JSONObject params = new JSONObject();
+                    try { params.put("path", path); } catch (Exception e) {
+                        throw new IllegalStateException("git_diff params", e);
+                    }
+                    pendingDiffRpc = rpc("git_diff", params);
+                });
+            } else {
+                // Silent chrome refresh
+                applyGitStatusChrome(data);
+            }
+            return true;
+        }
+        if ("git_branches".equals(command) && id.equals(pendingBranchesRpc)) {
+            clearPendingPocketId(command, id);
+            List<dev.pi.android.model.PickerItem> items = ProjectSheets.branchesFromResponse(data);
+            ProjectSheets.showBranches(this, items, branch -> {
+                JSONObject params = new JSONObject();
+                try { params.put("branch", branch); } catch (Exception e) {
+                    throw new IllegalStateException("git_checkout params", e);
+                }
+                pendingCheckoutRpc = rpc("git_checkout", params);
+            });
+            return true;
+        }
+        if ("git_checkout".equals(command) && id.equals(pendingCheckoutRpc)) {
+            clearPendingPocketId(command, id);
+            String branch = data != null ? data.optString("branch", "") : "";
+            if (!branch.isEmpty()) {
+                stateBranch = branch;
+                refreshSessionChrome();
+                Toast.makeText(this, getString(R.string.git_checkout_ok, branch), Toast.LENGTH_SHORT).show();
+            }
+            refreshGitChrome();
+            rpc("get_state", null);
+            return true;
+        }
+        if ("git_diff".equals(command) && id.equals(pendingDiffRpc)) {
+            String path = pendingDiffPath;
+            clearPendingPocketId(command, id);
+            String diff = data != null ? data.optString("diff", "") : "";
+            if (diff.isEmpty()) diff = "(empty diff)\n";
+            showTextViewer(getString(R.string.diff_viewer_title) + " · " + path, diff);
+            return true;
+        }
+        return false;
+    }
+
+    private void clearPendingPocketId(String command, String id) {
+        if ("list_project_files".equals(command)) {
+            if (id.equals(pendingFilesRpc)) pendingFilesRpc = "";
+            if (id.equals(pendingMentionRpc)) pendingMentionRpc = "";
+        } else if ("git_status".equals(command)) {
+            if (id.equals(pendingChangesRpc)) pendingChangesRpc = "";
+        } else if ("git_branches".equals(command)) {
+            if (id.equals(pendingBranchesRpc)) pendingBranchesRpc = "";
+        } else if ("git_checkout".equals(command)) {
+            if (id.equals(pendingCheckoutRpc)) pendingCheckoutRpc = "";
+        } else if ("git_diff".equals(command)) {
+            if (id.equals(pendingDiffRpc)) pendingDiffRpc = "";
+            pendingDiffPath = "";
+        } else if ("read_project_file".equals(command)) {
+            if (id.equals(pendingReadRpc)) pendingReadRpc = "";
+            pendingReadPath = "";
+        }
+    }
+
+    private void refreshGitChrome() {
+        if (!isConnected()) return;
+        // Silent — failures hide branch/diff chrome via empty fields.
+        rpc("git_status", null);
+    }
+
+    private void applyGitStatusChrome(@Nullable JSONObject data) {
+        if (data == null) return;
+        String branch = data.optString("branch", "");
+        if (!branch.isEmpty() && !"HEAD".equals(branch)) {
+            stateBranch = branch;
+        }
+        org.json.JSONArray files = data.optJSONArray("files");
+        if (files != null && files.length() > 0) {
+            if (stateDiffBadge.isEmpty()) {
+                stateDiffBadge = files.length() + (files.length() == 1 ? " file" : " files");
+            }
+        } else if (files != null) {
+            // Clean tree — clear synthetic badge if it came from git_status only
+            if (stateDiffBadge.endsWith(" file") || stateDiffBadge.endsWith(" files")) {
+                // keep get_state badge if present; only clear when purely file-count form
+                if (!stateDiffBadge.contains("+") && !stateDiffBadge.contains("-")) {
+                    stateDiffBadge = "";
+                }
+            }
+        }
+        refreshSessionChrome();
+    }
+
+    private void openFilesSheet() {
+        if (!isConnected()) {
+            Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Toast.makeText(this, R.string.files_loading, Toast.LENGTH_SHORT).show();
+        JSONObject params = new JSONObject();
+        try { params.put("limit", 120); } catch (Exception e) {
+            throw new IllegalStateException("list_project_files params", e);
+        }
+        pendingFilesRpc = rpc("list_project_files", params);
+    }
+
+    private void openChangesSheet() {
+        if (!isConnected()) {
+            Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Toast.makeText(this, R.string.changes_loading, Toast.LENGTH_SHORT).show();
+        pendingChangesRpc = rpc("git_status", null);
+    }
+
+    private void openBranchSwitcher() {
+        if (!isConnected()) {
+            Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        pendingBranchesRpc = rpc("git_branches", null);
+    }
+
+    private void openProjectFile(String path) {
+        if (path == null || path.isEmpty() || !isConnected()) return;
+        pendingReadPath = path;
+        JSONObject params = new JSONObject();
+        try {
+            params.put("path", path);
+            params.put("maxBytes", 200_000);
+        } catch (Exception e) {
+            throw new IllegalStateException("read_project_file params", e);
+        }
+        pendingReadRpc = rpc("read_project_file", params);
+    }
+
+    private void maybeOfferFileMention(String text) {
+        if (text == null || !isConnected()) return;
+        int at = text.lastIndexOf('@');
+        if (at < 0) return;
+        // Only when @ is at token start
+        if (at > 0) {
+            char prev = text.charAt(at - 1);
+            if (!Character.isWhitespace(prev)) return;
+        }
+        String query = text.substring(at + 1);
+        if (query.contains(" ") || query.contains("\n")) return;
+        if (query.length() > 64) return;
+        long now = System.currentTimeMillis();
+        if (query.equals(lastMentionQuery) && now - lastMentionAt < 400) return;
+        // Wait until at least 1 char after @ to avoid spam on lone @
+        if (query.isEmpty()) return;
+        lastMentionQuery = query;
+        lastMentionAt = now;
+        main.removeCallbacks(mentionRunnable);
+        main.postDelayed(mentionRunnable, 220);
+    }
+
+    private final Runnable mentionRunnable = () -> {
+        if (!isConnected()) return;
+        String q = lastMentionQuery;
+        if (q == null || q.isEmpty()) return;
+        JSONObject params = new JSONObject();
+        try {
+            params.put("query", q);
+            params.put("limit", 60);
+        } catch (Exception e) {
+            throw new IllegalStateException("mention params", e);
+        }
+        pendingMentionRpc = rpc("list_project_files", params);
+    };
+
+    private void onFileMentionPicked(String path) {
+        if (path == null || path.isEmpty() || composer == null) return;
+        CharSequence cur = composer.getText();
+        String text = cur == null ? "" : cur.toString();
+        int at = text.lastIndexOf('@');
+        if (at < 0) {
+            composer.append("@" + path + " ");
+        } else {
+            composer.getText().replace(at, text.length(), "@" + path + " ");
+        }
+        Toast.makeText(this, getString(R.string.mention_insert, path), Toast.LENGTH_SHORT).show();
+        // Offer optional contents attach for small text files
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.PiMaterialAlertDialog)
+                .setTitle("@" + path)
+                .setItems(new CharSequence[]{
+                        getString(R.string.mention_path_only),
+                        getString(R.string.mention_with_contents)
+                }, (d, which) -> {
+                    if (which == 1) attachMentionContents(path);
+                })
+                .show();
+    }
+
+    private void attachMentionContents(String path) {
+        if (!isConnected()) return;
+        pendingReadPath = path;
+        pendingReadAsAttach = true;
+        JSONObject params = new JSONObject();
+        try {
+            params.put("path", path);
+            params.put("maxBytes", 100_000);
+        } catch (Exception e) {
+            throw new IllegalStateException("read_project_file params", e);
+        }
+        pendingReadRpc = rpc("read_project_file", params);
+    }
+
+    private void convertLongPasteToAttachment(int start, int length, String body) {
+        if (composer == null || attachmentsCtl == null || body == null || body.isEmpty()) return;
+        String name = "paste-" + System.currentTimeMillis() + ".txt";
+        String placeholder = getString(R.string.paste_placeholder, name);
+        Editable editable = composer.getText();
+        int end = Math.min(editable.length(), start + length);
+        if (start < 0 || start > editable.length() || end < start) return;
+        editable.replace(start, end, placeholder);
+        attachmentsCtl.addTextContent(name, body, "text/plain");
+        Toast.makeText(this, getString(R.string.paste_as_file, name), Toast.LENGTH_SHORT).show();
+    }
+
+    private void showTextViewer(String title, String body) {
+        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        TextView tv = new TextView(this);
+        float d = getResources().getDisplayMetrics().density;
+        int pad = Math.round(16 * d);
+        tv.setPadding(pad, pad, pad, pad);
+        tv.setTextIsSelectable(true);
+        tv.setTypeface(AppFonts.mono(this, false));
+        tv.setTextSize(12f);
+        tv.setTextColor(ContextCompat.getColor(this, R.color.text_primary));
+        tv.setText(body == null ? "" : body);
+        scroll.addView(tv);
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.PiMaterialAlertDialog)
+                .setTitle(title)
+                .setView(scroll)
+                .setPositiveButton(android.R.string.ok, null)
+                .show();
+    }
+
+    private void showImageFullscreen(ChatMessage.AttachmentData attachment) {
+        if (attachment == null) return;
+        String data = attachment.imageData;
+        if (data == null || data.isEmpty()) {
+            Toast.makeText(this, R.string.attachment_chat_image_unavailable, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        android.widget.ImageView image = new android.widget.ImageView(this);
+        image.setAdjustViewBounds(true);
+        image.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
+        image.setContentDescription(getString(R.string.image_fullscreen_cd));
+        try {
+            byte[] bytes = android.util.Base64.decode(data, android.util.Base64.DEFAULT);
+            android.graphics.Bitmap bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+            if (bmp == null) {
+                Toast.makeText(this, R.string.attachment_chat_image_unavailable, Toast.LENGTH_SHORT).show();
+                return;
+            }
+            image.setImageBitmap(bmp);
+        } catch (Exception e) {
+            Toast.makeText(this, R.string.attachment_chat_image_unavailable, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        android.app.Dialog dialog = new android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        dialog.setContentView(image);
+        image.setOnClickListener(v -> dialog.dismiss());
+        dialog.show();
+    }
+
 
 }

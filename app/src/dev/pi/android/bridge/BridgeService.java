@@ -49,8 +49,13 @@ public class BridgeService extends Service {
     public static final String EXTRA_NOTIFY_ID = "notifyId";
 
     private static final String CHANNEL = "pi_bridge";
+    /** Higher-priority alerts: Pi finished / needs approval (not the ongoing FGS). */
+    private static final String CHANNEL_ALERT = "pi_alerts";
     private static final int ONGOING_ID = 1;
+    private static final int DONE_ID = 2;
     private static final int ASK_BASE_ID = 1000;
+    /** True between agent_start and agent_settled — used for background "done" notify. */
+    private boolean agentRunning;
 
     /** Activity 实现：服务转发事件给它渲染；没有 Activity 时事件只影响状态与通知。 */
     public interface UiHost {
@@ -197,16 +202,28 @@ public class BridgeService extends Service {
 
             @Override
             public void onEvent(JSONObject ev) {
+                String type = ev.optString("type");
                 // 扩展 UI 全部由服务处理：它要在没有界面的情况下也能作答
-                if ("extension_ui_request".equals(ev.optString("type"))) {
+                if ("extension_ui_request".equals(type)) {
                     String m = ev.optString("method");
                     dbg("got extui " + m + " host=" + (host != null)
                             + " visible=" + (host != null && host.isVisible()));
+                    // Background: ExtensionUi → askViaNotification (Chinese approval strings).
                     extUi.handle(ev);
                     return;
                 }
-                dbg("event " + ev.optString("type"));
-                if ("thinking_level_changed".equals(ev.optString("type"))) {
+                dbg("event " + type);
+                if ("agent_start".equals(type)) {
+                    agentRunning = true;
+                } else if ("agent_settled".equals(type)) {
+                    if (agentRunning && pickVisibleHost() == null) notifyPiDone();
+                    agentRunning = false;
+                } else if ("agent_end".equals(type) && !ev.optBoolean("willRetry", false)) {
+                    // Older Pi may omit agent_settled; notify once if still marked running.
+                    if (agentRunning && pickVisibleHost() == null) notifyPiDone();
+                    agentRunning = false;
+                }
+                if ("thinking_level_changed".equals(type)) {
                     AgentState.get().setThinking(ev.optString("level", ""), BridgeService.this);
                     rpc("get_state", null);
                 }
@@ -456,10 +473,40 @@ public class BridgeService extends Service {
 
     private void ensureChannel() {
         NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        if (nm == null || nm.getNotificationChannel(CHANNEL) != null) return;
-        NotificationChannel c = new NotificationChannel(CHANNEL, "Pi 连接器", NotificationManager.IMPORTANCE_LOW);
-        c.setDescription("Pi 与 Termux 连接器的状态，以及扩展提问");
-        nm.createNotificationChannel(c);
+        if (nm == null) return;
+        if (nm.getNotificationChannel(CHANNEL) == null) {
+            NotificationChannel c = new NotificationChannel(CHANNEL, "Pi 连接器",
+                    NotificationManager.IMPORTANCE_LOW);
+            c.setDescription("Pi 与 Termux 连接器的状态，以及扩展提问");
+            nm.createNotificationChannel(c);
+        }
+        if (nm.getNotificationChannel(CHANNEL_ALERT) == null) {
+            NotificationChannel alert = new NotificationChannel(CHANNEL_ALERT, "Pi 提醒",
+                    NotificationManager.IMPORTANCE_DEFAULT);
+            alert.setDescription("Pi 完成或需要确认时的提醒");
+            nm.createNotificationChannel(alert);
+        }
+    }
+
+    /** Background: agent finished a turn while no Activity is visible. */
+    private void notifyPiDone() {
+        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm == null) return;
+        ensureChannel();
+        PendingIntent open = PendingIntent.getActivity(this, DONE_ID,
+                new Intent(this, dev.pi.android.ui.MainActivity.class),
+                PendingIntent.FLAG_UPDATE_CURRENT | immutableFlag());
+        Notification n = new NotificationCompat.Builder(this, CHANNEL_ALERT)
+                .setSmallIcon(R.drawable.ic_pi_logo)
+                .setContentTitle(getString(R.string.notif_pi_done_title))
+                .setContentText(getString(R.string.notif_pi_done_body))
+                .setContentIntent(open)
+                .setAutoCancel(true)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setCategory(NotificationCompat.CATEGORY_STATUS)
+                .build();
+        nm.notify(DONE_ID, n);
+        dbg("notifyPiDone posted");
     }
 
     private void notifyOngoing(String state) {
@@ -539,10 +586,13 @@ public class BridgeService extends Service {
                 ? "点开 App 在输入行里回答"
                 : TextUtils.join(" / ", options);
 
-        NotificationCompat.Builder b = new NotificationCompat.Builder(this, CHANNEL)
+        ensureChannel();
+        String askTitle = getString(R.string.notif_pi_approval_title)
+                + (title == null || title.isEmpty() ? "" : "：" + title);
+        NotificationCompat.Builder b = new NotificationCompat.Builder(this, CHANNEL_ALERT)
                 .setSmallIcon(R.drawable.ic_pi_logo)
-                .setContentTitle("Pi 需要你回答：" + title)
-                .setContentText(body)
+                .setContentTitle(askTitle)
+                .setContentText(body.isEmpty() ? getString(R.string.notif_pi_approval_body) : body)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
                 .setAutoCancel(true)
