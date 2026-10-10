@@ -159,6 +159,10 @@ public final class PickerSheet {
         dialog.show();
     }
 
+    public void dismiss() {
+        dialog.dismiss();
+    }
+
     @Nullable
     public PickerItem lastPicked() {
         return lastPicked;

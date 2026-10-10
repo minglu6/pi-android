@@ -179,3 +179,34 @@ test('Pocket local RPCs: list_project_files + git_status (bridge-local, not Pi)'
   const gst = await c.response('gst');
   assert.notEqual(gst.error, '命令不允许: git_status');
 });
+
+test('Pocket cwd RPCs: get_cwd / list_cwd_entries / set_cwd persist + inject get_state', async t => {
+  const h = await harness(t), c = await h.connect();
+  await fs.mkdir(path.join(h.dir, 'workdir'));
+  c.rpc('gc', 'get_cwd', {});
+  const gc = await c.response('gc');
+  assert.equal(gc.ok, true);
+  assert.equal(gc.data.cwd, h.dir);
+  c.rpc('ls', 'list_cwd_entries', {});
+  const ls = await c.response('ls');
+  assert.equal(ls.ok, true);
+  assert.equal(ls.data.cwd, h.dir);
+  assert.ok(ls.data.entries.some(e => e.name === 'workdir' && e.kind === 'dir'));
+  c.rpc('st', 'get_state', {});
+  const st = await c.response('st');
+  assert.equal(st.ok, true);
+  assert.equal(st.data.cwd, h.dir);
+  const next = path.join(h.dir, 'workdir');
+  c.rpc('set', 'set_cwd', {path: next});
+  const set = await c.response('set');
+  assert.equal(set.ok, true);
+  assert.equal(set.data.cwd, next);
+  c.rpc('gc2', 'get_cwd', {});
+  assert.equal((await c.response('gc2')).data.cwd, next);
+  const persisted = path.join(h.dir, '.pi', 'agent', 'pi-android.cwd');
+  assert.equal((await fs.readFile(persisted, 'utf8')).trim(), next);
+  c.rpc('bad', 'set_cwd', {path: path.join(h.dir, 'no-such-dir')});
+  const bad = await c.response('bad');
+  assert.equal(bad.ok, false);
+  assert.notEqual(bad.error, '命令不允许: set_cwd');
+});

@@ -69,6 +69,9 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
     private static final int TYPE_TOOL = 2;
     private static final int TYPE_SYSTEM = 3;
 
+    /** In-place rebind payload — skips DefaultItemAnimator change cross-fade (ghost text). */
+    private static final Object PAYLOAD_REBIND = new Object();
+
     /** 输出预览行数（pi-pocket SHELL_LINES 的移动端收缩版）。 */
     private static final int PREVIEW_LINES = 6;
     /** Notice detail collapsed preview lines before「展开全文». */
@@ -208,7 +211,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
             int last = items.size() - 1;
             if (items.get(last).role == ChatMessage.Role.AGENT) {
                 items.set(last, msg);
-                notifyItemChanged(last);
+                notifyItemChanged(last, PAYLOAD_REBIND);
                 if (listener != null) listener.onChanged(items.size());
                 return true;
             }
@@ -220,7 +223,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
     public void replaceAt(int position, ChatMessage msg) {
         if (position < 0 || position >= items.size()) return;
         items.set(position, msg);
-        notifyItemChanged(position);
+        notifyItemChanged(position, PAYLOAD_REBIND);
     }
 
     /** Update a TOOL row by ToolData.id; returns index or -1. */
@@ -341,9 +344,24 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
     }
 
     @Override
+    public void onBindViewHolder(@NonNull VH holder, int position, @NonNull List<Object> payloads) {
+        // Payload path reuses the same VH without change cross-fade overlays.
+        holder.bind(items.get(position), position);
+    }
+
+    @Override
     public void onViewRecycled(@NonNull VH holder) {
         holder.cancelThumbnails();
         if (holder.attachmentItems != null) holder.attachmentItems.removeAllViews();
+        // Clear tool text so recycled views never flash previous command/status.
+        if (holder.type == TYPE_TOOL) {
+            if (holder.toolGlyph != null) holder.toolGlyph.setText("");
+            if (holder.toolName != null) holder.toolName.setText("");
+            if (holder.toolSubject != null) holder.toolSubject.setText("");
+            if (holder.toolStatus != null) holder.toolStatus.setText("");
+            if (holder.toolCommand != null) holder.toolCommand.setText("");
+            if (holder.toolOutput != null) holder.toolOutput.setText("");
+        }
         super.onViewRecycled(holder);
     }
 
