@@ -68,6 +68,8 @@ import dev.pi.android.util.SlashCommandStore;
 public class MainActivity extends AppCompatActivity implements BridgeService.UiHost {
 
     private static final String TAG = "PiUI";
+    /** Settings「检测更新」→ bring chat to front and run the same flow. */
+    public static final String EXTRA_CHECK_UPDATE = "check_update";
     private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
     private final android.content.ServiceConnection svcConn = new android.content.ServiceConnection() {
         @Override public void onServiceConnected(ComponentName name, IBinder binder) {
@@ -116,6 +118,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private String cwdBrowsePath = "";
     private String pendingMcpListRpc = "";
     private String pendingSkillsTrustRpc = "";
+    private String pendingPiVersionRpc = "";
+    private String pendingPiUpdateRpc = "";
+    @Nullable private DetailSheet updateProgressSheet;
     private boolean mcpSupported = true;
     private boolean skillsSupported = true;
     @Nullable private Boolean projectTrusted;
@@ -532,6 +537,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         String prompt = intent.getStringExtra("prompt");
         if (prompt != null && !prompt.isEmpty()) pendingPrompt = prompt;
+        if (intent.getBooleanExtra(EXTRA_CHECK_UPDATE, false)) {
+            intent.removeExtra(EXTRA_CHECK_UPDATE);
+            main.post(this::startCheckUpdate);
+        }
     }
 
     private void openUiTarget(String target) {
@@ -1147,18 +1156,18 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             ((MenuBuilder) m).setOptionalIconsVisible(true);
         }
         // 新建会话 is the dedicated top-bar + button — not duplicated here.
+        // 重新连接 / Fork stay on banner + message actions — not in overflow.
         addOverflowItem(m, 1, 0, R.string.menu_settings, R.drawable.ic_menu_settings);
-        addOverflowItem(m, 3, 1, R.string.menu_reload, R.drawable.ic_menu_reconnect);
-        addOverflowItem(m, 4, 2, R.string.menu_fork, R.drawable.ic_menu_fork);
-        addOverflowItem(m, 5, 3, R.string.menu_find, R.drawable.ic_menu_find);
-        addOverflowItem(m, 6, 4, R.string.menu_export, R.drawable.ic_menu_export);
-        addOverflowItem(m, 7, 5, R.string.menu_files, R.drawable.ic_menu_files);
-        addOverflowItem(m, 8, 6, R.string.menu_changes, R.drawable.ic_menu_changes);
+        addOverflowItem(m, 11, 1, R.string.menu_check_update, R.drawable.ic_menu_update);
+        addOverflowItem(m, 5, 2, R.string.menu_find, R.drawable.ic_menu_find);
+        addOverflowItem(m, 6, 3, R.string.menu_export, R.drawable.ic_menu_export);
+        addOverflowItem(m, 7, 4, R.string.menu_files, R.drawable.ic_menu_files);
+        addOverflowItem(m, 8, 5, R.string.menu_changes, R.drawable.ic_menu_changes);
         if (mcpSupported) {
-            addOverflowItem(m, 9, 7, R.string.menu_mcp, R.drawable.ic_mcp);
+            addOverflowItem(m, 9, 6, R.string.menu_mcp, R.drawable.ic_mcp);
         }
         if (skillsSupported) {
-            addOverflowItem(m, 10, 8, R.string.menu_skills, R.drawable.ic_menu_skills);
+            addOverflowItem(m, 10, 7, R.string.menu_skills, R.drawable.ic_menu_skills);
         }
         menu.setOnMenuItemClickListener(this::onOverflowItem);
         menu.show();
@@ -1180,17 +1189,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             case 1:
                 startActivity(new Intent(this, SettingsActivity.class));
                 return true;
-            case 3:
-                setConnectionVisual("connecting", getString(R.string.status_reconnecting));
-                reconnect();
-                return true;
-            case 4:
-                if (!isConnected()) {
-                    Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
-                    return true;
-                }
-                showForkPicker();
-                return true;
             case 5:
                 showFindSheet();
                 return true;
@@ -1208,6 +1206,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 return true;
             case 10:
                 openSkillsSheet();
+                return true;
+            case 11:
+                startCheckUpdate();
                 return true;
             default:
                 return false;
@@ -1904,7 +1905,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 || "set_cwd".equals(command)
                 || "list_cwd_entries".equals(command)
                 || "list_mcp_servers".equals(command)
-                || "get_project_trust".equals(command);
+                || "get_project_trust".equals(command)
+                || "check_pi_version".equals(command)
+                || "run_pi_update".equals(command);
     }
 
     private static String friendlyConnectionError(@Nullable Throwable t) {
@@ -2829,6 +2832,26 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
             return true;
         }
+        if ("run_pi_update".equals(command) && id.equals(pendingPiUpdateRpc)) {
+            pendingPiUpdateRpc = "";
+            if (isConnectorCommandRejected(error, command)) {
+                if (updateProgressSheet != null) {
+                    try { updateProgressSheet.dismiss(); } catch (Exception ignored) {}
+                    updateProgressSheet = null;
+                }
+                if (resumed) {
+                    Toast.makeText(this, R.string.connector_update_required, Toast.LENGTH_LONG).show();
+                }
+            } else {
+                showPiUpdateResult(false, null, error);
+            }
+            return true;
+        }
+        if ("check_pi_version".equals(command) && id.equals(pendingPiVersionRpc)) {
+            pendingPiVersionRpc = "";
+            // Optional probe — ignore failures quietly.
+            return true;
+        }
         if ("list_project_files".equals(command) || "git_status".equals(command)
                 || "git_branches".equals(command) || "git_checkout".equals(command)
                 || "git_diff".equals(command) || "read_project_file".equals(command)
@@ -3074,6 +3097,24 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             showSkillsSheetWithTrust(trusted);
             return true;
         }
+        if ("check_pi_version".equals(command) && id.equals(pendingPiVersionRpc)) {
+            pendingPiVersionRpc = "";
+            // Soft probe only — confirm sheet already shown; Toast version if useful.
+            if (data != null) {
+                String ver = data.optString("version", "");
+                if (!ver.isEmpty() && resumed) {
+                    Toast.makeText(this, getString(R.string.update_current_version, ver),
+                            Toast.LENGTH_SHORT).show();
+                }
+            }
+            return true;
+        }
+        if ("run_pi_update".equals(command) && id.equals(pendingPiUpdateRpc)) {
+            pendingPiUpdateRpc = "";
+            boolean okExit = data == null || !data.has("status") || data.optInt("status", 1) == 0;
+            showPiUpdateResult(okExit, data, null);
+            return true;
+        }
         return false;
     }
 
@@ -3121,6 +3162,78 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         runNoticeCommand("/mcp");
     }
 
+    /** Overflow / Settings「检测更新」: confirm → bridge `run_pi_update` (documented `pi update`). */
+    private void startCheckUpdate() {
+        if (!isConnected()) {
+            Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        // Best-effort version probe; confirm sheet still works if RPC unknown.
+        pendingPiVersionRpc = rpc("check_pi_version", null);
+        List<DetailSheet.Action> actions = new ArrayList<>();
+        actions.add(new DetailSheet.Action() {
+            @NonNull @Override public String label() { return getString(R.string.update_run); }
+            @Override public void run() { runPiUpdateConfirmed(); }
+        });
+        new DetailSheet(this, getString(R.string.menu_check_update))
+                .setTitleIcon(R.drawable.ic_menu_update)
+                .setBody(getString(R.string.update_confirm_body))
+                .setPrimaryActions(actions)
+                .show();
+    }
+
+    private void runPiUpdateConfirmed() {
+        if (!isConnected()) {
+            Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (updateProgressSheet != null) {
+            try { updateProgressSheet.dismiss(); } catch (Exception ignored) {}
+        }
+        updateProgressSheet = new DetailSheet(this, getString(R.string.update_running_title))
+                .setTitleIcon(R.drawable.ic_menu_update)
+                .setBody(getString(R.string.update_running_body))
+                .setProgress(true)
+                .setCancelVisible(false);
+        updateProgressSheet.show();
+        pendingPiUpdateRpc = rpc("run_pi_update", null);
+    }
+
+    private void showPiUpdateResult(boolean ok, @Nullable JSONObject data, @Nullable String error) {
+        if (updateProgressSheet != null) {
+            try { updateProgressSheet.dismiss(); } catch (Exception ignored) {}
+            updateProgressSheet = null;
+        }
+        StringBuilder log = new StringBuilder();
+        if (data != null) {
+            String cmd = data.optString("argv", data.optString("command", "pi update"));
+            if (!cmd.isEmpty()) log.append("$ ").append(cmd).append('\n');
+            String stdout = data.optString("stdout", "");
+            String stderr = data.optString("stderr", "");
+            if (!stdout.isEmpty()) log.append(stdout);
+            if (!stderr.isEmpty()) {
+                if (log.length() > 0 && log.charAt(log.length() - 1) != '\n') log.append('\n');
+                log.append(stderr);
+            }
+            if (data.has("status") && !data.isNull("status")) {
+                if (log.length() > 0 && log.charAt(log.length() - 1) != '\n') log.append('\n');
+                log.append("exit ").append(data.optInt("status"));
+            }
+        }
+        if (!ok && error != null && !error.isEmpty()) {
+            if (log.length() > 0) log.append('\n');
+            log.append(error);
+        }
+        String title = ok ? getString(R.string.update_ok_title) : getString(R.string.update_fail_title);
+        String body = ok ? getString(R.string.update_ok_body) : getString(R.string.update_fail_body);
+        new DetailSheet(this, title)
+                .setTitleIcon(R.drawable.ic_menu_update)
+                .setBody(body)
+                .setLog(log.length() == 0 ? null : log.toString().trim())
+                .setCancelLabel(getString(android.R.string.ok))
+                .show();
+    }
+
     private void showMcpServerDetail(@NonNull JSONObject server) {
         String name = server.optString("name", "");
         String status = ProjectSheets.mcpStatusLabel(this, server.optString("status", "configured"));
@@ -3130,20 +3243,63 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         String desc = server.optString("description", "");
         String detail = server.optString("detail", "");
         String exposure = server.optString("exposure", "");
+        List<String> chipLabels = new ArrayList<>();
+        chipLabels.add(status);
+        chipLabels.add(source);
+        if (!transport.isEmpty() && !"unknown".equals(transport)) chipLabels.add(transport);
         StringBuilder body = new StringBuilder();
-        body.append(status).append(" · ").append(source);
-        if (!transport.isEmpty()) body.append(" · ").append(transport);
-        if (!exposure.isEmpty()) body.append("\nexposure: ").append(exposure);
-        if (!desc.isEmpty()) body.append("\n\n").append(desc);
-        if (!detail.isEmpty()) body.append("\n\n").append(detail);
-        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.PiMaterialAlertDialog)
-                .setTitle(name.isEmpty() ? getString(R.string.menu_mcp) : name)
-                .setMessage(body.toString())
-                .setPositiveButton(R.string.mcp_run_command, (d, w) -> runMcpCommand())
-                .setNeutralButton(R.string.mcp_detail_run_get, (d, w) -> {
-                    if (!name.isEmpty()) runNoticeCommand("/mcp get " + name);
-                })
-                .setNegativeButton(android.R.string.cancel, null)
+        if (!exposure.isEmpty()) body.append("exposure: ").append(exposure);
+        if (!desc.isEmpty()) {
+            if (body.length() > 0) body.append("\n\n");
+            body.append(desc);
+        }
+        if (!detail.isEmpty()) {
+            if (body.length() > 0) body.append("\n\n");
+            body.append(detail);
+        }
+        List<DetailSheet.Action> actions = new ArrayList<>();
+        actions.add(new DetailSheet.Action() {
+            @NonNull @Override public String label() { return getString(R.string.mcp_run_command); }
+            @Override public void run() { runMcpCommand(); }
+        });
+        if (!name.isEmpty()) {
+            actions.add(new DetailSheet.Action() {
+                @NonNull @Override public String label() { return getString(R.string.mcp_detail_run_get); }
+                @Override public void run() { runNoticeCommand("/mcp get " + name); }
+            });
+        }
+        new DetailSheet(this, name.isEmpty() ? getString(R.string.menu_mcp) : name)
+                .setTitleIcon(R.drawable.ic_mcp)
+                .setChips(chipLabels)
+                .setBody(body.length() == 0 ? null : body.toString())
+                .setPrimaryActions(actions)
+                .show();
+    }
+
+    private void showSkillDetail(@NonNull SlashCommand skill) {
+        List<String> chipLabels = new ArrayList<>();
+        if (skill.location != null && !skill.location.isEmpty()) {
+            if ("project".equals(skill.location)) {
+                chipLabels.add(getString(R.string.mcp_source_project));
+            } else if ("user".equals(skill.location)) {
+                chipLabels.add(getString(R.string.mcp_source_user));
+            } else {
+                chipLabels.add(skill.location);
+            }
+        }
+        if (skill.source != null && !skill.source.isEmpty()) chipLabels.add(skill.source);
+        String title = skill.skillLabel();
+        if (title == null || title.isEmpty()) title = skill.name;
+        List<DetailSheet.Action> actions = new ArrayList<>();
+        actions.add(new DetailSheet.Action() {
+            @NonNull @Override public String label() { return getString(R.string.skills_insert_action); }
+            @Override public void run() { insertSkillIntoComposer(skill); }
+        });
+        new DetailSheet(this, title)
+                .setTitleIcon(R.drawable.ic_menu_skills)
+                .setChips(chipLabels)
+                .setBody(skill.description)
+                .setPrimaryActions(actions)
                 .show();
     }
 
@@ -3175,7 +3331,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             // get_commands may still be in flight — nudge once.
             refreshSlashCommands();
         }
-        ProjectSheets.showSkills(this, skills, trusted, this::insertSkillIntoComposer);
+        ProjectSheets.showSkills(this, skills, trusted, this::showSkillDetail);
     }
 
     private void insertSkillIntoComposer(@NonNull SlashCommand skill) {
