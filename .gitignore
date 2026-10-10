@@ -2,6 +2,7 @@ app/libs/
 app/build/
 app/out/
 app/*.jks
+app/tools/__pycache__/
 bridge/node_modules/
 bridge/run/
-docs/*.png
+*.log

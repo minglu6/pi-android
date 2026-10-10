@@ -37,6 +37,17 @@ public class BridgeConnection {
     }
 
     private static final String TAG = "PiBridge";
+
+    /** 临时取证：把收到的帧类型交给服务端写文件（本机 logcat 收不到 App 日志） */
+    public interface Trace {
+        void trace(String msg);
+    }
+
+    private Trace trace;
+
+    public void setTrace(Trace t) {
+        this.trace = t;
+    }
     private static final String WS_PATH = "";   // 桥直接挂在 ws://host:port/
 
     private final OkHttpClient http;
@@ -136,6 +147,7 @@ public class BridgeConnection {
             return;
         }
         String kind = obj.optString("kind");
+        if (trace != null) trace.trace("recv kind=" + kind + " len=" + raw.length());
         switch (kind) {
             case "status": {
                 String state = obj.optString("state");

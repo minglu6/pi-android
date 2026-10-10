@@ -1,6 +1,9 @@
 package dev.pi.android.ui;
 
+import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
+import android.os.IBinder;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.TextWatcher;
@@ -31,7 +34,7 @@ import java.util.Map;
 import dev.pi.android.util.Json;
 
 import dev.pi.android.R;
-import dev.pi.android.bridge.BridgeConnection;
+import dev.pi.android.bridge.BridgeService;
 import dev.pi.android.model.ChatMessage;
 
 /**
@@ -41,17 +44,32 @@ import dev.pi.android.model.ChatMessage;
  * 按 {@code contentIndex} 分块累积；{@code text_end} / {@code message_end} 给出权威全文，
  * 到达时用权威内容覆写 —— 中间任何丢包都不会让用户看到错字。
  */
-public class MainActivity extends AppCompatActivity implements BridgeConnection.Listener {
+public class MainActivity extends AppCompatActivity implements BridgeService.UiHost {
 
     private static final String TAG = "PiUI";
     private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final android.content.ServiceConnection svcConn = new android.content.ServiceConnection() {
+        @Override public void onServiceConnected(ComponentName name, IBinder binder) {
+            service = ((BridgeService.LocalBinder) binder).get();
+            serviceBound = true;
+            service.setHost(MainActivity.this);
+            service.takePendingAsk();
+        }
+
+        @Override public void onServiceDisconnected(ComponentName name) {
+            serviceBound = false;
+            service = null;
+        }
+    };
 
     private MessageAdapter adapter;
     private RecyclerView list;
     private EditText composer;
     private ImageButton send;
     private TextView statusText;
-    private BridgeConnection bridge;
+    private BridgeService service;
+    private boolean serviceBound;
+    private boolean resumed;
 
     /** contentIndex -> 该块的累积文本（ assistant 流式回复可能有多块：文本/思考/工具调用混排） */
     private final Map<Integer, StringBuilder> blocks = new LinkedHashMap<>();
@@ -88,37 +106,16 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
         });
         list.setAdapter(adapter);
 
-        bridge = new BridgeConnection();
         actions = findViewById(R.id.actions);
         actionsTitle = findViewById(R.id.actions_title);
         actionsInput = findViewById(R.id.actions_input);
         actionsButtons = findViewById(R.id.actions_buttons);
 
-        extUi = new ExtensionUi(
-                msg -> Toast.makeText(MainActivity.this, msg, Toast.LENGTH_SHORT).show(),
-                r -> bridge.rpc("extension_ui_response", r),
-                new ExtensionUi.StatusSink() {
-                    @Override
-                    public void onStatus(String key, String text) {
-                        if (text == null) extStatuses.remove(key);
-                        else extStatuses.put(key, text);
-                        runOnUiThread(MainActivity.this::renderExtStatus);
-                    }
-
-                    @Override
-                    public void onTitle(String title) {
-                        runOnUiThread(() -> setTitleExt(title));
-                    }
-
-                    @Override
-                    public void onNotify(String message, String type) {
-                        runOnUiThread(() -> adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM,
-                                notifyPrefix(type) + message)));
-                    }
-                },
-                (kind, title, hint, options, prefill, sink) -> runOnUiThread(
-                        () -> showExtensionActions(kind, title, hint, options, prefill, sink)));
-        bridge.setListener(this);
+        // 连接由前台 BridgeService 持有：App 进后台时也要能回答扩展提问，否则 Pi 会一直等
+        Intent svc = new Intent(this, BridgeService.class);
+        androidx.core.content.ContextCompat.startForegroundService(this, svc);
+        bindService(svc, svcConn, Context.BIND_AUTO_CREATE);
+        askNotificationPermission();
 
         send.setOnClickListener(v -> submit());
         composer.setOnEditorActionListener((v, actionId, event) -> {
@@ -138,7 +135,7 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
         });
 
         handleIntentExtras(getIntent());
-        if (bridge.isConnected()) openUiTarget(uiTarget);
+        if (isConnected()) openUiTarget(uiTarget);
         adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM,
                 "尚未连接：在设置里填 Token（或启动时传 --es token）。\nbuild " + dev.pi.android.BuildInfo.BUILD_TIME));
         reconnect();
@@ -196,12 +193,12 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
                 showForkPicker();
                 break;
             case "models":
-                bridge.rpc("get_available_models", null);
-                bridge.rpc("get_available_thinking_levels", null);
+                rpc("get_available_models", null);
+                rpc("get_available_thinking_levels", null);
                 showModelPicker();
                 break;
             case "thinking":
-                bridge.rpc("get_available_thinking_levels", null);
+                rpc("get_available_thinking_levels", null);
                 showThinkingPicker();
                 break;
             case "newsession":
@@ -216,7 +213,7 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
     private void requestSend(String text) {
         android.util.Log.i(TAG, "requestSend len=" + text.length());
         pendingPrompt = text;
-        if (bridge.isConnected()) {
+        if (isConnected()) {
             pendingPrompt = null;
             composer.setText("");
             adapter.add(new ChatMessage(ChatMessage.Role.USER, text));
@@ -226,7 +223,7 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
                 params.put("message", text);
             } catch (Exception ignored) {
             }
-            bridge.rpc("prompt", params);
+            rpc("prompt", params);
             setStatus("thinking…");
         }
     }
@@ -237,7 +234,7 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
         setIntent(intent);      // singleTop：新的分享intent在这里到，onCreate 不会再跑
         handleIntentExtras(intent);
         // 已经连着的话直接开面板；没连上则由 onStatus(online) 补做
-        if (bridge.isConnected() && pendingUiTarget != null) {
+        if (isConnected() && pendingUiTarget != null) {
             String target = pendingUiTarget;
             pendingUiTarget = null;
             main.postDelayed(() -> openUiTarget(target), 400);
@@ -252,20 +249,63 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
     @Override
     protected void onResume() {
         super.onResume();
+        resumed = true;
         // 设置页可能刚改过 token/端口
         reconnectIfConfigured();
+        // 从后台回来：把通知里问的东西拽回按钮行
+        if (serviceBound && service != null) service.takePendingAsk();
     }
 
     private void reconnectIfConfigured() {
         String sig = SettingsActivity.host(this) + ":" + SettingsActivity.port(this) + ":" + SettingsActivity.token(this);
-        if (bridge.isConnected() && sig.equals(lastConfig)) return;
+        if (isConnected() && sig.equals(lastConfig)) return;
         reconnect();
     }
 
     private void reconnect() {
-        lastConfig = SettingsActivity.host(this) + ":" + SettingsActivity.port(this) + ":" + SettingsActivity.token(this);
-        bridge.configure(SettingsActivity.host(this), SettingsActivity.port(this), SettingsActivity.token(this));
-        bridge.connect();
+        if (service != null) service.reconnect();
+    }
+
+
+    private String rpc(String command, @Nullable JSONObject params) {
+        if (service == null) return "";
+        return service.rpc(command, params);
+    }
+
+    private boolean isConnected() {
+        return service != null && service.isConnected();
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        resumed = false;
+    }
+
+    @Override
+    public boolean isVisible() {
+        return resumed;
+    }
+
+    @Override
+    public boolean showChoice(String id, String kind, String title, String hint,
+                              java.util.List<String> options, String prefill, ExtensionUi.AnswerSink sink) {
+        showExtensionActions(kind, title, hint, options, prefill, sink);
+        return true;
+    }
+
+    @Override
+    public void onExtStatus(java.util.Map<String, String> statuses) {
+        extStatuses.clear();
+        extStatuses.putAll(statuses);
+        main.post(this::renderExtStatus);
+    }
+
+    private void askNotificationPermission() {
+        if (android.os.Build.VERSION.SDK_INT < 33) return;
+        if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                == android.content.pm.PackageManager.PERMISSION_GRANTED) return;
+        requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 7);
     }
 
     private void setStreaming(boolean on) {
@@ -279,7 +319,7 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
     private void submit() {
         String text = composer.getText().toString().trim();
         if (text.isEmpty()) return;
-        if (!bridge.isConnected()) {
+        if (!isConnected()) {
             Toast.makeText(this, "桥未连接，检查设置里的 Token 与端口", Toast.LENGTH_SHORT).show();
             return;
         }
@@ -292,7 +332,7 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
             params.put("message", text);
         } catch (Exception ignored) {
         }
-        bridge.rpc("prompt", params);
+        rpc("prompt", params);
         setStatus("thinking…");
     }
 
@@ -322,7 +362,7 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
                 startNewSession();
                 return true;
             case 2:
-                bridge.rpc("abort", null);
+                rpc("abort", null);
                 return true;
             case 5:
                 showModelPicker();
@@ -357,7 +397,7 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
                 break;
             case "online":
                 setStatus(getString(R.string.status_online));
-                bridge.rpc("get_state", null);
+                rpc("get_state", null);
                 if (pendingUiTarget != null) {
                     String target = pendingUiTarget;
                     pendingUiTarget = null;
@@ -393,7 +433,7 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
             if (data.optBoolean("cancelled", false)) {
                 adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "切换会话被扩展取消了。"));
             } else {
-                bridge.rpc("get_messages", null);
+                rpc("get_messages", null);
             }
             return;
         }
@@ -428,7 +468,7 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
                             params.put("entryId", ids.get(which));
                         } catch (Exception ignored) {
                         }
-                        bridge.rpc("fork", params);
+                        rpc("fork", params);
                     })
                     .setNegativeButton(android.R.string.cancel, null)
                     .show();
@@ -439,7 +479,7 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
                 adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "fork 被扩展取消了。"));
             } else {
                 adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "已 fork，从这条消息继续：" + data.optString("text", "")));
-                bridge.rpc("get_messages", null);
+                rpc("get_messages", null);
             }
             return;
         }
@@ -475,8 +515,8 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
             String name = model != null ? model.optString("name", model.optString("id")) : null;
             String thinking = data.optString("thinkingLevel", null);
             setStatus((name != null ? name : "connected") + (thinking != null ? " · " + thinking : ""));
-            bridge.rpc("get_available_models", null);
-            bridge.rpc("get_available_thinking_levels", null);
+            rpc("get_available_models", null);
+            rpc("get_available_thinking_levels", null);
         }
     }
 
@@ -563,7 +603,7 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
             case "agent_settled":
                 setStreaming(false);
                 setStatus(getString(R.string.status_idle));
-                bridge.rpc("get_state", null);
+                rpc("get_state", null);
                 return;
             case "auto_retry_end":
                 if (!ev.optBoolean("success", true)) {
@@ -595,7 +635,7 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
             params.put("limit", 40);
         } catch (Exception ignored) {
         }
-        bridge.rpc("list_sessions", params);
+        rpc("list_sessions", params);
     }
 
     private void setTitleExt(String title) {
@@ -661,7 +701,7 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
     /** 扩展给的状态条目拼到顶栏右侧（同 key 覆盖，清空则移除），避免它抢走模型/状态那行。 */
     private void renderExtStatus() {
         if (extStatuses.isEmpty()) {
-            bridge.rpc("get_state", null);
+            rpc("get_state", null);
             return;
         }
         StringBuilder sb = new StringBuilder();
@@ -708,7 +748,7 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
                         params.put("sessionPath", sessionPaths.get(which));
                     } catch (Exception ignored) {
                     }
-                    bridge.rpc("switch_session", params);
+                    rpc("switch_session", params);
                 })
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
@@ -761,12 +801,12 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
 
     /** fork：从之前某条用户消息的新分支继续（Pi 的 get_fork_messages）。 */
     private void showForkPicker() {
-        bridge.rpc("get_fork_messages", null);
+        rpc("get_fork_messages", null);
         Toast.makeText(this, "正在取可 fork 的消息…", Toast.LENGTH_SHORT).show();
     }
 
     private void startNewSession() {
-        bridge.rpc("new_session", null);
+        rpc("new_session", null);
         adapter.clear();
         adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "新会话已开始。"));
     }
@@ -787,7 +827,7 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
                         params.put("modelId", ref[1]);
                     } catch (Exception ignored) {
                     }
-                    bridge.rpc("set_model", params);
+                    rpc("set_model", params);
                     adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "切换到模型 " + ref[0] + " / " + ref[1]));
                     dialog.dismiss();
                 })
@@ -809,7 +849,7 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
                         params.put("level", level);
                     } catch (Exception ignored) {
                     }
-                    bridge.rpc("set_thinking_level", params);
+                    rpc("set_thinking_level", params);
                     setStatus("thinking level: " + level);
                     dialog.dismiss();
                 })

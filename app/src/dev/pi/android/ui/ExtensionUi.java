@@ -32,8 +32,9 @@ public class ExtensionUi {
 
     /** 渲染交给宿主：一次只有一个在问，答案通过 AnswerSink 回来 */
     public interface Host {
-        /** kind: select / confirm / input / editor；confirm 时 options 为 [确定, 取消] */
-        void showChoice(String kind, String title, String hint, List<String> options, String prefill, AnswerSink sink);
+        /** id 是请求 id（作答时要原样带回）；kind: select / confirm / input / editor */
+        void showChoice(String id, String kind, String title, String hint, List<String> options,
+                        String prefill, AnswerSink sink);
     }
 
     public interface AnswerSink {
@@ -75,6 +76,21 @@ public class ExtensionUi {
         this.host = host;
     }
 
+    /** 重载：带 Trace Sink，用于把队列决策写到服务端可读取的文件（临时调试） */
+    public interface Trace {
+        void trace(String msg);
+    }
+
+    private Trace trace;
+
+    public void setTrace(Trace t) {
+        this.trace = t;
+    }
+
+    private void t(String msg) {
+        if (trace != null) trace.trace(msg);
+    }
+
     /** @return true 表示这条请求已被本层消费 */
     public boolean handle(@NonNull JSONObject req) {
         String method = req.optString("method");
@@ -84,6 +100,7 @@ public class ExtensionUi {
                 case "confirm":
                 case "input":
                 case "editor":
+                    t("queue " + method + " id=" + req.optString("id"));
                     queue.add(new Pending(req, System.currentTimeMillis()));
                     pump();
                     return true;
@@ -118,6 +135,7 @@ public class ExtensionUi {
 
     /** 一次只问一个；上一个回答完（或被超时/调用方取消）后才处理下一个。 */
     private void pump() {
+        t("pump awaiting=" + awaiting + " queue=" + queue.size());
         if (awaiting) return;
         Pending item = queue.poll();
         if (item == null) return;
@@ -178,7 +196,7 @@ public class ExtensionUi {
                     answer.cancelled();
                     return;
                 }
-                if (host != null) host.showChoice("select", title, "", options, null, answer);
+                if (host != null) host.showChoice(id, "select", title, "", options, null, answer);
                 else answer.cancelled();
                 break;
             }
@@ -187,7 +205,7 @@ public class ExtensionUi {
                 labels.add("确定");
                 labels.add("取消");
                 if (host != null) {
-                    host.showChoice("confirm", title, req.optString("message", ""), labels, null, answer);
+                    host.showChoice(id, "confirm", title, req.optString("message", ""), labels, null, answer);
                 } else {
                     answer.cancelled();
                 }
@@ -199,7 +217,7 @@ public class ExtensionUi {
                 labels.add("editor".equals(kind) ? "提交" : "确定");
                 labels.add("取消");
                 if (host != null) {
-                    host.showChoice(kind, title, req.optString("placeholder", ""), labels,
+                    host.showChoice(id, kind, title, req.optString("placeholder", ""), labels,
                             req.optString("prefill", ""), answer);
                 } else {
                     answer.cancelled();

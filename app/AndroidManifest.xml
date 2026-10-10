@@ -5,6 +5,12 @@
     <!-- 桥在 Termux 里，只连本机 loopback；INTERNET 是 WebSocket 到 127.0.0.1 所必需。
          应用本身不向公网发请求，桥也只绑 loopback + token。 -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- 前台服务：select/confirm/input/editor 会**阻塞 Pi**，App 进后台时也要能回答，
+         所以连接必须活在一个不会被随手回收的组件里。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <application
         android:allowBackup="false"
@@ -14,6 +20,11 @@
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="true"
         android:hardwareAccelerated="true">
+
+        <service
+            android:name=".bridge.BridgeService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <activity
             android:name=".ui.SettingsActivity"

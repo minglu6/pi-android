@@ -75,6 +75,8 @@ adb shell am start -n dev.pi.android/.ui.MainActivity --es token "$TOKEN" --disp
 - 工具调用气泡（`tool_execution_start/update/end`）；
 - 中断（abort）、新建会话、模型切换、思考档位切换；
 - `get_state` 驱动的顶栏状态（模型名 · 思考档位 · ready）；
+- 前台常驻通知（显示桥状态 + 一键停止桥）；改为由 `BridgeService` 持有 WebSocket，
+  这样 App 进后台也不会丢连接；
 - **会话列表（`list_sessions`，桥侧本地命令） `list_sessions`**：Pi 的 RPC 没有“有哪些会话”这条（只有当前会话内部的
   `get_tree`），所以列 `$HOME/.pi/agent/sessions/**/*.jsonl` 由桥代劳；点条目即可切换并重建历史；
 - **扩展 UI 子协议**：select / confirm / input / editor 用聊天流下方的一行按钮作答，

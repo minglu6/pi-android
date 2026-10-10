@@ -109,6 +109,23 @@ d8 默认不会自己拆 dex，需要显式切 multi-dex 并在 Application 里�
 每次验证新构建都要：`install -r` → `am force-stop dev.pi.android` → 重启虚拟屏 → 立刻操作。
 虚拟屏大约 1 分钟内会把窗口息掉、tap 失去响应，验证脚本要把“启动 → 意图 → 抓屏”压在一轮里做完。
 
+### P12 · App 的 logcat 收不到，取证要自己铺一条路
+本机 App 的 logcat **收不到任何本 App 的输出**（连 `Log.i` 都没有，同进程的其它 App 日志正常），
+所以 UI 之外的事实要取证只能靠：
+
+1. 把构建时间/commit 烘进界面（`build.sh` 生成 `BuildInfo.java`）—— 确认设备上跑的是哪一份 APK；
+2. 虚拟屏截图 + `tesseract -l chi_sim+eng` OCR（注意记忆 #56：虚拟屏息屏时可能返回最后一帧，
+   文件大小不再是活性判断；务必同时看 `DisplayInfo.state`）；
+3. **服务端 trace 文件**：App 侧 trace 追加到 `/data/data/dev.pi.android/files/debug.log`，
+   默认关闭，打开方式：`su -c 'touch /data/data/dev.pi.android/files/debug.trace'`，
+   读取：`su -c 'cat /data/data/dev.pi.android/files/debug.log'`。
+   崩溃仍然能从 `adb logcat -b crash` 里拿到。
+4. 通知类的显式证据：`adb shell dumpsys notification --noredact | grep dev.pi.android`
+   —— 这条比截图可靠得多。
+
+另外 `Activity.isResumed()` 是 **final** 的：自定义接口不要叫这个名字，否则运行期
+`LinkageError`（方法冲突，App 直接起不来，只在 `logcat -b crash` 里能看到）。
+
 ## 验证（2026-10-10）
 
 安装后在虚拟屏启动 `dev.pi.android`，`dumpsys activity` 显示
