@@ -45,7 +45,7 @@ AndroidX 不会带上它。
 ## CI（GitHub Actions）
 
 仓库工作流 [`.github/workflows/build-apk.yml`](../.github/workflows/build-apk.yml) 在每次
-**push 到 `master`**、**手动 `workflow_dispatch`**、以及 **`v*` tag** 时：
+**push 到 `master`**、**指向 `master` 的 PR**、**手动 `workflow_dispatch`**、以及 **`v*` tag** 时：
 
 1. 装 JDK 17 + Android cmdline-tools，拉 `platforms;android-36` 与 `build-tools;35.0.0`
    （提供 `aapt2` / `d8` / `apksigner` 与 `android.jar`，与 `app/build.sh` 的 TARGET_SDK=36 对齐）；
