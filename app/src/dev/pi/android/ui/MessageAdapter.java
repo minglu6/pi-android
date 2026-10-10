@@ -1,6 +1,7 @@
 package dev.pi.android.ui;
 
 import android.content.Context;
+import android.text.format.DateFormat;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.LayoutInflater;
@@ -14,15 +15,15 @@ import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.List;
 
 import dev.pi.android.R;
 import dev.pi.android.model.ChatMessage;
+import dev.pi.android.util.MarkdownLite;
 
-/** 聊天列表适配器。气泡靠 gravity + 圆角 drawable 区分角色。 */
+/** 聊天列表适配器。气泡靠 gravity + 圆角 drawable 区分角色；AGENT 做轻量 Markdown。 */
 public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
-
-    private static final String TAG = "PiUI";
 
     public interface OnMessageChanged {
         void onChanged(int size);
@@ -37,13 +38,12 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
     }
 
     public void add(ChatMessage msg) {
-        android.util.Log.i(TAG, "add " + msg.role + " len=" + msg.text.length());
         items.add(msg);
         notifyItemInserted(items.size() - 1);
         if (listener != null) listener.onChanged(items.size());
     }
 
-    /** 流式输出时反复更新最后一条助手消息，避免疯狂插入 item。 */
+    /** 流式输出时反复更新最后一条助手消息。 */
     public boolean upsertTail(ChatMessage msg) {
         if (!items.isEmpty()) {
             int last = items.size() - 1;
@@ -58,7 +58,6 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
         return false;
     }
 
-    /** 更新指定位置（工具结果回填时用）。 */
     public void replaceAt(int position, ChatMessage msg) {
         if (position < 0 || position >= items.size()) return;
         items.set(position, msg);
@@ -82,7 +81,6 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
         return items.size();
     }
 
-    /** 是否只有系统提示（用于空状态判断：纯引导文案仍算「空」）。 */
     public boolean onlySystemOrEmpty() {
         for (ChatMessage m : items) {
             if (m.role != ChatMessage.Role.SYSTEM) return false;
@@ -111,6 +109,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
         final Context ctx;
         final LinearLayout root;
         final TextView role;
+        final TextView time;
         final TextView text;
 
         VH(@NonNull View itemView) {
@@ -118,6 +117,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
             ctx = itemView.getContext();
             root = itemView.findViewById(R.id.bubble_root);
             role = itemView.findViewById(R.id.role);
+            time = itemView.findViewById(R.id.time);
             text = itemView.findViewById(R.id.text);
         }
 
@@ -127,8 +127,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
             int gravity = system ? Gravity.CENTER_HORIZONTAL
                     : (mine ? Gravity.END : Gravity.START);
             root.setGravity(gravity);
-            role.setGravity(gravity);
-            text.setText(msg.text);
+            ((LinearLayout) role.getParent()).setGravity(gravity);
 
             int padH = dp(12);
             int padV = dp(9);
@@ -136,34 +135,63 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
             text.setMaxWidth((int) (ctx.getResources().getDisplayMetrics().widthPixels
                     * (system ? 0.92f : 0.82f)));
 
+            time.setText(formatTime(msg.timestampMs));
+
+            int codeBg = ContextCompat.getColor(ctx, R.color.bg_code);
+            int codeFg = ContextCompat.getColor(ctx, R.color.pi_amber);
+
             switch (msg.role) {
                 case USER:
                     role.setText("YOU");
                     role.setTextColor(ContextCompat.getColor(ctx, R.color.role_you));
                     text.setBackgroundResource(R.drawable.bg_bubble_user);
+                    text.setTextColor(ContextCompat.getColor(ctx, R.color.text_primary));
+                    text.setText(msg.text);
                     break;
                 case TOOL:
                     role.setText("TOOL");
                     role.setTextColor(ContextCompat.getColor(ctx, R.color.role_tool));
                     text.setBackgroundResource(R.drawable.bg_bubble_tool);
+                    text.setTextColor(ContextCompat.getColor(ctx, R.color.text_primary));
+                    text.setText(MarkdownLite.render(msg.text, codeBg, codeFg));
                     break;
                 case SYSTEM:
                     role.setText("INFO");
                     role.setTextColor(ContextCompat.getColor(ctx, R.color.role_info));
                     text.setBackgroundResource(R.drawable.bg_bubble_system);
                     text.setTextColor(ContextCompat.getColor(ctx, R.color.text_secondary));
+                    text.setText(msg.text);
                     break;
                 case AGENT:
                 default:
-                    role.setText("PI");
+                    role.setText(msg.streaming ? "PI · …" : "PI");
                     role.setTextColor(ContextCompat.getColor(ctx, R.color.role_pi));
                     text.setBackgroundResource(R.drawable.bg_bubble_agent);
                     text.setTextColor(ContextCompat.getColor(ctx, R.color.text_primary));
+                    CharSequence body = MarkdownLite.render(msg.text, codeBg, codeFg);
+                    if (msg.streaming) {
+                        android.text.SpannableStringBuilder sb =
+                                new android.text.SpannableStringBuilder(body);
+                        sb.append(ctx.getString(R.string.streaming_marker));
+                        text.setText(sb);
+                    } else {
+                        text.setText(body);
+                    }
                     break;
             }
-            if (msg.role != ChatMessage.Role.SYSTEM) {
-                text.setTextColor(ContextCompat.getColor(ctx, R.color.text_primary));
+        }
+
+        private String formatTime(long ms) {
+            if (ms <= 0) return "";
+            Calendar then = Calendar.getInstance();
+            then.setTimeInMillis(ms);
+            Calendar now = Calendar.getInstance();
+            java.text.DateFormat fmt = DateFormat.getTimeFormat(ctx);
+            if (then.get(Calendar.YEAR) == now.get(Calendar.YEAR)
+                    && then.get(Calendar.DAY_OF_YEAR) == now.get(Calendar.DAY_OF_YEAR)) {
+                return fmt.format(then.getTime());
             }
+            return DateFormat.format("MM-dd HH:mm", then).toString();
         }
 
         private int dp(int v) {

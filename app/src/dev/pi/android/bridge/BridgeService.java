@@ -35,7 +35,7 @@ import dev.pi.android.ui.SettingsActivity;
  * 服务持有连接后，提问可以落到通知栏：不管用户在哪个界面都能点一下答掉。
  *
  * <p>前台服务而不是后台服务：本机后台进程会被系统清理（见 AGENTS.md），前台服务带常驻通知，
- * 存活率高得多。代价是常驻一条通知，所以通知里放了「停止桥」。
+ * 存活率高得多。代价是常驻一条通知，所以通知里放了「停止连接器」。
  */
 public class BridgeService extends Service {
 
@@ -115,7 +115,7 @@ public class BridgeService extends Service {
         tracing = new java.io.File(getFilesDir(), "debug.trace").exists();
         dbg("service onCreate");
         ensureChannel();
-        startForeground(ONGOING_ID, ongoingNotification("正在连接桥…"));
+        startForeground(ONGOING_ID, ongoingNotification("正在连接…"));
 
         bridge = new BridgeConnection();
         bridge.setTrace(msg -> dbg("conn: " + msg));
@@ -273,8 +273,8 @@ public class BridgeService extends Service {
     private void ensureChannel() {
         NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm == null || nm.getNotificationChannel(CHANNEL) != null) return;
-        NotificationChannel c = new NotificationChannel(CHANNEL, "Pi 桥", NotificationManager.IMPORTANCE_LOW);
-        c.setDescription("Pi 与 Termux 桥的连接状态，以及扩展提问");
+        NotificationChannel c = new NotificationChannel(CHANNEL, "Pi 连接器", NotificationManager.IMPORTANCE_LOW);
+        c.setDescription("Pi 与 Termux 连接器的状态，以及扩展提问");
         nm.createNotificationChannel(c);
     }
 
@@ -292,12 +292,12 @@ public class BridgeService extends Service {
                 PendingIntent.FLAG_UPDATE_CURRENT | immutableFlag());
         return new NotificationCompat.Builder(this, CHANNEL)
                 .setSmallIcon(R.drawable.ic_pi_logo)
-                .setContentTitle("Pi 桥 · " + state)
+                .setContentTitle("Pi 连接器 · " + state)
                 .setContentText(isConnected() ? "已连接（点一下打开对话）" : "未连接")
                 .setContentIntent(pi)
                 .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
-                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "停止桥", stopPi)
+                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "停止连接器", stopPi)
                 .build();
     }
 

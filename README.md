@@ -32,7 +32,7 @@ ChatGPT 在原始对话里建议 fork [Pocket Pi](https://github.com/earendil-wo
 
 | 路径 | 是什么 |
 | --- | --- |
-| `bridge/pi-rpc-bridge.mjs` | WebSocket ↔ Pi RPC 的桥（Termux 侧，Node + ws） |
+| `bridge/pi-rpc-bridge.mjs` | WebSocket ↔ Pi RPC 连接器（Termux 侧，Node + ws） |
 | `app/src/dev/pi/android/` | APK 源码：`ui/` 界面、`bridge/` 连接层、`model/`、`util/` |
 | `app/tools/` | 替代 gradle 的四个脚本（依赖获取、依赖 R 生成、打包、AXML 包名读取） |
 | `app/build.sh` | 一键构建：`aapt2 → javac → d8 → assemble → apksigner` |
@@ -47,7 +47,7 @@ ChatGPT 在原始对话里建议 fork [Pocket Pi](https://github.com/earendil-wo
 # 1) 一次生成 token（600），APK 侧要填同一份
 umask 077; head -c 24 /dev/urandom | base64 > ~/.pi/agent/pi-android.token
 
-# 2) 桥常驻：runit 服务
+# 2) 连接器常驻：runit 服务
 sv up pi-rpc-bridge          # 日志 $PREFIX/var/log/sv/pi-rpc-bridge/current
 # （一次性跑：~/bin/pi-rpc-bridge）
 
@@ -81,8 +81,8 @@ adb shell am start -n dev.pi.android/.ui.MainActivity --es token "$TOKEN" --disp
 - 中断（abort：顶栏菜单 / 发送钮在流式时变为停止）；
 - 新建会话、模型切换、思考档位切换；
 - `get_state` 驱动的状态芯片（模型名 · 思考档位 · 连接点）；
-- **前台 `BridgeService`**：持有 WebSocket + 常驻通知（桥状态 + 一键停止），App 进后台不丢连接；
-- **会话列表**（桥本地命令 `list_sessions` → `switch_session` → `get_messages` 重建历史）；顶栏快捷入口；
+- **前台 `BridgeService`**：持有 WebSocket + 常驻通知（连接器状态 + 一键停止），App 进后台不丢连接；
+- **会话列表**（连接器本地命令 `list_sessions` → `switch_session` → `get_messages` 重建历史）；顶栏快捷入口；可重命名 / 删除；
 - **Fork**（`get_fork_messages` → `fork`）；
 - **扩展 UI 子协议**：select / confirm / input / editor —— 前台用聊天流下方按钮行作答；后台走高优先级通知按钮；`notify` 落成气泡，`setStatus` / `setTitle` 反映到顶栏。不用 AlertDialog：虚拟屏上存在「对象创建成功、isShowing() 为 true、屏幕上却没有」的情况，而这几种请求会**阻塞 Pi**；
 - 首次启动空状态：无 Token / 未连接时引导进设置；
@@ -97,7 +97,7 @@ adb shell am start -n dev.pi.android/.ui.MainActivity --es token "$TOKEN" --disp
 
 ## 安全边界
 
-- 桥只绑 `127.0.0.1`，token 必填（token 文件丢失时会明确告警）。本机 loopback 不对 App 做隔离，
+- 连接器只绑 `127.0.0.1`，token 必填（token 文件丢失时会明确告警）。本机 loopback 不对 App 做隔离，
   所以 token 是唯一的门槛，权限应是 `~/.pi/agent/pi-android.token` 的 600。
 - 命令白名单默认**不包含 `bash`**。开 `--allow-bash` 等于把设备的 shell 交给能连到 loopback 的 App。
 - 依赖里有 sha256 清单（`app/libs/manifest.json`），重建时核对即可。

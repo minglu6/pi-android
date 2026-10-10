@@ -80,6 +80,37 @@
         </LinearLayout>
     </androidx.appcompat.widget.Toolbar>
 
+    <LinearLayout
+        android:id="@+id/reconnect_banner"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/bg_reconnect_banner"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="14dp"
+        android:paddingTop="10dp"
+        android:paddingEnd="10dp"
+        android:paddingBottom="10dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/reconnect_text"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/reconnect_banner"
+            android:textColor="@color/pi_salmon"
+            android:textSize="13sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/reconnect_btn"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/reconnect_action"
+            android:textColor="@color/pi_blue" />
+    </LinearLayout>
+
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
@@ -95,6 +126,20 @@
             android:paddingTop="10dp"
             android:paddingEnd="12dp"
             android:paddingBottom="12dp" />
+
+        <ImageButton
+            android:id="@+id/scroll_bottom"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_gravity="bottom|end"
+            android:layout_margin="14dp"
+            android:background="@drawable/bg_send_button"
+            android:contentDescription="@string/scroll_to_bottom"
+            android:padding="10dp"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_scroll_down"
+            android:tint="@color/md_theme_onPrimary"
+            android:visibility="gone" />
 
         <LinearLayout
             android:id="@+id/empty_state"
