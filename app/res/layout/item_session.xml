@@ -52,7 +52,7 @@
 
                 <TextView
                     android:id="@+id/session_model"
-                    style="@style/MonoMetaText"
+                    style="@style/MonoMetaText.Line"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="6dp"
@@ -82,7 +82,7 @@
 
                 <TextView
                     android:id="@+id/session_msg_count"
-                    style="@style/MonoMetaText"
+                    style="@style/MonoMetaText.Line"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="6dp"
@@ -94,7 +94,7 @@
 
         <TextView
             android:id="@+id/session_time"
-            style="@style/MonoMetaText"
+            style="@style/MonoMetaText.Line"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:gravity="end"

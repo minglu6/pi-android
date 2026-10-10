@@ -36,7 +36,7 @@
 
             <TextView
                 android:id="@+id/tool_glyph"
-                style="@style/MonoMetaText"
+                style="@style/MonoMetaText.Line"
                 android:layout_width="16dp"
                 android:layout_height="wrap_content"
                 android:gravity="center"
@@ -45,7 +45,7 @@
 
             <TextView
                 android:id="@+id/tool_name"
-                style="@style/MonoMetaText"
+                style="@style/MonoMetaText.Line"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="4dp"
@@ -57,7 +57,7 @@
 
             <TextView
                 android:id="@+id/tool_subject"
-                style="@style/MonoMetaText"
+                style="@style/MonoMetaText.Line"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
@@ -68,7 +68,7 @@
 
             <TextView
                 android:id="@+id/tool_diff"
-                style="@style/MonoMetaText"
+                style="@style/MonoMetaText.Line"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="4dp"
@@ -78,7 +78,7 @@
 
             <TextView
                 android:id="@+id/tool_status"
-                style="@style/MonoMetaText"
+                style="@style/MonoMetaText.Line"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="6dp"
@@ -104,34 +104,58 @@
             android:orientation="vertical"
             android:visibility="gone">
 
-            <TextView
-                android:id="@+id/tool_command"
-                style="@style/MonoMetaText"
+            <HorizontalScrollView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:background="@drawable/bg_tool_output"
-                android:breakStrategy="simple"
-                android:lineSpacingMultiplier="1.2"
-                android:maxLines="5"
-                android:padding="6dp"
-                android:scrollHorizontally="false"
-                android:textColor="@color/status_online"
-                android:textSize="11sp"
-                android:visibility="gone" />
+                android:fillViewport="true"
+                android:overScrollMode="ifContentScrolls"
+                android:scrollbars="horizontal">
 
-            <TextView
-                android:id="@+id/tool_output"
-                style="@style/MonoMetaText"
+                <TextView
+                    android:id="@+id/tool_command"
+                    style="@style/MonoMetaText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_tool_output"
+                    android:breakStrategy="simple"
+                    android:lineSpacingMultiplier="1.2"
+                    android:maxLines="8"
+                    android:padding="6dp"
+                    android:textColor="@color/status_online"
+                    android:textSize="11sp"
+                    android:visibility="gone" />
+            </HorizontalScrollView>
+
+            <androidx.core.widget.NestedScrollView
+                android:id="@+id/tool_output_vscroll"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="3dp"
-                android:background="@drawable/bg_tool_output"
-                android:breakStrategy="simple"
-                android:lineSpacingMultiplier="1.25"
-                android:padding="6dp"
-                android:scrollHorizontally="false"
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp" />
+                android:fillViewport="false"
+                android:overScrollMode="ifContentScrolls"
+                android:scrollbars="vertical">
+
+                <HorizontalScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fillViewport="true"
+                    android:overScrollMode="ifContentScrolls"
+                    android:scrollbars="horizontal">
+
+                    <TextView
+                        android:id="@+id/tool_output"
+                        style="@style/MonoMetaText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_tool_output"
+                        android:breakStrategy="simple"
+                        android:lineSpacingMultiplier="1.25"
+                        android:padding="6dp"
+                        android:textColor="@color/text_secondary"
+                        android:textIsSelectable="true"
+                        android:textSize="11sp" />
+                </HorizontalScrollView>
+            </androidx.core.widget.NestedScrollView>
         </LinearLayout>
 
         <LinearLayout
