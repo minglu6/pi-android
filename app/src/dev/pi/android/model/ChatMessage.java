@@ -93,6 +93,44 @@ public class ChatMessage {
         }
     }
 
+    /** Pocket-style system notice (error / warning / info) shown in the transcript. */
+    public static final class NoticeData {
+        public static final String LEVEL_INFO = "info";
+        public static final String LEVEL_WARNING = "warning";
+        public static final String LEVEL_ERROR = "error";
+
+        public final String level;
+        public final String title;
+        public final String detail;
+        /** Optional chip label, e.g. 运行 /mcp. */
+        public final String actionLabel;
+        /** Slash or text inserted/sent when the chip is tapped, e.g. /mcp. */
+        public final String actionCommand;
+
+        public NoticeData(String level, String title, String detail,
+                          String actionLabel, String actionCommand) {
+            this.level = level == null || level.isEmpty() ? LEVEL_INFO : level;
+            this.title = title == null ? "" : title;
+            this.detail = detail == null ? "" : detail;
+            this.actionLabel = actionLabel == null ? "" : actionLabel;
+            this.actionCommand = actionCommand == null ? "" : actionCommand;
+        }
+
+        public String exportText() {
+            StringBuilder sb = new StringBuilder();
+            if (!title.isEmpty()) sb.append(title);
+            if (!detail.isEmpty()) {
+                if (sb.length() > 0) sb.append('\n');
+                sb.append(detail);
+            }
+            if (!actionCommand.isEmpty()) {
+                if (sb.length() > 0) sb.append('\n');
+                sb.append(actionCommand);
+            }
+            return sb.toString();
+        }
+    }
+
     public final Role role;
     public final String text;
     public final long timestampMs;
@@ -100,6 +138,8 @@ public class ChatMessage {
     public final boolean streaming;
     /** 结构化工具卡片数据；旧构造器产生的消息为 null，Adapter 走 legacy 文本 fallback。 */
     public final ToolData tool;
+    /** Structured system notice; null for legacy SYSTEM chips (parsed on bind). */
+    public final NoticeData notice;
     /** Session entry id for fork RPC when provided by get_messages / events. */
     public final String entryId;
 
@@ -126,6 +166,7 @@ public class ChatMessage {
         this.timestampMs = timestampMs;
         this.streaming = streaming;
         this.tool = null;
+        this.notice = null;
         this.entryId = entryId == null ? "" : entryId;
     }
 
@@ -135,6 +176,17 @@ public class ChatMessage {
         this.timestampMs = timestampMs;
         this.streaming = false;
         this.tool = data;
+        this.notice = null;
+        this.entryId = "";
+    }
+
+    private ChatMessage(NoticeData notice, long timestampMs) {
+        this.role = Role.SYSTEM;
+        this.notice = notice;
+        this.text = notice == null ? "" : notice.exportText();
+        this.timestampMs = timestampMs;
+        this.streaming = false;
+        this.tool = null;
         this.entryId = "";
     }
 
@@ -144,6 +196,7 @@ public class ChatMessage {
         timestampMs = source.timestampMs;
         streaming = source.streaming;
         tool = source.tool;
+        notice = source.notice;
         entryId = source.entryId;
         attachments.addAll(source.attachments);
     }
@@ -151,13 +204,23 @@ public class ChatMessage {
     public ChatMessage withEntryId(String id) {
         if (id == null || id.isEmpty() || id.equals(entryId)) return this;
         if (tool != null) {
-            ChatMessage copy = tool(tool, timestampMs);
-            // tool messages don't carry entryId for fork; keep empty
-            return copy;
+            return tool(tool, timestampMs);
+        }
+        if (notice != null) {
+            return notice(notice, timestampMs);
         }
         ChatMessage m = new ChatMessage(role, text, timestampMs, streaming, id);
         m.attachments.addAll(attachments);
         return m;
+    }
+
+    /** Structured SYSTEM notice card. */
+    public static ChatMessage notice(NoticeData data, long timestampMs) {
+        return new ChatMessage(data, timestampMs);
+    }
+
+    public static ChatMessage notice(NoticeData data) {
+        return notice(data, System.currentTimeMillis());
     }
 
     public ChatMessage copy() { return new ChatMessage(this); }

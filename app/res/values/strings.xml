@@ -75,6 +75,13 @@
     <string name="reconnect_banner_timeout">连接器超时未响应</string>
     <string name="reconnect_action">重新连接</string>
     <string name="go_settings">去设置</string>
+    <string name="notice_title_error">出错了</string>
+    <string name="notice_title_warning">需要注意</string>
+    <string name="notice_title_info">提示</string>
+    <string name="notice_title_connector">连接器</string>
+    <string name="notice_title_mcp">MCP 服务需要处理</string>
+    <string name="notice_run_slash">运行 %1$s</string>
+    <string name="notice_prompt_failed">发送失败</string>
     <string name="scroll_to_bottom">回到底部</string>
     <string name="ext_answer_hint">在下方按钮里回答</string>
     <string name="new_session_started">新会话已开始</string>

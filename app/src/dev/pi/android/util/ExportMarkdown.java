@@ -32,7 +32,12 @@ public final class ExportMarkdown {
                     appendTool(sb, m);
                     break;
                 case SYSTEM:
-                    if (m.text != null && !m.text.isEmpty()) {
+                    if (m.notice != null) {
+                        String body = m.notice.exportText();
+                        if (!body.isEmpty()) {
+                            sb.append("> ").append(body.replace("\n", "\n> ")).append("\n\n");
+                        }
+                    } else if (m.text != null && !m.text.isEmpty()) {
                         sb.append("> ").append(m.text.replace("\n", "\n> ")).append("\n\n");
                     }
                     break;

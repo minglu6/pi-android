@@ -43,4 +43,8 @@
     <color name="launcher_bg">#1A1B26</color>
     <color name="approval_border">#B15C00</color>
     <color name="approval_bg">#FFF4E8</color>
+    <color name="notice_bg">#EEF0F6</color>
+    <color name="notice_info">#2E7DE9</color>
+    <color name="notice_warning">#B15C00</color>
+    <color name="notice_error">#F52A65</color>
 </resources>

@@ -99,6 +99,9 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
         void onFork(@NonNull ChatMessage message);
 
         void onEditResend(@NonNull ChatMessage userMessage);
+
+        /** Optional notice action chip (e.g. /mcp). Default no-op. */
+        default void onNoticeAction(@NonNull String command) {}
     }
 
     private static final int CODE_FOLD_LINES = 40;
@@ -397,6 +400,13 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
         TextView agentActionMore;
         final Map<String, Boolean> codeExpanded = new HashMap<>();
 
+        // SYSTEM notice card
+        View noticeAccent;
+        TextView noticeIcon;
+        TextView noticeTitle;
+        TextView noticeDetail;
+        TextView noticeAction;
+
         VH(@NonNull View itemView, int type) {
             super(itemView);
             this.ctx = itemView.getContext();
@@ -414,6 +424,16 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                 agentActionRetry = itemView.findViewById(R.id.agent_action_retry);
                 agentActionFork = itemView.findViewById(R.id.agent_action_fork);
                 agentActionMore = itemView.findViewById(R.id.agent_action_more);
+            }
+            if (type == TYPE_SYSTEM) {
+                noticeAccent = itemView.findViewById(R.id.notice_accent);
+                noticeIcon = itemView.findViewById(R.id.notice_icon);
+                noticeTitle = itemView.findViewById(R.id.notice_title);
+                noticeDetail = itemView.findViewById(R.id.notice_detail);
+                noticeAction = itemView.findViewById(R.id.notice_action);
+                if (noticeDetail != null) noticeDetail.setTypeface(AppFonts.mono(ctx, false));
+                if (noticeAction != null) noticeAction.setTypeface(AppFonts.mono(ctx, false));
+                if (noticeIcon != null) noticeIcon.setTypeface(AppFonts.mono(ctx, true));
             }
             if (type == TYPE_TOOL) {
                 toolStateBar = itemView.findViewById(R.id.tool_state_bar);
@@ -461,7 +481,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                     bindTool(msg, position);
                     break;
                 case TYPE_SYSTEM:
-                    text.setText(msg.text);
+                    bindNotice(msg);
                     break;
                 case TYPE_AGENT:
                 default: {
@@ -764,6 +784,65 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
         }
 
         private int dp(int value) { return Math.round(value * ctx.getResources().getDisplayMetrics().density); }
+
+        private void bindNotice(ChatMessage msg) {
+            ChatMessage.NoticeData n = msg.notice;
+            if (n == null) {
+                n = dev.pi.android.util.NoticeLite.fromLegacyText(msg.text);
+            }
+            int accent = noticeAccentColor(n.level);
+            if (noticeAccent != null) noticeAccent.setBackgroundColor(accent);
+            if (noticeIcon != null) {
+                noticeIcon.setText(noticeGlyph(n.level));
+                noticeIcon.setTextColor(accent);
+            }
+            if (noticeTitle != null) {
+                noticeTitle.setText(n.title.isEmpty()
+                        ? ctx.getString(R.string.notice_title_info) : n.title);
+                noticeTitle.setTextColor(ContextCompat.getColor(ctx, R.color.text_primary));
+            }
+            if (noticeDetail != null) {
+                if (n.detail.isEmpty()) {
+                    noticeDetail.setVisibility(View.GONE);
+                } else {
+                    noticeDetail.setVisibility(View.VISIBLE);
+                    noticeDetail.setText(n.detail);
+                }
+            }
+            if (text != null) text.setVisibility(View.GONE);
+            if (noticeAction != null) {
+                if (n.actionCommand.isEmpty()) {
+                    noticeAction.setVisibility(View.GONE);
+                    noticeAction.setOnClickListener(null);
+                } else {
+                    noticeAction.setVisibility(View.VISIBLE);
+                    String label = n.actionLabel.isEmpty()
+                            ? ctx.getString(R.string.notice_run_slash, n.actionCommand)
+                            : n.actionLabel;
+                    noticeAction.setText(label);
+                    final String cmd = n.actionCommand;
+                    noticeAction.setOnClickListener(v -> {
+                        if (MessageAdapter.this.agentActions != null) {
+                            MessageAdapter.this.agentActions.onNoticeAction(cmd);
+                        }
+                    });
+                }
+            }
+        }
+
+        private int noticeAccentColor(String level) {
+            int res;
+            if (ChatMessage.NoticeData.LEVEL_ERROR.equals(level)) res = R.color.notice_error;
+            else if (ChatMessage.NoticeData.LEVEL_WARNING.equals(level)) res = R.color.notice_warning;
+            else res = R.color.notice_info;
+            return ContextCompat.getColor(ctx, res);
+        }
+
+        private String noticeGlyph(String level) {
+            if (ChatMessage.NoticeData.LEVEL_ERROR.equals(level)) return "!";
+            if (ChatMessage.NoticeData.LEVEL_WARNING.equals(level)) return "!";
+            return "i";
+        }
 
         /**
          * 工具卡片绑定。结构化 ToolData 直接使用；legacy 文本消息

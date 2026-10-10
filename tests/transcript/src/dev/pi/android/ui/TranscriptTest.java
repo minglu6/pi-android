@@ -97,7 +97,10 @@ public final class TranscriptTest {
         delta(0, "partial");
         JSONObject message = json("{\"role\":\"assistant\",\"timestamp\":77,\"stopReason\":\"error\",\"errorMessage\":\"AUTH_FAILURE\",\"content\":[]}");
         event(new JSONObject().put("type", "message_end").put("message", message));
-        equal(false, rows.get(0).streaming); equal("partial", rows.get(0).text); equal("⚠ AUTH_FAILURE", rows.get(1).text);
+        equal(false, rows.get(0).streaming); equal("partial", rows.get(0).text);
+        equal(ChatMessage.Role.SYSTEM, rows.get(1).role);
+        equal(true, rows.get(1).notice != null);
+        equal("AUTH_FAILURE", rows.get(1).notice.detail);
         event(new JSONObject().put("type", "agent_end").put("messages", new JSONArray().put(message)));
         equal(2, rows.size());
         event("{\"type\":\"message_start\",\"message\":{\"role\":\"assistant\"}}");
@@ -121,7 +124,8 @@ public final class TranscriptTest {
         equal("内部推理", withThink.get(0).tool.output);
         equal("对外答复", withThink.get(1).text);
         List<ChatMessage> errors = TranscriptReducer.history(json("{\"messages\":[{\"role\":\"assistant\",\"stopReason\":\"error\",\"errorMessage\":\"NO_KEY\",\"content\":[]},{\"role\":\"toolResult\",\"toolCallId\":\"cancel\",\"isError\":true,\"details\":{\"cancelled\":true},\"content\":[{\"type\":\"text\",\"text\":\"partial\"}]}]}"));
-        equal(2, errors.size()); equal(ChatMessage.Role.SYSTEM, errors.get(0).role); equal("⚠ NO_KEY", errors.get(0).text);
+        equal(2, errors.size()); equal(ChatMessage.Role.SYSTEM, errors.get(0).role);
+        equal(true, errors.get(0).notice != null); equal("NO_KEY", errors.get(0).notice.detail);
         equal("cancelled", errors.get(1).tool.state); equal("partial", errors.get(1).tool.output);
     }
     void reconnectBackfill() {
