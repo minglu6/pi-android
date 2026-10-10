@@ -1,28 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:background="@color/bg_base">
+    android:background="@color/bg_base"
+    android:orientation="vertical">
 
-    <androidx.appcompat.widget.Toolbar
-        android:id="@+id/toolbar"
+    <LinearLayout
+        android:id="@+id/top_bar"
         android:layout_width="match_parent"
-        android:layout_height="?attr/actionBarSize"
-        android:background="@color/bg_elevated"
-        android:elevation="2dp"
-        android:paddingEnd="4dp">
+        android:layout_height="wrap_content"
+        android:background="@drawable/bg_toolbar"
+        android:elevation="3dp"
+        android:orientation="vertical">
 
         <LinearLayout
+            android:id="@+id/toolbar_row"
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
+            android:layout_height="56dp"
             android:gravity="center_vertical"
             android:orientation="horizontal"
-            android:paddingEnd="8dp">
+            android:paddingStart="14dp"
+            android:paddingEnd="6dp">
 
             <ImageView
-                android:layout_width="28dp"
-                android:layout_height="28dp"
+                android:layout_width="26dp"
+                android:layout_height="26dp"
                 android:contentDescription="@string/app_name"
                 android:src="@drawable/ic_pi_logo" />
 
@@ -36,7 +39,7 @@
                 <TextView
                     android:id="@+id/brand_title"
                     style="@style/ToolbarTitle"
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="@string/app_name" />
 
@@ -55,8 +58,8 @@
 
                     <View
                         android:id="@+id/status_dot"
-                        android:layout_width="7dp"
-                        android:layout_height="7dp"
+                        android:layout_width="6dp"
+                        android:layout_height="6dp"
                         android:background="@drawable/ic_status_dot" />
 
                     <TextView
@@ -71,14 +74,23 @@
 
             <ImageButton
                 android:id="@+id/btn_sessions"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/action_sessions"
                 android:src="@android:drawable/ic_menu_recent_history"
                 android:tint="@color/text_secondary" />
+
+            <ImageButton
+                android:id="@+id/btn_menu"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/settings"
+                android:src="@android:drawable/ic_menu_more"
+                android:tint="@color/text_secondary" />
         </LinearLayout>
-    </androidx.appcompat.widget.Toolbar>
+    </LinearLayout>
 
     <LinearLayout
         android:id="@+id/reconnect_banner"
@@ -89,7 +101,7 @@
         android:orientation="horizontal"
         android:paddingStart="14dp"
         android:paddingTop="10dp"
-        android:paddingEnd="10dp"
+        android:paddingEnd="8dp"
         android:paddingBottom="10dp"
         android:visibility="gone">
 
@@ -107,6 +119,7 @@
             style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:minWidth="0dp"
             android:text="@string/reconnect_action"
             android:textColor="@color/pi_blue" />
     </LinearLayout>
@@ -122,9 +135,7 @@
             android:layout_height="match_parent"
             android:clipToPadding="false"
             android:overScrollMode="never"
-            android:paddingStart="12dp"
-            android:paddingTop="10dp"
-            android:paddingEnd="12dp"
+            android:paddingTop="8dp"
             android:paddingBottom="12dp" />
 
         <ImageButton
@@ -132,7 +143,7 @@
             android:layout_width="44dp"
             android:layout_height="44dp"
             android:layout_gravity="bottom|end"
-            android:layout_margin="14dp"
+            android:layout_margin="16dp"
             android:background="@drawable/bg_send_button"
             android:contentDescription="@string/scroll_to_bottom"
             android:padding="10dp"
@@ -146,21 +157,15 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_gravity="center"
-            android:layout_marginStart="28dp"
-            android:layout_marginEnd="28dp"
-            android:background="@drawable/bg_empty_card"
             android:gravity="center_horizontal"
             android:orientation="vertical"
-            android:paddingStart="22dp"
-            android:paddingTop="28dp"
-            android:paddingEnd="22dp"
-            android:paddingBottom="24dp"
+            android:paddingStart="28dp"
+            android:paddingEnd="28dp"
             android:visibility="gone">
 
             <ImageView
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:alpha="0.9"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
                 android:contentDescription="@string/app_name"
                 android:src="@drawable/ic_pi_logo" />
 
@@ -168,10 +173,10 @@
                 android:id="@+id/empty_title"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
+                android:layout_marginTop="18dp"
                 android:text="@string/empty_title"
                 android:textColor="@color/text_primary"
-                android:textSize="18sp"
+                android:textSize="20sp"
                 android:textStyle="bold" />
 
             <TextView
@@ -180,7 +185,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
                 android:gravity="center"
-                android:lineSpacingExtra="2dp"
+                android:lineSpacingMultiplier="1.25"
                 android:text="@string/empty_body"
                 android:textColor="@color/text_secondary"
                 android:textSize="14sp" />
@@ -192,10 +197,17 @@
                 android:layout_marginTop="16dp"
                 android:text="@string/empty_open_settings"
                 android:visibility="gone" />
+
+            <LinearLayout
+                android:id="@+id/suggest_row"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="22dp"
+                android:gravity="center"
+                android:orientation="vertical" />
         </LinearLayout>
     </FrameLayout>
 
-    <!-- 扩展 UI：select/confirm/input 用按钮行回答（不走 AlertDialog，见 ExtensionUi）。 -->
     <LinearLayout
         android:id="@+id/actions"
         android:layout_width="match_parent"
@@ -246,11 +258,12 @@
     </LinearLayout>
 
     <LinearLayout
+        android:id="@+id/composer_bar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="@color/bg_elevated"
-        android:elevation="4dp"
-        android:gravity="center_vertical"
+        android:elevation="6dp"
+        android:gravity="bottom"
         android:orientation="horizontal"
         android:paddingStart="12dp"
         android:paddingTop="10dp"
@@ -268,20 +281,20 @@
             android:imeOptions="actionSend"
             android:inputType="textMultiLine|textCapSentences"
             android:maxLines="6"
-            android:minHeight="44dp"
-            android:paddingStart="14dp"
-            android:paddingTop="10dp"
-            android:paddingEnd="14dp"
-            android:paddingBottom="10dp" />
+            android:minHeight="48dp"
+            android:paddingStart="16dp"
+            android:paddingTop="12dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="12dp" />
 
         <ImageButton
             android:id="@+id/send"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
             android:layout_marginStart="8dp"
             android:background="@drawable/bg_send_button"
             android:contentDescription="@string/action_send"
-            android:padding="10dp"
+            android:padding="12dp"
             android:scaleType="centerInside"
             android:src="@drawable/ic_send"
             android:tint="@color/md_theme_onPrimary" />

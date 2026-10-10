@@ -5,8 +5,8 @@
         <item name="colorOnPrimary">@color/md_theme_onPrimary</item>
         <item name="colorSecondary">@color/md_theme_secondary</item>
         <item name="colorTertiary">@color/md_theme_tertiary</item>
-        <item name="android:statusBarColor">@color/bg_elevated</item>
-        <item name="android:navigationBarColor">@color/bg_base</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@color/bg_elevated</item>
         <item name="android:windowBackground">@color/bg_base</item>
         <item name="android:colorBackground">@color/bg_base</item>
         <item name="colorSurface">@color/bg_elevated</item>
@@ -14,20 +14,23 @@
         <item name="android:textColorPrimary">@color/text_primary</item>
         <item name="android:textColorSecondary">@color/text_secondary</item>
         <item name="popupMenuBackground">@color/bg_elevated</item>
+        <item name="android:windowLightStatusBar">false</item>
     </style>
 
     <style name="ComposerText">
         <item name="android:textColor">@color/text_primary</item>
         <item name="android:textColorHint">@color/text_muted</item>
         <item name="android:textSize">16sp</item>
-        <item name="android:lineSpacingExtra">2dp</item>
+        <item name="android:lineSpacingMultiplier">1.25</item>
     </style>
 
     <style name="ToolbarTitle">
         <item name="android:textColor">@color/text_primary</item>
-        <item name="android:textSize">17sp</item>
+        <item name="android:textSize">18sp</item>
         <item name="android:textStyle">bold</item>
-        <item name="android:letterSpacing">0.02</item>
+        <item name="android:letterSpacing">0.01</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
     </style>
 
     <style name="StatusChipText">
@@ -35,6 +38,24 @@
         <item name="android:textSize">12sp</item>
         <item name="android:maxLines">1</item>
         <item name="android:ellipsize">end</item>
+    </style>
+
+    <style name="AgentBodyText">
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:lineSpacingMultiplier">1.35</item>
+    </style>
+
+    <style name="UserBubbleText">
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textSize">15.5sp</item>
+        <item name="android:lineSpacingMultiplier">1.28</item>
+    </style>
+
+    <style name="SystemChipText">
+        <item name="android:textColor">@color/text_muted</item>
+        <item name="android:textSize">12.5sp</item>
+        <item name="android:gravity">center</item>
     </style>
 
     <style name="SettingsLabel">

@@ -70,12 +70,15 @@ const ALLOWED = new Set([
   "set_auto_compaction", "set_auto_retry", "abort_retry", "compact",
   "export_html",
   "extension_ui_response",
-  "set_session_name", "get_session_name",
+  "set_session_name",
 ]);
 if (ALLOW_BASH) {
   ALLOWED.add("bash");
   ALLOWED.add("abort_bash");
 }
+
+/** 当前会话显示名：Pi 的 RPC 没有稳定的 get_session_name，由连接器本地跟踪。 */
+let currentSessionName = "";
 
 function findPi() {
   for (const p of [
@@ -194,6 +197,9 @@ function ensurePi() {
 
 /** Pi stdout 的每一条记录：响应按 id 回填，其余作为事件广播。 */
 function routeRecord(rec) {
+  if (rec && rec.type === "session_info_changed" && typeof rec.name === "string") {
+    currentSessionName = rec.name;
+  }
   if (rec && rec.type === "extension_ui_request" && DIALOG_METHODS.has(rec.method) && rec.id) {
     uiRequests.set(rec.id, { method: rec.method, ts: Date.now() });
   }
@@ -203,6 +209,10 @@ function routeRecord(rec) {
       const [id, entry] = pending;
       pendingReqs.delete(id);
       if (rec.id) pendingReqs.delete(rec.id);
+      // 从 get_state 同步会话名，供本地 get_session_name 使用
+      if (entry.command === "get_state" && rec.success && rec.data && typeof rec.data.sessionName === "string") {
+        currentSessionName = rec.data.sessionName;
+      }
       safeSend(
         entry.ws,
         JSON.stringify({
@@ -431,6 +441,23 @@ function writeCommand(id, ws, command, params) {
       respond(ws, id, false, "delete_session", null, e.message);
     }
     return;
+  }
+  // Pi 不支持 get_session_name；本地返回跟踪到的名字，避免客户端收到 Unknown command
+  if (command === "get_session_name") {
+    respond(ws, id, true, "get_session_name", { name: currentSessionName || "" }, null);
+    return;
+  }
+  if (command === "set_session_name") {
+    const n = params && typeof params.name === "string" ? params.name.trim() : "";
+    if (n) currentSessionName = n;
+    // 仍转发给 Pi（若支持）；名字已本地记下，即使 Pi 忽略也不影响 UI
+  }
+  if (command === "new_session" || command === "switch_session") {
+    // switch 后客户端会再拉 get_session_name / get_state；先清空避免显示旧名
+    if (command === "new_session") currentSessionName = "";
+    else if (!(params && typeof params.name === "string" && params.name.trim())) {
+      currentSessionName = "";
+    }
   }
   if (!ALLOWED.has(command)) {
     safeSend(
