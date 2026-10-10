@@ -25,6 +25,13 @@ pi.dev 的 [Press Kit](https://pi.dev/press-kit) 把它描述为「Vector logo f
 
 - 本仓库自己的代码：MIT（见 `LICENSE`）。
 - Pi 的 logo / 商标：**不在** MIT 授权范围内 —— MIT 授权的是代码，不等同于商标与品牌素材授权。
-- 依赖的 AndroidX / Material / OkHttp 等：各自 Apache-2.0，sha256 与来源见 `app/libs/manifest.json`。
+- 依赖的 AndroidX / Material / OkHttp / JSch（mwiede）等：各自许可证，sha256 与来源见
+  `app/libs/manifest.json`。
+- **MesloLGLDZ Nerd Font Mono**（`app/res/font/meslo_lgldz_nf_*.ttf`）：上游 Meslo
+  （André Berg）为 **Apache License 2.0**（`app/res/raw/meslo_apache_license.txt` /
+  `meslo_apache_2_0_full.txt`）；Nerd Fonts 补丁工程为 **MIT**
+  （`app/res/raw/nerd_fonts_mit.txt`）。来自
+  [ryanoasis/nerd-fonts](https://github.com/ryanoasis/nerd-fonts) Meslo.zip
+  （`MesloLGLDZNerdFontMono-Regular/Bold.ttf`）。仅打包 Regular + Bold。
 - 本项目不 fork、不 vendored、不 patch Pi 源码；只通过 `pi --mode rpc` 这一官方支持的
   JSONL 子协议驱动已安装的 Pi。

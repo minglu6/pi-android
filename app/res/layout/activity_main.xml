@@ -75,6 +75,27 @@
                 </LinearLayout>
             </LinearLayout>
 
+            <TextView
+                android:id="@+id/node_chip"
+                android:layout_width="wrap_content"
+                android:layout_height="32dp"
+                android:layout_marginEnd="2dp"
+                android:background="@drawable/bg_status_chip"
+                android:clickable="true"
+                android:contentDescription="@string/nodes_title"
+                android:drawablePadding="4dp"
+                android:ellipsize="end"
+                android:focusable="true"
+                android:foreground="?attr/selectableItemBackgroundBorderless"
+                android:gravity="center_vertical"
+                android:maxWidth="96dp"
+                android:maxLines="1"
+                android:paddingStart="8dp"
+                android:paddingEnd="10dp"
+                android:text="@string/nodes_local_default"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
             <ImageButton
                 android:id="@+id/btn_sessions"
                 android:layout_width="48dp"

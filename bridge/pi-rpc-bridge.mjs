@@ -25,7 +25,7 @@
  *    {"v":1,"kind":"pong","t":<ms>}
  *    {"v":1,"kind":"log","line":"..."}      // Pi 的 stderr 摘录，--verbose-log 时下发
  */
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { WebSocketServer } from "ws";
 import fs from "node:fs";
@@ -44,7 +44,43 @@ const arg = (name, def) => {
 };
 const flags = (name) => argv.includes(`--${name}`);
 
-const HOST = arg("host", "127.0.0.1");
+/**
+ * 解析绑定地址。默认 loopback。
+ * `--host tailscale`：读 `tailscale ip -4`（或 status --json 的 TailscaleIPs），
+ * 仅绑 100.x / fd7a: 等 Tailscale 接口，勿用 0.0.0.0。
+ */
+function resolveHost(raw) {
+  const v = raw == null || raw === true ? "127.0.0.1" : String(raw);
+  if (v !== "tailscale" && v !== "tailnet") return v;
+  try {
+    const out = execFileSync("tailscale", ["ip", "-4"], {
+      encoding: "utf8",
+      timeout: 5000,
+    }).trim();
+    const ip = out.split(/\s|\n/).find((s) => /^\d+\.\d+\.\d+\.\d+$/.test(s));
+    if (ip) return ip;
+  } catch {
+    /* fall through */
+  }
+  try {
+    const json = execFileSync("tailscale", ["status", "--json"], {
+      encoding: "utf8",
+      timeout: 8000,
+    });
+    const root = JSON.parse(json);
+    const self = root.Self || root.Status?.Self;
+    const ips = self?.TailscaleIPs || root.TailscaleIPs || [];
+    const v4 = ips.find((s) => typeof s === "string" && s.includes("."));
+    if (v4) return v4;
+  } catch (e) {
+    throw new Error(
+      `--host tailscale 需要本机已安装并登录 Tailscale（tailscale ip -4）：${e.message || e}`
+    );
+  }
+  throw new Error("--host tailscale：未能解析 Tailscale IPv4");
+}
+
+const HOST = resolveHost(arg("host", "127.0.0.1"));
 const PORT = Number(arg("port", 8945));
 const PI_BIN = arg("pi-bin", process.env.PI_BIN || findPi());
 const CWD = arg("cwd", process.env.HOME);

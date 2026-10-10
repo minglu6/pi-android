@@ -46,6 +46,7 @@ import dev.pi.android.bridge.BridgeService;
 import dev.pi.android.bridge.ModelRpc;
 import dev.pi.android.model.ChatMessage;
 import dev.pi.android.model.SlashCommand;
+import dev.pi.android.util.NodeStore;
 import dev.pi.android.util.SlashCommandStore;
 
 /**
@@ -103,6 +104,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private View scrollBottom;
     private View topBar;
     private View composerBar;
+    private TextView nodeChip;
     private LinearLayout suggestRow;
     private View slashPanel;
     private SlashCommandAdapter slashAdapter;
@@ -225,6 +227,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         });
         findViewById(R.id.btn_settings).setOnClickListener(v ->
                 startActivity(new Intent(this, SettingsActivity.class)));
+        nodeChip = findViewById(R.id.node_chip);
+        if (nodeChip != null) {
+            nodeChip.setOnClickListener(v ->
+                    startActivity(new Intent(this, NodesActivity.class)));
+            refreshNodeChip();
+        }
         View statusChip = findViewById(R.id.status_chip);
         if (statusChip != null) {
             statusChip.setOnClickListener(v -> {
@@ -340,6 +348,15 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         String prompt = intent.getStringExtra("prompt");
         if (prompt != null && !prompt.isEmpty()) pendingPrompt = prompt;
+        if (intent.getBooleanExtra("force_reconnect", false)) {
+            lastConfig = "";
+            intent.removeExtra("force_reconnect");
+        }
+    }
+
+    private void refreshNodeChip() {
+        if (nodeChip == null) return;
+        nodeChip.setText(NodeStore.active(this).name);
     }
 
     private void openUiTarget(String target) {
@@ -351,6 +368,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 break;
             case "settings":
                 startActivity(new Intent(this, SettingsActivity.class));
+                break;
+            case "nodes":
+                startActivity(new Intent(this, NodesActivity.class));
                 break;
             case "fork":
                 showForkPicker();
@@ -426,6 +446,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         super.onResume();
         resumed = true;
         restoreFromAgentState();
+        refreshNodeChip();
         if (serviceBound && service != null) {
             service.setHost(this);
             service.takePendingAsk();

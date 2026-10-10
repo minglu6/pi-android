@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Pi Android — nodes / SSH / Nerd Font preview</title>
+<style>
+  :root {
+    --pi-salmon: #F09082;
+    --pi-blue: #4D9ABF;
+    --bg-base: #0B0D10;
+    --bg-elevated: #12151A;
+    --bg-card: #161B22;
+    --text-primary: #F0F3F6;
+    --text-secondary: #9AA4B2;
+    --text-muted: #6E7681;
+    --divider: #242C38;
+    --online: #3FB950;
+    --offline: #F85149;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; gap: 28px; flex-wrap: wrap;
+    justify-content: center; padding: 28px 16px; background: #1a1a1a;
+    font-family: "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
+    color: var(--text-primary);
+  }
+  .col { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .label { color: #aaa; font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; }
+  .phone {
+    width: 320px; height: 640px; border-radius: 28px; overflow: hidden;
+    background: var(--bg-base); border: 1px solid #333; box-shadow: 0 16px 40px #0008;
+    display: flex; flex-direction: column;
+  }
+  .bar {
+    height: 56px; display: flex; align-items: center; gap: 8px;
+    padding: 0 12px; background: linear-gradient(#1a1f27, #12151a);
+    border-bottom: 1px solid var(--divider);
+  }
+  .brand { font-weight: 700; font-size: 16px; flex: 1; }
+  .chip {
+    font-size: 11px; padding: 4px 8px; border-radius: 999px;
+    background: #1e2630; color: var(--text-secondary);
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .list { flex: 1; padding: 12px; overflow: auto; }
+  .card {
+    background: var(--bg-card); border-radius: 12px; padding: 12px 14px;
+    margin-bottom: 10px; display: flex; gap: 10px; align-items: center;
+  }
+  .card .meta { flex: 1; min-width: 0; }
+  .card .name { font-size: 15px; font-weight: 600; }
+  .card .host { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .badge {
+    font-size: 10px; color: var(--pi-blue); border: 1px solid #2a4a5e;
+    padding: 2px 6px; border-radius: 6px;
+  }
+  .term {
+    flex: 1; margin: 8px; border-radius: 8px; background: #0D1117;
+    font-family: "MesloLGLDZ Nerd Font Mono", "Meslo LG L DZ", ui-monospace, monospace;
+    font-size: 12px; line-height: 1.45; padding: 10px; color: #E6EDF3;
+    white-space: pre-wrap;
+  }
+  .term .green { color: #3FB950; }
+  .term .cyan { color: #39C5CF; }
+  .term .dim { color: #6E7681; }
+  .keys {
+    display: flex; gap: 6px; padding: 8px 10px 14px; overflow-x: auto;
+    background: var(--bg-elevated);
+  }
+  .keys span {
+    flex: 0 0 auto; padding: 6px 10px; border: 1px solid #333; border-radius: 8px;
+    font-size: 12px; color: var(--text-secondary);
+  }
+  .settings-row {
+    display: flex; justify-content: space-between; padding: 14px 16px;
+    border-bottom: 1px solid var(--divider); background: var(--bg-card);
+  }
+  .settings-row small { color: var(--text-muted); display: block; margin-top: 2px; }
+</style>
+</head>
+<body>
+  <div class="col">
+    <div class="label">Chat · node chip</div>
+    <div class="phone">
+      <div class="bar">
+        <div class="brand">Pi</div>
+        <span class="chip">Mac Studio</span>
+        <span class="chip">◎</span>
+        <span class="chip">⚙</span>
+      </div>
+      <div class="list" style="color:var(--text-secondary);font-size:13px;padding-top:24px;text-align:center">
+        顶栏节点芯片 → 打开节点列表<br/>切换连接器或 SSH 终端
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="label">Nodes</div>
+    <div class="phone">
+      <div class="bar"><div class="brand">节点</div><span class="chip">＋</span></div>
+      <div class="list">
+        <div class="card">
+          <span class="dot" style="background:var(--online)"></span>
+          <div class="meta">
+            <div class="name">本机</div>
+            <div class="host">127.0.0.1:8945 · SSH u0_a@8022</div>
+          </div>
+          <span class="badge">当前聊天</span>
+        </div>
+        <div class="card">
+          <span class="dot" style="background:var(--online)"></span>
+          <div class="meta">
+            <div class="name">Mac Studio</div>
+            <div class="host">mac-studio.tailXXXX.ts.net:8945</div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="dot" style="background:var(--offline)"></span>
+          <div class="meta">
+            <div class="name">grokbot</div>
+            <div class="host">100.64.0.12:8945 · SSH ubuntu@22</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="label">SSH · MesloLGLDZ NF Mono</div>
+    <div class="phone">
+      <div class="bar"><div class="brand">终端 · Mac Studio</div><span class="chip">复制</span></div>
+      <div class="term"><span class="dim">正在连接 SSH…</span>
+<span class="green">已连接</span> ming@mac-studio
+<span class="cyan">~/code</span> <span class="dim">via</span> 󰌠 <span class="green"></span> <span class="dim"></span> 󰊢 main
+$ starship · powerline glyphs OK
+$ echo 中文 fallback · CJK
+中文 fallback · CJK
+$</div>
+      <div class="keys">
+        <span>Esc</span><span>Tab</span><span>Ctrl</span><span>↑</span><span>↓</span><span>←</span><span>→</span><span>|</span><span>~</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="label">Settings · font</div>
+    <div class="phone">
+      <div class="bar"><div class="brand">设置</div></div>
+      <div style="padding:12px;flex:1">
+        <div class="settings-row" style="border-radius:12px 12px 0 0">
+          <div>节点与 Tailscale<small>Mac Studio · 100.64.0.5:8945</small></div>
+        </div>
+        <div class="settings-row">
+          <div>终端 / 代码字体<small>MesloLGLDZ Nerd Font</small></div>
+        </div>
+        <div class="settings-row" style="border-radius:0 0 12px 12px;border-bottom:0">
+          <div>终端字号<small>13 sp（终端内可捏合缩放）</small></div>
+        </div>
+        <p style="color:var(--text-muted);font-size:12px;line-height:1.5;margin:16px 8px">
+          Meslo LG Large · 点状 0 · Mono；Apache-2.0 + MIT；Regular+Bold 约 +5 MB APK。
+        </p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

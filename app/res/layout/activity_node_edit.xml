@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/node_edit_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_base"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingBottom="32dp">
+
+        <LinearLayout
+            android:id="@+id/node_edit_top"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_toolbar"
+            android:gravity="center_vertical"
+            android:minHeight="56dp"
+            android:orientation="horizontal"
+            android:paddingStart="4dp"
+            android:paddingEnd="12dp">
+
+            <ImageButton
+                android:id="@+id/node_edit_back"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/action_back"
+                android:padding="12dp"
+                android:src="@drawable/ic_back"
+                android:tint="@color/text_primary" />
+
+            <TextView
+                android:id="@+id/node_edit_title"
+                style="@style/ToolbarTitle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/nodes_edit" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/node_edit_save"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/action_save" />
+        </LinearLayout>
+
+        <TextView
+            style="@style/SettingsSectionHeader"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingStart="16dp"
+            android:text="@string/nodes_section_connector" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp">
+
+            <TextView style="@style/SettingsLabel" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/nodes_name" />
+            <EditText android:id="@+id/node_name" style="@style/SettingsField" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="@string/nodes_name_hint" android:inputType="text" />
+
+            <TextView style="@style/SettingsLabel" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/nodes_host" />
+            <EditText android:id="@+id/node_host" style="@style/SettingsField" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="@string/nodes_host_hint" android:inputType="textUri" android:importantForAutofill="no" />
+
+            <TextView style="@style/SettingsLabel" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/nodes_connector_port" />
+            <EditText android:id="@+id/node_port" style="@style/SettingsField" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number" android:importantForAutofill="no" />
+
+            <TextView style="@style/SettingsLabel" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/settings_token_label" />
+            <EditText android:id="@+id/node_token" style="@style/SettingsField" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="@string/settings_token_hint" android:inputType="textPassword" android:importantForAutofill="no" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/nodes_connector_warn"
+                android:textColor="@color/text_muted"
+                android:textSize="12.5sp" />
+        </LinearLayout>
+
+        <TextView
+            style="@style/SettingsSectionHeader"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingStart="16dp"
+            android:text="@string/nodes_section_ssh" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp">
+
+            <TextView style="@style/SettingsLabel" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/nodes_ssh_user" />
+            <EditText android:id="@+id/node_ssh_user" style="@style/SettingsField" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="text" android:importantForAutofill="no" />
+
+            <TextView style="@style/SettingsLabel" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/nodes_ssh_port" />
+            <EditText android:id="@+id/node_ssh_port" style="@style/SettingsField" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number" android:importantForAutofill="no" />
+
+            <TextView style="@style/SettingsLabel" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/nodes_ssh_auth" />
+            <RadioGroup
+                android:id="@+id/node_ssh_auth"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <RadioButton android:id="@+id/node_auth_key" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/nodes_auth_key" />
+                <RadioButton android:id="@+id/node_auth_password" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="16dp" android:text="@string/nodes_auth_password" />
+            </RadioGroup>
+
+            <TextView style="@style/SettingsLabel" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/nodes_ssh_password" />
+            <EditText android:id="@+id/node_ssh_password" style="@style/SettingsField" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textPassword" android:importantForAutofill="no" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/node_gen_key"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/nodes_gen_key" />
+
+            <TextView
+                android:id="@+id/node_pubkey"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_composer"
+                android:fontFamily="monospace"
+                android:padding="12dp"
+                android:textColor="@color/text_secondary"
+                android:textIsSelectable="true"
+                android:textSize="12sp"
+                android:visibility="gone" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/node_copy_pubkey"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/nodes_copy_pubkey"
+                android:visibility="gone" />
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

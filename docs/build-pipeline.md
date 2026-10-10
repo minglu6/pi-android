@@ -57,6 +57,7 @@ python3 tools/fetch-aars.py \
   --root com.google.android.material:material:1.12.0 \
   --root org.jetbrains.kotlin:kotlin-stdlib:1.9.24 \
   --root com.squareup.okhttp3:okhttp:4.12.0 \
+  --root com.github.mwiede:jsch:0.2.26 \
   --root androidx.exifinterface:exifinterface:1.3.7 \
   --exclude org.jetbrains.kotlin:kotlin-stdlib-jdk7 \
   --exclude org.jetbrains.kotlin:kotlin-stdlib-jdk8 \
@@ -65,8 +66,8 @@ python3 tools/axml-package.py --all --libs libs      # 读每个 AAR 的 package
 ```
 
 `okhttp` 必须显式 `--root`：源码 `BridgeConnection` 直接 `import okhttp3.*`，传递依赖图里
-AndroidX 不会带上它。`exifinterface` 同理：`AttachmentController` 直接 import 它做图片
-EXIF 旋正，AndroidX 其它构件不传递它。
+AndroidX 不会带上它。`jsch`（mwiede 0.2.26）同理：SSH 终端 `SshSession` / `SshKeyGen` 直接
+`import com.jcraft.jsch.*`。`exifinterface`：`AttachmentController` 做图片 EXIF 旋正。
 
 ## CI（GitHub Actions）
 

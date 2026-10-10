@@ -1,0 +1,12 @@
+MesloLGLDZ Nerd Font Mono (Regular + Bold) for pi-android.
+
+Variant: Meslo LG Large, Dotted Zero (DZ), Nerd Font Mono patch
+  — MesloLGLDZNerdFontMono-Regular.ttf / -Bold.ttf from Meslo.zip
+Source: https://github.com/ryanoasis/nerd-fonts (v3.3.0)
+Upstream Meslo Font: André Berg (Apache License 2.0)
+Nerd Fonts patching code: MIT (see nerd_fonts_mit.txt)
+
+Bundled glyphs lightly subset (Latin + box/powerline + Nerd PUA) to
+trim APK; CJK falls back to system sans-serif via AppFonts.
+
+Default for SSH terminal grid and chat code blocks.

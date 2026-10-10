@@ -101,11 +101,24 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
     }
 
     public static void setToken(Context ctx, String value) {
-        prefs(ctx).edit().putString(K_TOKEN, value).apply();
+        prefs(ctx).edit().putString(K_TOKEN, value == null ? "" : value).apply();
+        try {
+            dev.pi.android.model.Node active = dev.pi.android.util.NodeStore.active(ctx);
+            dev.pi.android.util.SecretStore.put(ctx,
+                    dev.pi.android.util.SecretStore.tokenKey(active.id), value);
+            dev.pi.android.util.NodeStore.applyToLegacyConnector(ctx, active);
+        } catch (Exception ignored) {
+        }
     }
 
     public static void setPort(Context ctx, int value) {
         prefs(ctx).edit().putInt(K_PORT, value).apply();
+        try {
+            dev.pi.android.model.Node active = dev.pi.android.util.NodeStore.active(ctx);
+            active.connectorPort = value;
+            dev.pi.android.util.NodeStore.upsert(ctx, active);
+        } catch (Exception ignored) {
+        }
     }
 
     public static String configSignature(Context ctx) {
@@ -184,6 +197,27 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
         findViewById(R.id.pref_model).setOnClickListener(v -> showModelPicker());
         findViewById(R.id.pref_thinking).setOnClickListener(v -> showThinkingPicker());
         findViewById(R.id.pref_theme).setOnClickListener(v -> showThemePicker());
+        View prefNodes = findViewById(R.id.pref_nodes);
+        if (prefNodes != null) {
+            prefNodes.setOnClickListener(v ->
+                    startActivity(new Intent(this, NodesActivity.class)));
+            TextView nodesVal = findViewById(R.id.pref_nodes_value);
+            if (nodesVal != null) {
+                nodesVal.setText(dev.pi.android.util.NodeStore.active(this).name
+                        + " · " + host(this) + ":" + port(this));
+            }
+        }
+        TextView termFontVal = findViewById(R.id.pref_term_font_value);
+        TextView termSizeVal = findViewById(R.id.pref_term_size_value);
+        refreshTermFontLabels(termFontVal, termSizeVal);
+        View prefTermFont = findViewById(R.id.pref_term_font);
+        if (prefTermFont != null) {
+            prefTermFont.setOnClickListener(v -> showTermFontPicker(termFontVal, termSizeVal));
+        }
+        View prefTermSize = findViewById(R.id.pref_term_size);
+        if (prefTermSize != null) {
+            prefTermSize.setOnClickListener(v -> showTermSizePicker(termSizeVal));
+        }
 
         AgentState.get().addListener(agentListener);
 
@@ -196,6 +230,21 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
         super.onResume();
         visible = true;
         applyAgentStateToUi();
+        // 从 Nodes 页返回时刷新 host/port/token 与节点摘要
+        if (hostEdit != null) hostEdit.setText(host(this));
+        if (portEdit != null) portEdit.setText(String.valueOf(port(this)));
+        if (tokenEdit != null) {
+            tokenEdit.setText(token(this));
+            applyTokenVisibility(tokenVisible);
+        }
+        TextView nodesVal = findViewById(R.id.pref_nodes_value);
+        if (nodesVal != null) {
+            nodesVal.setText(dev.pi.android.util.NodeStore.active(this).name
+                    + " · " + host(this) + ":" + port(this));
+        }
+        TextView termFontVal = findViewById(R.id.pref_term_font_value);
+        TextView termSizeVal = findViewById(R.id.pref_term_size_value);
+        refreshTermFontLabels(termFontVal, termSizeVal);
         if (serviceBound && service != null) {
             service.setHost(this);
             refreshFromService();
@@ -274,11 +323,24 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
             Toast.makeText(this, e.getMessage(), Toast.LENGTH_SHORT).show();
             return;
         }
+        String hostVal = hostEdit.getText().toString().trim();
+        String tokenVal = tokenEdit.getText().toString().trim();
         prefs(this).edit()
-                .putString(K_HOST, hostEdit.getText().toString().trim())
+                .putString(K_HOST, hostVal)
                 .putInt(K_PORT, portVal)
-                .putString(K_TOKEN, tokenEdit.getText().toString().trim())
+                .putString(K_TOKEN, tokenVal)
                 .apply();
+        // 同步到当前激活节点，避免 Nodes 页与旧连接器字段分叉
+        try {
+            dev.pi.android.model.Node active = dev.pi.android.util.NodeStore.active(this);
+            active.host = hostVal.isEmpty() ? "127.0.0.1" : hostVal;
+            active.connectorPort = portVal;
+            dev.pi.android.util.NodeStore.upsert(this, active);
+            dev.pi.android.util.SecretStore.put(this,
+                    dev.pi.android.util.SecretStore.tokenKey(active.id), tokenVal);
+            dev.pi.android.util.NodeStore.applyToLegacyConnector(this, active);
+        } catch (Exception ignored) {
+        }
     }
 
     private void refreshThemeLabel() {
@@ -302,6 +364,61 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
             applySavedTheme(this);
             refreshThemeLabel();
         });
+    }
+
+    private void refreshTermFontLabels(@Nullable TextView fontVal, @Nullable TextView sizeVal) {
+        if (fontVal != null) {
+            fontVal.setText(dev.pi.android.util.AppFonts.FAMILY_SYSTEM.equals(
+                    dev.pi.android.util.AppFonts.family(this))
+                    ? R.string.settings_term_font_system
+                    : R.string.settings_term_font_nerd);
+        }
+        if (sizeVal != null) {
+            sizeVal.setText(getString(R.string.settings_term_size_fmt,
+                    dev.pi.android.util.AppFonts.sizeSp(this)));
+        }
+    }
+
+    private void showTermFontPicker(TextView fontVal, TextView sizeVal) {
+        java.util.List<dev.pi.android.model.PickerItem> items = new java.util.ArrayList<>();
+        String cur = dev.pi.android.util.AppFonts.family(this);
+        items.add(dev.pi.android.model.PickerItem.row(
+                getString(R.string.settings_term_font_nerd),
+                getString(R.string.settings_term_font_desc_nerd),
+                dev.pi.android.util.AppFonts.FAMILY_NERD,
+                dev.pi.android.util.AppFonts.FAMILY_NERD.equals(cur)));
+        items.add(dev.pi.android.model.PickerItem.row(
+                getString(R.string.settings_term_font_system),
+                getString(R.string.settings_term_font_desc_system),
+                dev.pi.android.util.AppFonts.FAMILY_SYSTEM,
+                dev.pi.android.util.AppFonts.FAMILY_SYSTEM.equals(cur)));
+        PickerSheet sheet = new PickerSheet(this, R.string.settings_term_font, false, item -> {
+            if (item.payload instanceof String) {
+                dev.pi.android.util.AppFonts.setFamily(this, (String) item.payload);
+                refreshTermFontLabels(fontVal, sizeVal);
+            }
+        });
+        sheet.setItems(items);
+        sheet.show();
+    }
+
+    private void showTermSizePicker(TextView sizeVal) {
+        final float[] choices = {10f, 12f, 13f, 14f, 16f, 18f, 20f, 24f};
+        java.util.List<dev.pi.android.model.PickerItem> items = new java.util.ArrayList<>();
+        float cur = dev.pi.android.util.AppFonts.sizeSp(this);
+        for (float sp : choices) {
+            items.add(dev.pi.android.model.PickerItem.row(
+                    String.format(java.util.Locale.US, "%.0f sp", sp), null, sp,
+                    Math.abs(sp - cur) < 0.1f));
+        }
+        PickerSheet sheet = new PickerSheet(this, R.string.settings_term_size, false, item -> {
+            if (item.payload instanceof Float) {
+                dev.pi.android.util.AppFonts.setSizeSp(this, (Float) item.payload);
+                refreshTermFontLabels(null, sizeVal);
+            }
+        });
+        sheet.setItems(items);
+        sheet.show();
     }
 
     private void showModelPicker() {

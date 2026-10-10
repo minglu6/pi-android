@@ -50,13 +50,16 @@ python3 tools/fetch-aars.py \
   --root com.google.android.material:material:1.12.0 \
   --root org.jetbrains.kotlin:kotlin-stdlib:1.9.24 \
   --root com.squareup.okhttp3:okhttp:4.12.0 \
+  --root com.github.mwiede:jsch:0.2.26 \
+  --root androidx.exifinterface:exifinterface:1.3.7 \
   --exclude org.jetbrains.kotlin:kotlin-stdlib-jdk7 \
   --exclude org.jetbrains.kotlin:kotlin-stdlib-jdk8 \
   --exclude org.jetbrains.kotlin:kotlin-stdlib-common
 python3 tools/axml-package.py --all --libs libs
 ```
 
-`okhttp` is required (`BridgeConnection` imports `okhttp3`). `app/libs/` is gitignored;
+`okhttp` is required (`BridgeConnection` imports `okhttp3`). `jsch` is required
+for the in-app SSH terminal (`SshSession`). `app/libs/` is gitignored;
 rebuild from this command on every clean checkout.
 
 Or: `make deps` from the repo root (see `Makefile`).

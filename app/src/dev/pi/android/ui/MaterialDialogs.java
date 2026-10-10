@@ -68,4 +68,25 @@ public final class MaterialDialogs {
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
     }
+
+    public static void promptCustom(@NonNull Context ctx, @StringRes int titleRes,
+                                    @NonNull android.view.View custom,
+                                    @NonNull Runnable onOk) {
+        float density = ctx.getResources().getDisplayMetrics().density;
+        int pad = Math.round(20 * density);
+        FrameLayout wrap = new FrameLayout(ctx);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(pad, Math.round(8 * density), pad, 0);
+        if (custom.getParent() instanceof ViewGroup) {
+            ((ViewGroup) custom.getParent()).removeView(custom);
+        }
+        wrap.addView(custom, lp);
+        new MaterialAlertDialogBuilder(ctx, R.style.PiMaterialAlertDialog)
+                .setTitle(titleRes)
+                .setView(wrap)
+                .setPositiveButton(android.R.string.ok, (d, w) -> onOk.run())
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
 }

@@ -2,9 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="dev.pi.android">
 
-    <!-- 桥在 Termux 里，只连本机 loopback；INTERNET 是 WebSocket 到 127.0.0.1 所必需。
-         应用本身不向公网发请求，桥也只绑 loopback + token。 -->
+    <!-- INTERNET：本机 loopback 或 Tailscale 100.x / MagicDNS 上的连接器与 SSH。 -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- 前台服务：select/confirm/input/editor 会**阻塞 Pi**，App 进后台时也要能回答，
@@ -29,6 +29,22 @@
         <activity
             android:name=".ui.SettingsActivity"
             android:theme="@style/AppTheme"
+            android:exported="false" />
+
+        <activity
+            android:name=".ui.NodesActivity"
+            android:theme="@style/AppTheme"
+            android:exported="false" />
+
+        <activity
+            android:name=".ui.NodeEditActivity"
+            android:theme="@style/AppTheme"
+            android:exported="false" />
+
+        <activity
+            android:name=".ui.TerminalActivity"
+            android:theme="@style/AppTheme"
+            android:windowSoftInputMode="adjustResize"
             android:exported="false" />
 
         <activity

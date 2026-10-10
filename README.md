@@ -37,13 +37,16 @@ adb shell am start -n dev.pi.android/.ui.MainActivity --es token "$TOKEN"
 
 ```
 pi-android.apk                      Java 原生 UI · 包名 dev.pi.android · 官方 Pi logo
-   │  ws://127.0.0.1:8945  (loopback + token)
+   │  ws://127.0.0.1:8945  或  ws://100.x:8945  (token)
    ▼
-Termux: pi-rpc-bridge  →  bridge/pi-rpc-bridge.mjs  →  pi --mode rpc
+本机 Termux / 远程节点: pi-rpc-bridge  →  bridge/pi-rpc-bridge.mjs  →  pi --mode rpc
                                                           (stdin/stdout JSONL)
    ▼
 现有 ~/.pi/agent：模型认证 / Skills / Extensions / 历史会话 全部保留
 ```
+
+远程节点：连接器加 `--host tailscale`（或 `--host $(tailscale ip -4)`），App「节点」页填
+MagicDNS / `100.x`。步骤见 [`docs/nodes-ssh.md`](docs/nodes-ssh.md)。
 
 APK 关闭不会销毁 Termux 里的任何东西；反过来，Termux 里的 Pi 也不用为 APK 活着。
 桥默认使用 Pi 的持久会话；显式 `--no-session` 才是临时会话，进程结束后不会保留。
@@ -74,12 +77,15 @@ export ANDROID_HOME=/path/to/android-sdk
 export PATH="$ANDROID_HOME/build-tools/35.0.0:$PATH"
 export ANDROID_JAR="$ANDROID_HOME/platforms/android-36/android.jar"
 
-make deps    # fetch-aars（含 okhttp）+ axml-package
+make deps    # fetch-aars（含 okhttp + jsch）+ axml-package
 make apk     # → app/out/pi-android.apk
 ```
 
-依赖 roots 与 CI 完全一致（含 `com.squareup.okhttp3:okhttp:4.12.0`），见
+依赖 roots 与 CI 完全一致（含 `okhttp` 与 SSH 用的 `com.github.mwiede:jsch:0.2.26`），见
 [`CONTRIBUTING.md`](CONTRIBUTING.md) 与 [`docs/build-pipeline.md`](docs/build-pipeline.md)。
+
+内置 MesloLGLDZ Nerd Font Mono（Regular+Bold；Meslo Apache-2.0 + Nerd Fonts MIT）
+用于 SSH 终端与聊天代码块；约 +5 MB APK。设置可改系统等宽 / 字号；终端支持捏合缩放。
 
 ## Download APK
 
@@ -116,6 +122,8 @@ gh run watch
 - 首启空状态（无 Token / 未连接引导）、adaptive + monochrome 图标
 - GitHub Actions 自动打 APK
 - 日用聊天打磨：Markdown/代码块、时间戳、断线横幅、粘底滚动、会话重命名/删除
+- Tailscale 节点列表 + 切换连接器；应用内 SSH 终端（JSch PTY + ANSI）
+- MesloLGLDZ Nerd Font Mono（终端 / 代码块；可改系统等宽与字号）
 
 ### 已知限制 / 未做
 
@@ -123,12 +131,13 @@ gh run watch
 - `setWidget` / 大文本编辑体验仍简陋
 - 多窗口 / 折叠专门布局
 - 厂商激进杀进程无法 100% 对抗（依赖前台通知保活）
+- SSH 终端为轻量缓冲，无完整 scrollback / 选区编辑
 
 产品方向与大功能请先讨论，不要在本仓库默默扩 scope。
 
 ## 安全边界
 
-- 连接器只绑 `127.0.0.1`，token 必填（文件权限建议 600）
+- 连接器默认只绑 `127.0.0.1`；远程用 `--host tailscale` 只听 Tailscale 接口。token 必填（文件权限建议 600）
 - 命令白名单默认**不含直接 `bash` RPC**；`--allow-bash` 显式开启。该白名单不限制 prompt 驱动的 agent 工具，不是工具权限沙箱
 - 依赖 sha256 清单：`app/libs/manifest.json`（重建后核对）
 

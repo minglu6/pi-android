@@ -41,8 +41,11 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
+import android.graphics.Typeface;
+
 import dev.pi.android.R;
 import dev.pi.android.model.ChatMessage;
+import dev.pi.android.util.AppFonts;
 import dev.pi.android.util.MarkdownLite;
 
 /**
@@ -329,7 +332,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                     break;
                 case TYPE_AGENT:
                 default: {
-                    CharSequence body = MarkdownLite.render(msg.text, codeBg, codeFg);
+                    CharSequence body = MarkdownLite.render(ctx, msg.text, codeBg, codeFg);
                     if (msg.streaming) {
                         android.text.SpannableStringBuilder sb =
                                 new android.text.SpannableStringBuilder(body);
@@ -519,6 +522,11 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
             }
 
             final boolean expanded = Boolean.TRUE.equals(toolExpanded.get(key));
+
+            Typeface mono = AppFonts.mono(ctx, false);
+            toolGlyph.setTypeface(mono);
+            toolCommand.setTypeface(mono);
+            toolOutput.setTypeface(mono);
 
             int stateColor = stateColor(state);
             toolStateBar.setBackgroundColor(stateColor);
