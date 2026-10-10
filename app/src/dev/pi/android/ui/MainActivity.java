@@ -21,8 +21,12 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.appcompat.widget.Toolbar;
+import androidx.appcompat.widget.PopupMenu;
 import androidx.core.content.ContextCompat;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -84,7 +88,11 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private MaterialButton emptyAction;
     private View reconnectBanner;
     private TextView reconnectText;
+    private MaterialButton reconnectBtn;
     private View scrollBottom;
+    private View topBar;
+    private View composerBar;
+    private LinearLayout suggestRow;
     private BridgeService service;
     private boolean serviceBound;
     private boolean resumed;
@@ -119,13 +127,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         setContentView(R.layout.activity_main);
-
-        Toolbar toolbar = findViewById(R.id.toolbar);
-        setSupportActionBar(toolbar);
-        if (getSupportActionBar() != null) {
-            getSupportActionBar().setDisplayShowTitleEnabled(false);
-        }
 
         statusText = findViewById(R.id.status_text);
         statusDot = findViewById(R.id.status_dot);
@@ -137,15 +140,22 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         emptyAction = findViewById(R.id.empty_action);
         reconnectBanner = findViewById(R.id.reconnect_banner);
         reconnectText = findViewById(R.id.reconnect_text);
+        reconnectBtn = findViewById(R.id.reconnect_btn);
         scrollBottom = findViewById(R.id.scroll_bottom);
+        topBar = findViewById(R.id.top_bar);
+        composerBar = findViewById(R.id.composer_bar);
+        suggestRow = findViewById(R.id.suggest_row);
         actions = findViewById(R.id.actions);
         actionsTitle = findViewById(R.id.actions_title);
         actionsInput = findViewById(R.id.actions_input);
         actionsButtons = findViewById(R.id.actions_buttons);
 
+        applyWindowInsets();
+        setupSuggestChips();
+
         list = findViewById(R.id.messages);
         LinearLayoutManager lm = new LinearLayoutManager(this);
-        lm.setStackFromEnd(true);
+        lm.setStackFromEnd(false);
         list.setLayoutManager(lm);
         adapter = new MessageAdapter(size -> {
             refreshEmptyState();
@@ -167,16 +177,19 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         findViewById(R.id.btn_sessions).setOnClickListener(v -> {
             if (!isConnected()) {
                 Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+                showConnectionBanner(getString(R.string.bridge_not_connected), true);
                 return;
             }
             loadSessions();
         });
+        findViewById(R.id.btn_menu).setOnClickListener(this::showOverflowMenu);
         emptyAction.setOnClickListener(v ->
                 startActivity(new Intent(this, SettingsActivity.class)));
-        findViewById(R.id.reconnect_btn).setOnClickListener(v -> {
+        reconnectBtn.setOnClickListener(v -> {
             if (!SettingsActivity.hasToken(this)) {
                 startActivity(new Intent(this, SettingsActivity.class));
             } else {
+                setConnectionVisual("connecting", getString(R.string.status_reconnecting));
                 reconnect();
             }
         });
@@ -434,12 +447,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             reconnectBanner.setVisibility(View.GONE);
             return;
         }
-        reconnectBanner.setVisibility(View.VISIBLE);
-        if (reconnectText != null) {
-            reconnectText.setText(SettingsActivity.hasToken(this)
-                    ? R.string.reconnect_banner
-                    : R.string.reconnect_banner_token);
-        }
+        boolean needToken = !SettingsActivity.hasToken(this);
+        showConnectionBanner(
+                getString(needToken ? R.string.reconnect_banner_token : R.string.reconnect_banner),
+                needToken);
     }
 
     private void applySessionTitle() {
@@ -520,40 +531,50 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         updateSendEnabled();
         if (!show) return;
 
+        if (suggestRow != null) {
+            suggestRow.setVisibility(View.GONE);
+        }
         if (!SettingsActivity.hasToken(this)) {
             emptyTitle.setText(R.string.empty_need_token_title);
             emptyBody.setText(R.string.empty_need_token_body);
             emptyAction.setVisibility(View.VISIBLE);
             emptyAction.setText(R.string.empty_open_settings);
+            emptyAction.setOnClickListener(v ->
+                    startActivity(new Intent(this, SettingsActivity.class)));
         } else if (!isConnected()) {
-            emptyTitle.setText(R.string.status_offline);
-            emptyBody.setText(R.string.empty_body);
+            emptyTitle.setText(R.string.empty_offline_title);
+            emptyBody.setText(R.string.empty_offline_body);
             emptyAction.setVisibility(View.VISIBLE);
-            emptyAction.setText(R.string.settings);
+            emptyAction.setText(R.string.reconnect_action);
+            emptyAction.setOnClickListener(v -> {
+                setConnectionVisual("connecting", getString(R.string.status_reconnecting));
+                reconnect();
+            });
         } else {
             emptyTitle.setText(R.string.empty_title);
             emptyBody.setText(R.string.empty_body);
             emptyAction.setVisibility(View.GONE);
+            if (suggestRow != null) suggestRow.setVisibility(View.VISIBLE);
         }
     }
 
     // ---------- 菜单 ----------
 
-    @Override
-    public boolean onCreateOptionsMenu(Menu menu) {
-        menu.add(Menu.NONE, 1, 100, R.string.action_new_session);
-        menu.add(Menu.NONE, 2, 200, R.string.action_stop);
-        menu.add(Menu.NONE, 3, 300, R.string.action_reload);
-        menu.add(Menu.NONE, 5, 500, R.string.action_model);
-        menu.add(Menu.NONE, 6, 600, R.string.action_thinking);
-        menu.add(Menu.NONE, 7, 700, R.string.action_sessions);
-        menu.add(Menu.NONE, 8, 800, R.string.action_fork);
-        menu.add(Menu.NONE, 4, 400, R.string.settings);
-        return true;
+    private void showOverflowMenu(View anchor) {
+        PopupMenu popup = new PopupMenu(this, anchor);
+        popup.getMenu().add(Menu.NONE, 1, 100, R.string.action_new_session);
+        popup.getMenu().add(Menu.NONE, 2, 200, R.string.action_stop);
+        popup.getMenu().add(Menu.NONE, 3, 300, R.string.action_reload);
+        popup.getMenu().add(Menu.NONE, 5, 500, R.string.action_model);
+        popup.getMenu().add(Menu.NONE, 6, 600, R.string.action_thinking);
+        popup.getMenu().add(Menu.NONE, 7, 700, R.string.action_sessions);
+        popup.getMenu().add(Menu.NONE, 8, 800, R.string.action_fork);
+        popup.getMenu().add(Menu.NONE, 4, 400, R.string.settings);
+        popup.setOnMenuItemClickListener(this::onMenuItem);
+        popup.show();
     }
 
-    @Override
-    public boolean onOptionsItemSelected(@NonNull MenuItem item) {
+    private boolean onMenuItem(@NonNull MenuItem item) {
         switch (item.getItemId()) {
             case 1:
                 startNewSession();
@@ -575,14 +596,97 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 showForkPicker();
                 return true;
             case 3:
+                setConnectionVisual("connecting", getString(R.string.status_reconnecting));
                 reconnect();
                 return true;
             case 4:
                 startActivity(new Intent(this, SettingsActivity.class));
                 return true;
             default:
-                return super.onOptionsItemSelected(item);
+                return false;
         }
+    }
+
+    private void applyWindowInsets() {
+        View root = findViewById(R.id.root);
+        final float density = getResources().getDisplayMetrics().density;
+        final int padH = Math.round(12 * density);
+        final int padTop = Math.round(10 * density);
+        final int padEnd = Math.round(10 * density);
+        ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {
+            Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            if (topBar != null) {
+                topBar.setPadding(0, bars.top, 0, 0);
+            }
+            if (composerBar != null) {
+                composerBar.setPadding(padH, padTop, padEnd, bars.bottom + padTop);
+            }
+            return insets;
+        });
+    }
+
+    private void setupSuggestChips() {
+        if (suggestRow == null) return;
+        suggestRow.removeAllViews();
+        addSuggestChip(R.string.suggest_explain);
+        addSuggestChip(R.string.suggest_plan);
+        addSuggestChip(R.string.suggest_debug);
+    }
+
+    private void addSuggestChip(int labelRes) {
+        TextView chip = new TextView(this);
+        chip.setText(labelRes);
+        chip.setTextColor(ContextCompat.getColor(this, R.color.text_secondary));
+        chip.setTextSize(14f);
+        chip.setBackgroundResource(R.drawable.bg_suggest_chip);
+        int padH = (int) (14 * getResources().getDisplayMetrics().density);
+        int padV = (int) (10 * getResources().getDisplayMetrics().density);
+        chip.setPadding(padH, padV, padH, padV);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = (int) (8 * getResources().getDisplayMetrics().density);
+        chip.setLayoutParams(lp);
+        chip.setOnClickListener(v -> {
+            if (!isConnected()) {
+                showConnectionBanner(getString(R.string.bridge_not_connected), true);
+                return;
+            }
+            composer.setText(getString(labelRes));
+            composer.setSelection(composer.getText().length());
+            onSendOrStop();
+        });
+        suggestRow.addView(chip);
+    }
+
+    /** 连接/可选命令错误走横幅，不污染聊天流。 */
+    private void showConnectionBanner(String message, boolean goSettings) {
+        if (reconnectBanner == null) return;
+        reconnectBanner.setVisibility(View.VISIBLE);
+        if (reconnectText != null) reconnectText.setText(message);
+        if (reconnectBtn != null) {
+            reconnectBtn.setText(goSettings ? R.string.go_settings : R.string.reconnect_action);
+        }
+    }
+
+    private static boolean isOptionalRpc(String command) {
+        return "get_session_name".equals(command)
+                || "get_session_stats".equals(command)
+                || "export_html".equals(command);
+    }
+
+    private static String friendlyConnectionError(@Nullable Throwable t) {
+        if (t == null) return null;
+        String msg = t.getMessage() == null ? "" : t.getMessage();
+        String lower = msg.toLowerCase(java.util.Locale.US);
+        if (lower.contains("pong") || lower.contains("ping") || lower.contains("timeout")
+                || lower.contains("timed out")) {
+            return null; // caller uses reconnect_banner_timeout
+        }
+        if (lower.contains("failed to connect") || lower.contains("connection refused")
+                || lower.contains("econnrefused")) {
+            return null;
+        }
+        return null; // never leak raw English into UI
     }
 
     // ---------- 连接器事件 ----------
@@ -613,9 +717,15 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             case "offline":
             default:
                 setStreaming(false);
-                setConnectionVisual("offline", error != null && !error.isEmpty()
-                        ? getString(R.string.status_offline_with, error)
-                        : getString(R.string.status_offline));
+                setConnectionVisual("offline", getString(R.string.status_offline));
+                showConnectionBanner(
+                        SettingsActivity.hasToken(this)
+                                ? getString(R.string.reconnect_banner)
+                                : getString(R.string.reconnect_banner_token),
+                        !SettingsActivity.hasToken(this));
+                if (error != null && !error.isEmpty()) {
+                    android.util.Log.w(TAG, "offline: " + error);
+                }
                 refreshEmptyState();
                 break;
         }
@@ -624,7 +734,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     @Override
     public void onResponse(String id, boolean ok, String command, @Nullable JSONObject data, @Nullable String error) {
         if (!ok) {
-            adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, command + " 失败：" + error));
+            android.util.Log.w(TAG, "rpc fail " + command + ": " + error);
+            if (isOptionalRpc(command)) return;
+            // 未知/失败命令：Toast + 横幅，不写进聊天气泡
+            Toast.makeText(this, R.string.rpc_failed, Toast.LENGTH_SHORT).show();
             return;
         }
         if ("list_sessions".equals(command)) {
@@ -647,7 +760,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             return;
         }
         if ("set_session_name".equals(command)) {
-            rpc("get_session_name", null);
+            // 名字已在本地乐观更新；连接器也会本地跟踪
+            applySessionTitle();
             return;
         }
         if ("get_session_name".equals(command) && data != null) {
@@ -657,7 +771,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         if ("switch_session".equals(command) && data != null) {
             if (data.optBoolean("cancelled", false)) {
-                adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "切换会话被扩展取消了。"));
+                Toast.makeText(this, R.string.rpc_failed, Toast.LENGTH_SHORT).show();
             } else {
                 stickToBottom = true;
                 rpc("get_messages", null);
@@ -705,10 +819,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         if ("fork".equals(command) && data != null) {
             if (data.optBoolean("cancelled", false)) {
-                adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "fork 被扩展取消了。"));
+                Toast.makeText(this, R.string.rpc_failed, Toast.LENGTH_SHORT).show();
             } else {
-                adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM,
-                        "已 fork，从这条消息继续：" + data.optString("text", "")));
                 rpc("get_messages", null);
             }
             return;
@@ -718,7 +830,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             currentSessionName = "";
             applySessionTitle();
             adapter.clear();
-            adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, getString(R.string.new_session_started)));
             stickToBottom = true;
             refreshEmptyState();
             return;
@@ -775,14 +886,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                     prefix + ev.optString("message", "")));
             return;
         }
-        // extension_ui_request 由 BridgeService 处理；这里只记一条可见线索
         if ("extension_ui_request".equals(type)) {
-            String method = ev.optString("method");
-            if ("select".equals(method) || "confirm".equals(method)
-                    || "input".equals(method) || "editor".equals(method)) {
-                adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM,
-                        "扩展请求 " + method + "：" + ev.optString("title", ev.optString("message", ""))));
-            }
+            // BridgeService 负责作答；不必再往聊天流塞调试 INFO
             return;
         }
         android.util.Log.i(TAG, "event " + type);
@@ -862,28 +967,27 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 return;
             case "auto_retry_end":
                 if (!ev.optBoolean("success", true)) {
-                    adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM,
-                            "重试失败：" + ev.optString("finalError")));
+                    android.util.Log.w(TAG, "auto_retry failed: " + ev.optString("finalError"));
+                    Toast.makeText(this, R.string.rpc_failed, Toast.LENGTH_SHORT).show();
                 }
                 return;
             case "session_info_changed":
                 currentSessionName = ev.optString("name", currentSessionName);
                 applySessionTitle();
-                adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM,
-                        "会话名：" + ev.optString("name")));
                 return;
             default:
-                if (type.endsWith("_start") || type.endsWith("_end")) {
-                    setConnectionVisual("online", type);
-                }
                 break;
         }
     }
 
     @Override
     public void onFailure(@Nullable Throwable t) {
-        adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM,
-                getString(R.string.connection_failed, t == null ? "?" : t.getMessage())));
+        android.util.Log.w(TAG, "connection failure", t);
+        setStreaming(false);
+        setConnectionVisual("offline", getString(R.string.status_offline));
+        String msg = getString(R.string.reconnect_banner_timeout);
+        friendlyConnectionError(t); // maps known patterns; raw never shown
+        showConnectionBanner(msg, false);
         refreshEmptyState();
     }
 
@@ -928,8 +1032,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             });
             actionsButtons.addView(b);
         }
-        adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM,
-                "扩展提问：" + title + "（" + getString(R.string.ext_answer_hint) + "）"));
     }
 
     private void hideExtensionActions() {
@@ -1114,8 +1216,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
         }
         if (history.isEmpty()) {
+            // 空会话走 empty state + 建议 chips，不往聊天流塞 SYSTEM 气泡
             adapter.clear();
-            adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, getString(R.string.session_empty)));
         } else {
             adapter.replaceAll(history);
         }
@@ -1136,7 +1238,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         applySessionTitle();
         rpc("new_session", null);
         adapter.clear();
-        adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, getString(R.string.new_session_started)));
         stickToBottom = true;
         refreshEmptyState();
     }
@@ -1159,8 +1260,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                         throw new IllegalStateException("set_model params", e);
                     }
                     rpc("set_model", params);
-                    adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM,
-                            "切换到模型 " + ref[0] + " / " + ref[1]));
+                    Toast.makeText(this, ref[0] + " / " + ref[1], Toast.LENGTH_SHORT).show();
                     dialog.dismiss();
                 })
                 .setNegativeButton(android.R.string.cancel, null)

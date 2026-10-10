@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Pi Android — chat UX redesign preview</title>
+<style>
+  :root {
+    --pi-salmon: #F09082;
+    --pi-blue: #4D9ABF;
+    --pi-amber: #F1BE58;
+    --bg-base: #0B0D10;
+    --bg-elevated: #12151A;
+    --bg-composer: #1A1F27;
+    --bg-composer-stroke: #2A323E;
+    --bg-bubble-user: #244A6E;
+    --bg-system: #1A2028;
+    --bg-suggest: #161B22;
+    --text-primary: #F0F3F6;
+    --text-secondary: #9AA4B2;
+    --text-muted: #6E7681;
+    --divider: #242C38;
+    --status-online: #3FB950;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    gap: 32px;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 32px 16px;
+    background: #1a1a1a;
+    font-family: "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
+    color: var(--text-primary);
+  }
+  .col { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .label { color: #aaa; font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .phone {
+    width: 360px;
+    height: 720px;
+    border-radius: 28px;
+    overflow: hidden;
+    border: 2px solid #333;
+    background: var(--bg-base);
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0,0,0,.45);
+  }
+  .status-bar {
+    height: 28px;
+    padding: 0 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11px;
+    color: #ddd;
+    background: var(--bg-elevated);
+  }
+  .toolbar {
+    background: var(--bg-elevated);
+    padding: 8px 6px 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid var(--divider);
+  }
+  .logo {
+    width: 26px; height: 26px; border-radius: 6px;
+    background: conic-gradient(var(--pi-salmon), var(--pi-blue), var(--pi-amber), var(--pi-salmon));
+    flex-shrink: 0;
+  }
+  .titles { flex: 1; min-width: 0; }
+  .titles h1 {
+    margin: 0; font-size: 18px; font-weight: 700; letter-spacing: 0.01em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    margin-top: 2px; padding: 2px 8px; border-radius: 999px;
+    background: #1C2430; font-size: 12px; color: var(--text-secondary);
+  }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--status-online); }
+  .icon-btn {
+    width: 44px; height: 44px; border: 0; background: transparent;
+    color: var(--text-secondary); font-size: 18px; cursor: default;
+  }
+  .banner {
+    display: none;
+    padding: 10px 14px;
+    background: #2a1816;
+    color: var(--pi-salmon);
+    font-size: 13px;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .banner.show { display: flex; }
+  .banner button {
+    border: 0; background: transparent; color: var(--pi-blue);
+    font-size: 13px; font-weight: 600;
+  }
+  .chat {
+    flex: 1; overflow: auto; padding: 8px 0 12px;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .sys {
+    align-self: center; margin: 8px 32px;
+    padding: 6px 12px; border-radius: 20px;
+    background: var(--bg-system); color: var(--text-muted);
+    font-size: 12.5px; text-align: center;
+  }
+  .user {
+    align-self: flex-end; margin: 6px 16px 6px 48px;
+    padding: 10px 14px; border-radius: 18px 18px 6px 18px;
+    background: var(--bg-bubble-user); font-size: 15.5px; line-height: 1.28;
+    max-width: 82%;
+  }
+  .agent {
+    display: flex; gap: 12px; padding: 10px 16px 10px 14px;
+  }
+  .agent .avatar {
+    width: 28px; height: 28px; border-radius: 6px; flex-shrink: 0; margin-top: 2px;
+    background: conic-gradient(var(--pi-salmon), var(--pi-blue), var(--pi-amber), var(--pi-salmon));
+  }
+  .agent .body {
+    flex: 1; font-size: 16px; line-height: 1.35; color: var(--text-primary);
+  }
+  .empty {
+    flex: 1; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; padding: 28px; text-align: center;
+  }
+  .empty .logo-lg {
+    width: 56px; height: 56px; border-radius: 12px;
+    background: conic-gradient(var(--pi-salmon), var(--pi-blue), var(--pi-amber), var(--pi-salmon));
+  }
+  .empty h2 { margin: 18px 0 8px; font-size: 20px; }
+  .empty p { margin: 0; color: var(--text-secondary); font-size: 14px; line-height: 1.25; }
+  .suggest {
+    margin-top: 22px; display: flex; flex-direction: column; gap: 8px; width: 100%;
+  }
+  .suggest button {
+    width: 100%; padding: 12px 14px; border-radius: 16px;
+    border: 1px solid var(--divider); background: var(--bg-suggest);
+    color: var(--text-secondary); font-size: 14px; text-align: left;
+  }
+  .composer {
+    display: flex; gap: 8px; align-items: flex-end;
+    padding: 10px 10px 18px 12px;
+    background: var(--bg-elevated);
+    border-top: 1px solid var(--divider);
+  }
+  .composer input {
+    flex: 1; min-height: 48px; border-radius: 24px;
+    border: 1px solid var(--bg-composer-stroke); background: var(--bg-composer);
+    color: var(--text-primary); padding: 12px 16px; font-size: 16px;
+  }
+  .composer input::placeholder { color: var(--text-muted); }
+  .send {
+    width: 48px; height: 48px; border-radius: 50%; border: 0;
+    background: var(--pi-blue); color: #0E1116; font-size: 18px;
+  }
+  .send:disabled { opacity: 0.45; }
+  /* before (debug) */
+  .before .chat { padding-top: 180px; }
+  .before .dbg {
+    margin: 8px 12px; font-size: 11px; color: #8B949E;
+  }
+  .before .dbg-bubble {
+    margin: 0 12px 10px; padding: 10px 12px; border-radius: 8px;
+    background: #1a1f27; color: #c9d1d9; font-size: 13px; line-height: 1.35;
+  }
+  .before .dbg.you { color: #4D9ABF; text-align: right; }
+  .before .dbg.pi { color: #F09082; }
+  .before .user-old {
+    margin-left: auto; margin-right: 12px; max-width: 60%;
+    background: #1e3a5f; border-radius: 8px; padding: 8px 12px;
+  }
+</style>
+</head>
+<body>
+  <div class="col">
+    <div class="label">Before (feedback screenshot)</div>
+    <div class="phone before">
+      <div class="status-bar"><span>13:20</span><span>97%</span></div>
+      <div class="toolbar" style="padding-top:0;height:40px;overflow:hidden">
+        <div class="logo"></div>
+        <div class="chip" style="margin:0"><div class="dot"></div>GPT-6.1 Sol · high</div>
+        <button class="icon-btn">◷</button>
+        <button class="icon-btn">⋮</button>
+      </div>
+      <div class="chat">
+        <div class="dbg">INFO  13:19</div>
+        <div class="dbg-bubble">连接失败：sent ping but didn't receive pong within 25000ms (after 0 successful ping/pongs)（Termux 里跑起连接器了吗？）</div>
+        <div class="dbg">INFO  13:20</div>
+        <div class="dbg-bubble">get_session_name 失败：Unknown command: get_session_name</div>
+        <div class="dbg you">YOU  13:20</div>
+        <div class="user-old">ping</div>
+        <div class="dbg pi">PI  13:20</div>
+        <div class="dbg-bubble">pong 🏓</div>
+      </div>
+      <div class="composer">
+        <input placeholder="给 Pi 发消息..." disabled/>
+        <button class="send" disabled>➤</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="label">After — empty / online</div>
+    <div class="phone">
+      <div class="status-bar"><span>13:20</span><span>97%</span></div>
+      <div class="toolbar">
+        <div class="logo"></div>
+        <div class="titles">
+          <h1>Pi</h1>
+          <div class="chip"><div class="dot"></div>GPT-6.1 Sol · high</div>
+        </div>
+        <button class="icon-btn">◷</button>
+        <button class="icon-btn">⋮</button>
+      </div>
+      <div class="empty">
+        <div class="logo-lg"></div>
+        <h2>今天想聊点什么？</h2>
+        <p>连上 Termux 里的连接器后即可开始。</p>
+        <div class="suggest">
+          <button>解释这段代码</button>
+          <button>帮我订个计划</button>
+          <button>排查一个错误</button>
+        </div>
+      </div>
+      <div class="composer">
+        <input placeholder="给 Pi 发消息…"/>
+        <button class="send">➤</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="label">After — chat + reconnect banner</div>
+    <div class="phone">
+      <div class="status-bar"><span>13:20</span><span>97%</span></div>
+      <div class="toolbar">
+        <div class="logo"></div>
+        <div class="titles">
+          <h1>Pi · 日常</h1>
+          <div class="chip"><div class="dot" style="background:#F85149"></div>未连接</div>
+        </div>
+        <button class="icon-btn">◷</button>
+        <button class="icon-btn">⋮</button>
+      </div>
+      <div class="banner show">
+        <span>连接器超时未响应</span>
+        <button>重新连接</button>
+      </div>
+      <div class="chat">
+        <div class="sys">• 扩展已就绪</div>
+        <div class="user">ping</div>
+        <div class="agent">
+          <div class="avatar"></div>
+          <div class="body">pong 🏓</div>
+        </div>
+        <div class="user">帮我看看这段报错该怎么修</div>
+        <div class="agent">
+          <div class="avatar"></div>
+          <div class="body">先确认 Termux 里的连接器是否在跑，再检查 Token。超时不会再写进聊天流，只会显示在上方横幅。</div>
+        </div>
+      </div>
+      <div class="composer">
+        <input placeholder="连接器未连接" disabled/>
+        <button class="send" disabled>➤</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
