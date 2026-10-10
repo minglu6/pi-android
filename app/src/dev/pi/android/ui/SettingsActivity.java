@@ -2,19 +2,18 @@ package dev.pi.android.ui;
 
 import android.content.SharedPreferences;
 import android.os.Bundle;
-import android.text.InputType;
 import android.widget.EditText;
-import android.widget.LinearLayout;
-import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.Toolbar;
 
 import dev.pi.android.R;
 
 /**
- * 连接设置。没有 PreferenceScreen 依赖，就用最朴素的三个输入框 —— 这里只需要
- * host / port / token，其余都可以后期再加。
+ * 连接设置：host / port / token。
+ * 返回聊天页时 MainActivity 会按配置签名决定是否重连。
  */
 public class SettingsActivity extends AppCompatActivity {
 
@@ -39,12 +38,21 @@ public class SettingsActivity extends AppCompatActivity {
         return prefs(ctx).getString(K_TOKEN, "");
     }
 
+    public static boolean hasToken(android.content.Context ctx) {
+        String t = token(ctx);
+        return t != null && !t.trim().isEmpty();
+    }
+
     public static void setToken(android.content.Context ctx, String value) {
         prefs(ctx).edit().putString(K_TOKEN, value).apply();
     }
 
     public static void setPort(android.content.Context ctx, int value) {
         prefs(ctx).edit().putInt(K_PORT, value).apply();
+    }
+
+    public static String configSignature(android.content.Context ctx) {
+        return host(ctx) + ":" + port(ctx) + ":" + token(ctx);
     }
 
     private static SharedPreferences prefs(android.content.Context ctx) {
@@ -54,63 +62,50 @@ public class SettingsActivity extends AppCompatActivity {
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        int pad = (int) (16 * getResources().getDisplayMetrics().density);
-        root.setPadding(pad, pad, pad, pad);
-        root.setBackgroundColor(getResources().getColor(R.color.bg_base));
+        setContentView(R.layout.activity_settings);
 
-        root.addView(label("Host（Termux 通常就是 127.0.0.1）"));
-        hostEdit = input(host(this));
-        root.addView(hostEdit);
+        Toolbar toolbar = findViewById(R.id.toolbar);
+        toolbar.setTitle(R.string.settings_title);
+        setSupportActionBar(toolbar);
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+        }
+        toolbar.setNavigationOnClickListener(v -> finish());
 
-        root.addView(label("Port"));
-        portEdit = input(String.valueOf(port(this)));
-        portEdit.setInputType(InputType.TYPE_CLASS_NUMBER);
-        root.addView(portEdit);
-
-        root.addView(label("Token（~/.pi/agent/pi-android.token 的内容）"));
-        tokenEdit = input(token(this));
-        root.addView(tokenEdit);
-
-        root.addView(label("保存后返回聊天页会自动重连。"));
-        setContentView(root);
+        hostEdit = findViewById(R.id.host);
+        portEdit = findViewById(R.id.port);
+        tokenEdit = findViewById(R.id.token);
+        hostEdit.setText(host(this));
+        portEdit.setText(String.valueOf(port(this)));
+        tokenEdit.setText(token(this));
     }
 
     @Override
     protected void onPause() {
         super.onPause();
+        int port;
+        try {
+            port = requirePort(portEdit.getText().toString());
+        } catch (IllegalArgumentException e) {
+            Toast.makeText(this, e.getMessage(), Toast.LENGTH_SHORT).show();
+            return;
+        }
         prefs(this).edit()
                 .putString(K_HOST, hostEdit.getText().toString().trim())
-                .putInt(K_PORT, safeInt(portEdit.getText().toString(), 8945))
+                .putInt(K_PORT, port)
                 .putString(K_TOKEN, tokenEdit.getText().toString().trim())
                 .apply();
     }
 
-    private static int safeInt(String s, int def) {
+    private static int requirePort(String s) {
         try {
-            return Integer.parseInt(s.trim());
-        } catch (Exception e) {
-            return def;
+            int p = Integer.parseInt(s.trim());
+            if (p < 1 || p > 65535) {
+                throw new IllegalArgumentException("端口超出范围: " + p);
+            }
+            return p;
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("端口无效: " + s, e);
         }
-    }
-
-    private TextView label(String text) {
-        TextView tv = new TextView(this);
-        tv.setText(text);
-        tv.setTextColor(getResources().getColor(R.color.text_secondary));
-        tv.setTextSize(13f);
-        tv.setPadding(0, (int) (10 * getResources().getDisplayMetrics().density), 0, 4);
-        return tv;
-    }
-
-    private EditText input(String value) {
-        EditText et = new EditText(this);
-        et.setText(value);
-        et.setTextColor(getResources().getColor(R.color.text_primary));
-        et.setBackgroundColor(getResources().getColor(R.color.bg_elevated));
-        int p = (int) (10 * getResources().getDisplayMetrics().density);
-        et.setPadding(p, p, p, p);
-        return et;
     }
 }

@@ -63,6 +63,9 @@ public class BridgeService extends Service {
 
         void onExtStatus(Map<String, String> statuses);
 
+        /** 扩展 setTitle：反映到顶栏品牌标题 */
+        void onExtTitle(String title);
+
         /** Activity 是否在前台可见（不能叫 isResumed：Activity 有个 final 的同名方法） */
         boolean isVisible();
 
@@ -165,7 +168,7 @@ public class BridgeService extends Service {
 
                     @Override
                     public void onTitle(String title) {
-                        publishStatuses();
+                        if (host != null) host.onExtTitle(title);
                     }
 
                     @Override
@@ -187,7 +190,7 @@ public class BridgeService extends Service {
                             + " visible=" + (host != null && host.isVisible()));
                     if (inline) return;
                     dbg("notify path for " + kind + " id=" + id);
-                    askViaNotification(id, kind, title, options, sink);
+                    askViaNotification(id, kind, title, hint, options, prefill, sink);
                 });
         extUi.setTrace(msg -> dbg("extui: " + msg));
     }
@@ -257,6 +260,7 @@ public class BridgeService extends Service {
         cancelAsk(pendingAsk.notifyId);
         Ask ask = pendingAsk;
         pendingAsk = null;
+        asks.remove(ask.reqId); // 改走内联 sink，通知按钮路径作废
         return host.showChoice(ask.reqId, ask.kind, ask.title, ask.hint, ask.options, ask.prefill, ask.sink);
     }
 
@@ -297,8 +301,13 @@ public class BridgeService extends Service {
                 .build();
     }
 
-    /** 后台时的提问：一条高优先级通知 + 最多 3 个选项按钮（更多则让用户回 App 里选）。 */
-    private void askViaNotification(String reqId, String kind, String title, List<String> options,
+    /**
+     * 后台时的提问：高优先级通知。
+     * select/confirm 可直接点通知按钮作答；input/editor 需要文本，通知里无法可靠输入，
+     * 只提供「打开 App」与「取消」，回前台后由 {@link #takePendingAsk()} 还原内联输入行。
+     */
+    private void askViaNotification(String reqId, String kind, String title, String hint,
+                                    List<String> options, String prefill,
                                     ExtensionUi.AnswerSink sink) {
         NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm == null) {
@@ -309,12 +318,18 @@ public class BridgeService extends Service {
         ensureChannel();
         int id = ASK_BASE_ID + (++askSeq);
         asks.put(reqId, sink);
-        dbg("askViaNotification notifyId=" + id + " reqId=" + reqId + " options=" + options.size());
+        dbg("askViaNotification notifyId=" + id + " reqId=" + reqId + " kind=" + kind
+                + " options=" + options.size());
+
+        boolean needsText = "input".equals(kind) || "editor".equals(kind);
+        String body = needsText
+                ? "点开 App 在输入行里回答"
+                : TextUtils.join(" / ", options);
 
         NotificationCompat.Builder b = new NotificationCompat.Builder(this, CHANNEL)
                 .setSmallIcon(R.drawable.ic_pi_logo)
                 .setContentTitle("Pi 需要你回答：" + title)
-                .setContentText(TextUtils.join(" / ", options))
+                .setContentText(body)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
                 .setAutoCancel(true)
@@ -322,16 +337,20 @@ public class BridgeService extends Service {
                         new Intent(this, dev.pi.android.ui.MainActivity.class),
                         PendingIntent.FLAG_UPDATE_CURRENT | immutableFlag()));
 
-        int shown = Math.min(options.size(), 3);
-        for (int i = 0; i < shown; i++) {
-            b.addAction(android.R.drawable.ic_menu_send, options.get(i),
-                    answerIntent(reqId, kind, options.get(i), id));
+        if (!needsText) {
+            int shown = Math.min(options.size(), 3);
+            for (int i = 0; i < shown; i++) {
+                b.addAction(android.R.drawable.ic_menu_send, options.get(i),
+                        answerIntent(reqId, kind, options.get(i), id));
+            }
         }
         b.addAction(android.R.drawable.ic_menu_close_clear_cancel, "取消",
                 answerIntent(reqId, kind, "__cancel__", id));
         nm.notify(id, b.build());
         dbg("notification posted id=" + id);
-        pendingAsk = new Ask(id, reqId, kind, title, "", options, "", sink);
+        pendingAsk = new Ask(id, reqId, kind, title,
+                hint == null ? "" : hint, options,
+                prefill == null ? "" : prefill, sink);
     }
 
     private PendingIntent answerIntent(String reqId, String kind, String value, int notifyId) {
@@ -359,9 +378,14 @@ public class BridgeService extends Service {
             dbg("no sink for " + id);
             return;
         }
-        if ("__cancel__".equals(value)) sink.cancelled();
-        else if ("confirm".equals(kind)) sink.confirmed(Boolean.parseBoolean(value));
-        else sink.value(value == null ? "" : value);
+        if ("__cancel__".equals(value)) {
+            sink.cancelled();
+        } else if ("confirm".equals(kind)) {
+            // 选项文案是「确定/取消」，不是 true/false；Boolean.parseBoolean("确定") 恒为 false
+            sink.confirmed("确定".equals(value));
+        } else {
+            sink.value(value == null ? "" : value);
+        }
     }
 
     private static int immutableFlag() {

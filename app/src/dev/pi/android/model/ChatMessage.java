@@ -1,6 +1,6 @@
 package dev.pi.android.model;
 
-/** 一屏里的单条消息。日后接桥后由 {@code bridge/GatewayClient} 的事件流填充，现在先本地驱动。 */
+/** 聊天列表里的单条消息（用户 / Pi / 工具 / 系统提示）。 */
 public class ChatMessage {
     public enum Role { USER, AGENT, TOOL, SYSTEM }
 

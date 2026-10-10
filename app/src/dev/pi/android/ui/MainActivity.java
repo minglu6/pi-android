@@ -3,12 +3,14 @@ package dev.pi.android.ui;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.drawable.GradientDrawable;
 import android.os.IBinder;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
 import android.widget.ImageButton;
@@ -20,9 +22,11 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
-import com.google.android.material.button.MaterialButton;
+import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
+
+import com.google.android.material.button.MaterialButton;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -31,18 +35,16 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-import dev.pi.android.util.Json;
-
 import dev.pi.android.R;
 import dev.pi.android.bridge.BridgeService;
 import dev.pi.android.model.ChatMessage;
+import dev.pi.android.util.Json;
 
 /**
  * 聊天主界面。
  *
- * <p>流式显示的做法（照 JSON 事件流的语义，不是拍脑袋）：{@code message_update} 是 delta-only，
- * 按 {@code contentIndex} 分块累积；{@code text_end} / {@code message_end} 给出权威全文，
- * 到达时用权威内容覆写 —— 中间任何丢包都不会让用户看到错字。
+ * <p>流式显示：{@code message_update} 是 delta-only，按 {@code contentIndex} 累积；
+ * {@code text_end} / {@code message_end} 给出权威全文并覆写。
  */
 public class MainActivity extends AppCompatActivity implements BridgeService.UiHost {
 
@@ -54,6 +56,14 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             serviceBound = true;
             service.setHost(MainActivity.this);
             service.takePendingAsk();
+            lastConfig = SettingsActivity.configSignature(MainActivity.this);
+            refreshEmptyState();
+            if (pendingPrompt != null) requestSend(pendingPrompt);
+            if (isConnected() && pendingUiTarget != null) {
+                String target = pendingUiTarget;
+                pendingUiTarget = null;
+                main.postDelayed(() -> openUiTarget(target), 200);
+            }
         }
 
         @Override public void onServiceDisconnected(ComponentName name) {
@@ -67,24 +77,36 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private EditText composer;
     private ImageButton send;
     private TextView statusText;
+    private View statusDot;
+    private View emptyState;
+    private TextView emptyTitle;
+    private TextView emptyBody;
+    private MaterialButton emptyAction;
     private BridgeService service;
     private boolean serviceBound;
     private boolean resumed;
 
-    /** contentIndex -> 该块的累积文本（ assistant 流式回复可能有多块：文本/思考/工具调用混排） */
+    /** contentIndex -> 该块的累积文本 */
     private final Map<Integer, StringBuilder> blocks = new LinkedHashMap<>();
-    /** toolCallId -> 气泡在列表里的位置，用于把 tool_execution_update/end 填回同一条 */
+    /** toolCallId -> 气泡在列表里的位置 */
     private final Map<String, Integer> toolRows = new HashMap<>();
     private boolean streaming;
-    /** 通过 Intent 送进来的待发提示（ACTION_SEND / --es prompt），连上桥后自动发出 */
     private String pendingPrompt;
-    /** 上次连桥用的配置签名；设置没变且已连上就不重连 —— 每收到一次分享 intent 重连会掐掉正在流的回复 */
     private String lastConfig;
     private final java.util.List<CharSequence> modelLabels = new java.util.ArrayList<>();
-    private final java.util.List<String[]> modelRefs = new java.util.ArrayList<>();   // [provider, id]
+    private final java.util.List<String[]> modelRefs = new java.util.ArrayList<>();
     private final java.util.List<CharSequence> thinkingLevels = new java.util.ArrayList<>();
     private final java.util.List<CharSequence> sessionLabels = new java.util.ArrayList<>();
     private final java.util.List<String> sessionPaths = new java.util.ArrayList<>();
+
+    private LinearLayout actions;
+    private TextView actionsTitle;
+    private EditText actionsInput;
+    private LinearLayout actionsButtons;
+    private final java.util.LinkedHashMap<String, String> extStatuses = new java.util.LinkedHashMap<>();
+    private String uiTarget;
+    private String pendingUiTarget;
+    private String modelStatus = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -93,34 +115,54 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
         Toolbar toolbar = findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setDisplayShowTitleEnabled(false);
+        }
+
         statusText = findViewById(R.id.status_text);
+        statusDot = findViewById(R.id.status_dot);
         composer = findViewById(R.id.composer);
         send = findViewById(R.id.send);
+        emptyState = findViewById(R.id.empty_state);
+        emptyTitle = findViewById(R.id.empty_title);
+        emptyBody = findViewById(R.id.empty_body);
+        emptyAction = findViewById(R.id.empty_action);
+        actions = findViewById(R.id.actions);
+        actionsTitle = findViewById(R.id.actions_title);
+        actionsInput = findViewById(R.id.actions_input);
+        actionsButtons = findViewById(R.id.actions_buttons);
 
         list = findViewById(R.id.messages);
         LinearLayoutManager lm = new LinearLayoutManager(this);
         lm.setStackFromEnd(true);
         list.setLayoutManager(lm);
         adapter = new MessageAdapter(size -> {
+            refreshEmptyState();
             if (size > 0) list.smoothScrollToPosition(size - 1);
         });
         list.setAdapter(adapter);
 
-        actions = findViewById(R.id.actions);
-        actionsTitle = findViewById(R.id.actions_title);
-        actionsInput = findViewById(R.id.actions_input);
-        actionsButtons = findViewById(R.id.actions_buttons);
+        findViewById(R.id.btn_sessions).setOnClickListener(v -> {
+            if (!isConnected()) {
+                Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+                return;
+            }
+            loadSessions();
+        });
+        emptyAction.setOnClickListener(v ->
+                startActivity(new Intent(this, SettingsActivity.class)));
 
-        // 连接由前台 BridgeService 持有：App 进后台时也要能回答扩展提问，否则 Pi 会一直等
         Intent svc = new Intent(this, BridgeService.class);
-        androidx.core.content.ContextCompat.startForegroundService(this, svc);
+        ContextCompat.startForegroundService(this, svc);
         bindService(svc, svcConn, Context.BIND_AUTO_CREATE);
         askNotificationPermission();
 
-        send.setOnClickListener(v -> submit());
+        send.setOnClickListener(v -> onSendOrStop());
+        send.setEnabled(false);
+        send.setAlpha(0.45f);
         composer.setOnEditorActionListener((v, actionId, event) -> {
             if (actionId == EditorInfo.IME_ACTION_SEND) {
-                submit();
+                onSendOrStop();
                 return true;
             }
             return false;
@@ -128,25 +170,18 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         composer.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
-                send.setEnabled(s.toString().trim().length() > 0);
-                send.setAlpha(s.toString().trim().length() > 0 ? 1f : 0.4f);
+                updateSendEnabled();
             }
             @Override public void afterTextChanged(Editable s) {}
         });
 
         handleIntentExtras(getIntent());
-        if (isConnected()) openUiTarget(uiTarget);
-        adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM,
-                "尚未连接：在设置里填 Token（或启动时传 --es token）。\nbuild " + dev.pi.android.BuildInfo.BUILD_TIME));
+        setConnectionVisual("connecting", getString(R.string.status_connecting));
+        refreshEmptyState();
         reconnect();
-        if (pendingPrompt != null) requestSend(pendingPrompt);
+        if (isConnected() && uiTarget != null) openUiTarget(uiTarget);
     }
 
-    /**
-     * 两种入口：
-     *  - ACTION_SEND text/plain：其它应用分享文本给 Pi（也是本机自动化驱动它的正规方式）；
-     *  - {@code --es token} / {@code --es prompt}：从 Termux / adb 一键投放token和提问。
-     */
     private void handleIntentExtras(@Nullable Intent intent) {
         if (intent == null) return;
         String token = intent.getStringExtra("token");
@@ -155,12 +190,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         if (port != null && !port.isEmpty()) {
             try {
                 SettingsActivity.setPort(this, Integer.parseInt(port.trim()));
-            } catch (NumberFormatException ignored) {
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("invalid port extra: " + port, e);
             }
         }
-        // ui=sessions|settings|fork|models|thinking：给本机自动化用的深链入口，
-        // 启动直接落到某个面板（配合 --es token 一键到达）
         uiTarget = intent.getStringExtra("ui");
+        if (uiTarget != null && uiTarget.trim().isEmpty()) uiTarget = null;
         pendingUiTarget = uiTarget;
         if (Intent.ACTION_SEND.equals(intent.getAction()) && "text/plain".equals(intent.getType())) {
             String shared = intent.getStringExtra(Intent.EXTRA_TEXT);
@@ -169,15 +204,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         String prompt = intent.getStringExtra("prompt");
         if (prompt != null && !prompt.isEmpty()) pendingPrompt = prompt;
     }
-
-    private ExtensionUi extUi;
-    private LinearLayout actions;
-    private android.widget.TextView actionsTitle;
-    private EditText actionsInput;
-    private LinearLayout actionsButtons;
-    private final java.util.LinkedHashMap<String, String> extStatuses = new java.util.LinkedHashMap<>();
-    private String uiTarget;
-    private String pendingUiTarget;
 
     private void openUiTarget(String target) {
         if (target == null) return;
@@ -205,11 +231,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 startNewSession();
                 break;
             default:
-                break;
+                throw new IllegalArgumentException("unknown ui target: " + target);
         }
     }
 
-    /** 未连上时先排队，onStatus(online) 里再发 —— 桥可能也才刚拉起 Pi。 */
     private void requestSend(String text) {
         android.util.Log.i(TAG, "requestSend len=" + text.length());
         pendingPrompt = text;
@@ -218,22 +243,23 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             composer.setText("");
             adapter.add(new ChatMessage(ChatMessage.Role.USER, text));
             blocks.clear();
+            setStreaming(true);
             JSONObject params = new JSONObject();
             try {
                 params.put("message", text);
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                throw new IllegalStateException("prompt params", e);
             }
             rpc("prompt", params);
-            setStatus("thinking…");
+            setConnectionVisual("online", "thinking…");
         }
     }
 
     @Override
     protected void onNewIntent(android.content.Intent intent) {
         super.onNewIntent(intent);
-        setIntent(intent);      // singleTop：新的分享intent在这里到，onCreate 不会再跑
+        setIntent(intent);
         handleIntentExtras(intent);
-        // 已经连着的话直接开面板；没连上则由 onStatus(online) 补做
         if (isConnected() && pendingUiTarget != null) {
             String target = pendingUiTarget;
             pendingUiTarget = null;
@@ -250,22 +276,27 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     protected void onResume() {
         super.onResume();
         resumed = true;
-        // 设置页可能刚改过 token/端口
         reconnectIfConfigured();
-        // 从后台回来：把通知里问的东西拽回按钮行
         if (serviceBound && service != null) service.takePendingAsk();
+        refreshEmptyState();
     }
 
     private void reconnectIfConfigured() {
-        String sig = SettingsActivity.host(this) + ":" + SettingsActivity.port(this) + ":" + SettingsActivity.token(this);
+        String sig = SettingsActivity.configSignature(this);
         if (isConnected() && sig.equals(lastConfig)) return;
         reconnect();
     }
 
     private void reconnect() {
+        lastConfig = SettingsActivity.configSignature(this);
+        if (!SettingsActivity.hasToken(this)) {
+            setConnectionVisual("offline", getString(R.string.bridge_missing_token));
+            refreshEmptyState();
+            return;
+        }
+        setConnectionVisual("connecting", getString(R.string.status_connecting));
         if (service != null) service.reconnect();
     }
-
 
     private String rpc(String command, @Nullable JSONObject params) {
         if (service == null) return "";
@@ -280,6 +311,16 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     protected void onStop() {
         super.onStop();
         resumed = false;
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (serviceBound) {
+            if (service != null) service.setHost(null);
+            unbindService(svcConn);
+            serviceBound = false;
+        }
+        super.onDestroy();
     }
 
     @Override
@@ -301,6 +342,16 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         main.post(this::renderExtStatus);
     }
 
+    @Override
+    public void onExtTitle(String title) {
+        main.post(() -> {
+            TextView brand = findViewById(R.id.brand_title);
+            if (brand == null) return;
+            String name = getString(R.string.app_name);
+            brand.setText(title == null || title.isEmpty() ? name : name + " · " + title);
+        });
+    }
+
     private void askNotificationPermission() {
         if (android.os.Build.VERSION.SDK_INT < 33) return;
         if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
@@ -310,17 +361,35 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     private void setStreaming(boolean on) {
         streaming = on;
-        if (send != null) {
-            send.setImageResource(on ? android.R.drawable.ic_delete : android.R.drawable.ic_menu_send);
-            send.setContentDescription(getString(on ? R.string.action_stop : R.string.action_send));
+        if (send == null) return;
+        send.setImageResource(on ? R.drawable.ic_stop : R.drawable.ic_send);
+        send.setContentDescription(getString(on ? R.string.action_stop : R.string.action_send));
+        updateSendEnabled();
+    }
+
+    private void updateSendEnabled() {
+        if (send == null || composer == null) return;
+        boolean canSend = streaming || composer.getText().toString().trim().length() > 0;
+        send.setEnabled(canSend);
+        send.setAlpha(canSend ? 1f : 0.45f);
+    }
+
+    private void onSendOrStop() {
+        if (streaming) {
+            rpc("abort", null);
+            setStreaming(false);
+            setConnectionVisual("online", getString(R.string.status_idle));
+            return;
         }
+        submit();
     }
 
     private void submit() {
         String text = composer.getText().toString().trim();
         if (text.isEmpty()) return;
         if (!isConnected()) {
-            Toast.makeText(this, "桥未连接，检查设置里的 Token 与端口", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+            refreshEmptyState();
             return;
         }
         composer.setText("");
@@ -330,14 +399,57 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         JSONObject params = new JSONObject();
         try {
             params.put("message", text);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            throw new IllegalStateException("prompt params", e);
         }
         rpc("prompt", params);
-        setStatus("thinking…");
+        setConnectionVisual("online", "thinking…");
     }
 
-    private void setStatus(String s) {
-        if (statusText != null) statusText.setText(s);
+    private void setConnectionVisual(String state, String label) {
+        if (statusText != null) statusText.setText(label);
+        if (statusDot == null) return;
+        int color;
+        switch (state) {
+            case "online":
+                color = R.color.status_online;
+                break;
+            case "starting":
+            case "connecting":
+                color = R.color.status_connecting;
+                break;
+            case "offline":
+            default:
+                color = R.color.status_offline;
+                break;
+        }
+        GradientDrawable dot = new GradientDrawable();
+        dot.setShape(GradientDrawable.OVAL);
+        dot.setColor(ContextCompat.getColor(this, color));
+        statusDot.setBackground(dot);
+    }
+
+    private void refreshEmptyState() {
+        if (emptyState == null || adapter == null) return;
+        boolean show = adapter.onlySystemOrEmpty();
+        emptyState.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (!show) return;
+
+        if (!SettingsActivity.hasToken(this)) {
+            emptyTitle.setText(R.string.empty_need_token_title);
+            emptyBody.setText(R.string.empty_need_token_body);
+            emptyAction.setVisibility(View.VISIBLE);
+            emptyAction.setText(R.string.empty_open_settings);
+        } else if (!isConnected()) {
+            emptyTitle.setText(R.string.status_offline);
+            emptyBody.setText(R.string.empty_body);
+            emptyAction.setVisibility(View.VISIBLE);
+            emptyAction.setText(R.string.settings);
+        } else {
+            emptyTitle.setText(R.string.empty_title);
+            emptyBody.setText(R.string.empty_body);
+            emptyAction.setVisibility(View.GONE);
+        }
     }
 
     // ---------- 菜单 ----------
@@ -345,7 +457,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         menu.add(Menu.NONE, 1, 100, R.string.action_new_session);
-        menu.add(Menu.NONE, 2, 200, R.string.action_stop).setIcon(android.R.drawable.ic_menu_close_clear_cancel);
+        menu.add(Menu.NONE, 2, 200, R.string.action_stop);
         menu.add(Menu.NONE, 3, 300, R.string.action_reload);
         menu.add(Menu.NONE, 5, 500, R.string.action_model);
         menu.add(Menu.NONE, 6, 600, R.string.action_thinking);
@@ -363,6 +475,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 return true;
             case 2:
                 rpc("abort", null);
+                setStreaming(false);
                 return true;
             case 5:
                 showModelPicker();
@@ -393,15 +506,16 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     public void onStatus(String state, @Nullable String error) {
         switch (state) {
             case "starting":
-                setStatus(getString(R.string.status_starting_pi));
+                setConnectionVisual("starting", getString(R.string.status_starting_pi));
                 break;
             case "online":
-                setStatus(getString(R.string.status_online));
+                lastConfig = SettingsActivity.configSignature(this);
+                setConnectionVisual("online", getString(R.string.status_online));
                 rpc("get_state", null);
+                refreshEmptyState();
                 if (pendingUiTarget != null) {
                     String target = pendingUiTarget;
                     pendingUiTarget = null;
-                    // 模型/档位列表要等 get_available_* 回来才有内容，稍等一拍再开面板
                     main.postDelayed(() -> openUiTarget(target), 400);
                 }
                 if (pendingPrompt != null) {
@@ -412,9 +526,11 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 break;
             case "offline":
             default:
-                setStatus(error != null && !error.isEmpty()
+                setStreaming(false);
+                setConnectionVisual("offline", error != null && !error.isEmpty()
                         ? getString(R.string.status_offline_with, error)
                         : getString(R.string.status_offline));
+                refreshEmptyState();
                 break;
         }
     }
@@ -450,7 +566,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                     JSONObject m = msgs.optJSONObject(i);
                     if (m == null) continue;
                     String t = m.optString("text", "");
-                    t = t.replace("\\s+", " ").trim();
+                    t = t.replaceAll("\\s+", " ").trim();
                     if (t.length() > 60) t = t.substring(0, 60) + "…";
                     labels.add(t.isEmpty() ? "(空)" : t);
                     ids.add(m.optString("entryId", ""));
@@ -466,7 +582,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                         JSONObject params = new JSONObject();
                         try {
                             params.put("entryId", ids.get(which));
-                        } catch (Exception ignored) {
+                        } catch (Exception e) {
+                            throw new IllegalStateException("fork params", e);
                         }
                         rpc("fork", params);
                     })
@@ -478,9 +595,16 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             if (data.optBoolean("cancelled", false)) {
                 adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "fork 被扩展取消了。"));
             } else {
-                adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "已 fork，从这条消息继续：" + data.optString("text", "")));
+                adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM,
+                        "已 fork，从这条消息继续：" + data.optString("text", "")));
                 rpc("get_messages", null);
             }
+            return;
+        }
+        if ("new_session".equals(command)) {
+            adapter.clear();
+            adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, getString(R.string.new_session_started)));
+            refreshEmptyState();
             return;
         }
         if ("get_available_models".equals(command) && data != null) {
@@ -514,7 +638,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             JSONObject model = data.optJSONObject("model");
             String name = model != null ? model.optString("name", model.optString("id")) : null;
             String thinking = data.optString("thinkingLevel", null);
-            setStatus((name != null ? name : "connected") + (thinking != null ? " · " + thinking : ""));
+            modelStatus = (name != null ? name : getString(R.string.status_online))
+                    + (thinking != null && !thinking.isEmpty() ? " · " + thinking : "");
+            setConnectionVisual("online", modelStatus);
             rpc("get_available_models", null);
             rpc("get_available_thinking_levels", null);
         }
@@ -523,14 +649,20 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     @Override
     public void onEvent(@NonNull JSONObject ev) {
         String type = ev.optString("type");
-        if ("extension_ui_request".equals(type) && extUi != null) {
+        if ("extension_notify".equals(type)) {
+            String prefix = notifyPrefix(ev.optString("notifyType", "info"));
+            adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM,
+                    prefix + ev.optString("message", "")));
+            return;
+        }
+        // extension_ui_request 由 BridgeService 处理；这里只记一条可见线索
+        if ("extension_ui_request".equals(type)) {
             String method = ev.optString("method");
-            if ("select".equals(method) || "confirm".equals(method) || "input".equals(method) || "editor".equals(method)) {
-                // 阻塞式请求：先留一条可见记录。没有 logcat 的机器上，这是唯一可靠的取证方式
+            if ("select".equals(method) || "confirm".equals(method)
+                    || "input".equals(method) || "editor".equals(method)) {
                 adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM,
                         "扩展请求 " + method + "：" + ev.optString("title", ev.optString("message", ""))));
             }
-            extUi.handle(ev);
             return;
         }
         android.util.Log.i(TAG, "event " + type);
@@ -559,7 +691,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                         break;
                     case "thinking_start":
                     case "thinking_delta":
-                        setStatus("thinking…");
+                        setConnectionVisual("online", "thinking…");
                         break;
                     case "toolcall_start": {
                         String name = agg.optString("toolName", "tool");
@@ -589,8 +721,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 toolRows.put(ev.optString("toolCallId"), adapter.size() - 1);
                 return;
             case "tool_execution_end": {
-                Integer row = toolRows.remove(ev.optJSONObject("result") != null
-                        ? ev.optString("toolCallId") : ev.optString("toolCallId"));
+                Integer row = toolRows.remove(ev.optString("toolCallId"));
                 JSONObject res = ev.optJSONObject("result");
                 String out = res != null ? textOfContent(res.optJSONArray("content")) : "";
                 if (row != null) {
@@ -602,19 +733,27 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
             case "agent_settled":
                 setStreaming(false);
-                setStatus(getString(R.string.status_idle));
+                if (modelStatus.isEmpty()) {
+                    setConnectionVisual("online", getString(R.string.status_idle));
+                } else {
+                    setConnectionVisual("online", modelStatus);
+                }
                 rpc("get_state", null);
                 return;
             case "auto_retry_end":
                 if (!ev.optBoolean("success", true)) {
-                    adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "重试失败：" + ev.optString("finalError")));
+                    adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM,
+                            "重试失败：" + ev.optString("finalError")));
                 }
                 return;
             case "session_info_changed":
-                adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "会话名：" + ev.optString("name")));
+                adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM,
+                        "会话名：" + ev.optString("name")));
                 return;
             default:
-                if (type.endsWith("_start") || type.endsWith("_end")) setStatus(type);
+                if (type.endsWith("_start") || type.endsWith("_end")) {
+                    setConnectionVisual("online", type);
+                }
                 break;
         }
     }
@@ -622,52 +761,42 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     @Override
     public void onFailure(@Nullable Throwable t) {
         adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM,
-                "连接失败：" + (t == null ? "?" : t.getMessage()) + "（Termux 里跑起 pi-rpc-bridge 了吗？）"));
+                "连接失败：" + (t == null ? "?" : t.getMessage())
+                        + "（Termux 里跑起 pi-rpc-bridge 了吗？）"));
+        refreshEmptyState();
     }
 
-    /**
-     * 会话列表来自桥的本地命令 list_sessions：Pi 的 RPC 只有 get_tree（当前会话内部的树），
-     * 没有“有哪些会话文件”这条，所以列目录这件小事必须由桥代劳。
-     */
     private void loadSessions() {
         JSONObject params = new JSONObject();
         try {
             params.put("limit", 40);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            throw new IllegalStateException("list_sessions params", e);
         }
         rpc("list_sessions", params);
     }
 
-    private void setTitleExt(String title) {
-        String name = getString(R.string.app_name);
-        setTitle(title.isEmpty() ? name : name + " · " + title);
-    }
-
-    /**
-     * 扩展的阻塞式提问改用聊天流上方的一行按钮来问（不走 AlertDialog）。
-     * 屏幕旋转/虚拟屏熄灭都要能看见，否则用户没法回答、Pi 一直等着。
-     */
     private void showExtensionActions(String kind, String title, String hint,
                                       java.util.List<String> options, String prefill,
                                       ExtensionUi.AnswerSink sink) {
         actionsButtons.removeAllViews();
-        actions.setVisibility(android.view.View.VISIBLE);
-        actionsTitle.setText(title.isEmpty() ? "Pi" : title);
+        actions.setVisibility(View.VISIBLE);
+        actionsTitle.setText(title.isEmpty() ? getString(R.string.app_name) : title);
         boolean wantsText = "input".equals(kind) || "editor".equals(kind);
-        actionsInput.setVisibility(wantsText ? android.view.View.VISIBLE : android.view.View.GONE);
+        actionsInput.setVisibility(wantsText ? View.VISIBLE : View.GONE);
         if (wantsText) {
             actionsInput.setText(prefill == null ? "" : prefill);
-            actionsInput.setHint(hint.isEmpty() ? (("editor".equals(kind) ? "编辑内容" : "输入")) : hint);
+            actionsInput.setHint(hint.isEmpty()
+                    ? ("editor".equals(kind) ? "编辑内容" : "输入")
+                    : hint);
         }
         for (String opt : options) {
-            com.google.android.material.button.MaterialButton b =
-                    new MaterialButton(this);
+            MaterialButton b = new MaterialButton(this);
             b.setText(opt);
             b.setTextSize(14f);
-            b.setPadding(8, 0, 8, 0);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            lp.setMarginEnd(12);
+            lp.setMarginEnd(10);
             b.setLayoutParams(lp);
             b.setOnClickListener(v -> {
                 hideExtensionActions();
@@ -678,13 +807,14 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             });
             actionsButtons.addView(b);
         }
-        adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "扩展提问：" + title + "（在下方按钮里回答）"));
+        adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM,
+                "扩展提问：" + title + "（" + getString(R.string.ext_answer_hint) + "）"));
     }
 
     private void hideExtensionActions() {
-        actions.setVisibility(android.view.View.GONE);
+        actions.setVisibility(View.GONE);
         actionsButtons.removeAllViews();
-        actionsInput.setVisibility(android.view.View.GONE);
+        actionsInput.setVisibility(View.GONE);
     }
 
     private static String notifyPrefix(String type) {
@@ -693,15 +823,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         return "• ";
     }
 
-    /** 给 ExtensionUi 用的可见调试记录：本机 App 的 logcat 收不到，只能靠屏幕取证 */
-    void debugNote(String text) {
-        adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, text));
-    }
-
-    /** 扩展给的状态条目拼到顶栏右侧（同 key 覆盖，清空则移除），避免它抢走模型/状态那行。 */
     private void renderExtStatus() {
         if (extStatuses.isEmpty()) {
-            rpc("get_state", null);
+            if (!modelStatus.isEmpty()) setConnectionVisual("online", modelStatus);
+            else rpc("get_state", null);
             return;
         }
         StringBuilder sb = new StringBuilder();
@@ -709,12 +834,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             if (sb.length() > 0) sb.append(" · ");
             sb.append(v);
         }
-        setStatus(sb.length() > 60 ? sb.substring(0, 60) + "…" : sb.toString());
-    }
-
-    private void setTitle(Object titleOrResId) {
-        if (titleOrResId instanceof Integer) setTitle((Integer) titleOrResId);
-        else setTitle(String.valueOf(titleOrResId));
+        setConnectionVisual("online", sb.length() > 60 ? sb.substring(0, 60) + "…" : sb.toString());
     }
 
     private void renderSessions(JSONObject data) {
@@ -729,7 +849,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 if (path.isEmpty()) continue;
                 String preview = item.optString("preview", "");
                 if (preview.isEmpty()) preview = "(无预览)";
-                preview = preview.replace("\\s+", " ").trim();
+                preview = preview.replaceAll("\\s+", " ").trim();
                 if (preview.length() > 60) preview = preview.substring(0, 60) + "…";
                 long mtime = item.optLong("mtimeMs", 0L);
                 sessionLabels.add(relTime(mtime) + " · " + preview);
@@ -746,7 +866,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                     JSONObject params = new JSONObject();
                     try {
                         params.put("sessionPath", sessionPaths.get(which));
-                    } catch (Exception ignored) {
+                    } catch (Exception e) {
+                        throw new IllegalStateException("switch_session params", e);
                     }
                     rpc("switch_session", params);
                 })
@@ -767,7 +888,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         return android.text.format.DateFormat.format("yyyy-MM-dd", ms).toString();
     }
 
-    /** 切到某个会话后，把它已有的消息渲染回列表（get_messages）。 */
     private void renderHistory(JSONObject data) {
         JSONArray messages = data != null ? data.optJSONArray("messages") : null;
         java.util.List<ChatMessage> history = new java.util.ArrayList<>();
@@ -792,14 +912,14 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         if (history.isEmpty()) {
             adapter.clear();
-            adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "这个会话是空的。"));
+            adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, getString(R.string.session_empty)));
         } else {
             adapter.replaceAll(history);
         }
         list.scrollToPosition(Math.max(0, adapter.size() - 1));
+        refreshEmptyState();
     }
 
-    /** fork：从之前某条用户消息的新分支继续（Pi 的 get_fork_messages）。 */
     private void showForkPicker() {
         rpc("get_fork_messages", null);
         Toast.makeText(this, "正在取可 fork 的消息…", Toast.LENGTH_SHORT).show();
@@ -808,15 +928,16 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private void startNewSession() {
         rpc("new_session", null);
         adapter.clear();
-        adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "新会话已开始。"));
+        adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, getString(R.string.new_session_started)));
+        refreshEmptyState();
     }
 
     private void showModelPicker() {
         if (modelLabels.isEmpty()) {
             Toast.makeText(this, "模型列表还没取到", Toast.LENGTH_SHORT).show();
+            rpc("get_available_models", null);
             return;
         }
-        int cur = -1;
         new androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle(R.string.action_model)
                 .setSingleChoiceItems(modelLabels.toArray(new CharSequence[0]), -1, (dialog, which) -> {
@@ -825,10 +946,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                     try {
                         params.put("provider", ref[0]);
                         params.put("modelId", ref[1]);
-                    } catch (Exception ignored) {
+                    } catch (Exception e) {
+                        throw new IllegalStateException("set_model params", e);
                     }
                     rpc("set_model", params);
-                    adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "切换到模型 " + ref[0] + " / " + ref[1]));
+                    adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM,
+                            "切换到模型 " + ref[0] + " / " + ref[1]));
                     dialog.dismiss();
                 })
                 .setNegativeButton(android.R.string.cancel, null)
@@ -838,6 +961,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private void showThinkingPicker() {
         if (thinkingLevels.isEmpty()) {
             Toast.makeText(this, "思考档位还没取到", Toast.LENGTH_SHORT).show();
+            rpc("get_available_thinking_levels", null);
             return;
         }
         new androidx.appcompat.app.AlertDialog.Builder(this)
@@ -847,10 +971,11 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                     JSONObject params = new JSONObject();
                     try {
                         params.put("level", level);
-                    } catch (Exception ignored) {
+                    } catch (Exception e) {
+                        throw new IllegalStateException("set_thinking_level params", e);
                     }
                     rpc("set_thinking_level", params);
-                    setStatus("thinking level: " + level);
+                    setConnectionVisual("online", "thinking level: " + level);
                     dialog.dismiss();
                 })
                 .setNegativeButton(android.R.string.cancel, null)
@@ -867,7 +992,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         return s.length() > 1200 ? s.substring(0, 1200) + "\n…" : s;
     }
 
-    /** 取出消息里的纯文本：content 是 [{type:"text", text:"…"}, …]。 */
     static String textOfMessage(JSONObject msg) {
         JSONArray content = msg.optJSONArray("content");
         String s = textOfContent(content);
