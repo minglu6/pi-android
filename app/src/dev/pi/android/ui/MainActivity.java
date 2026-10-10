@@ -100,12 +100,22 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private TextView sessionMeta;
     private TextView modelChip;
     private TextView footerStats;
+    private TextView footerSep;
+    private View contextBarWrap;
+    private View contextBarFill;
+    private TextView diffBadge;
+    private ImageButton btnStop;
     private View steerToggle;
+    private TextView steerModePlan;
     private TextView steerModeSteer;
     private TextView steerModeQueue;
-    /** true = steer，false = follow_up / queue */
-    private boolean steerMode = true;
+    /** 0=plan, 1=steer, 2=queue；流式发送时 plan/queue → follow_up，steer → steer */
+    private int composerMode = 1;
     private long lastSessionStatsAt;
+    /** Optional workspace fields from get_state — empty means hide. */
+    private String stateCwd = "";
+    private String stateBranch = "";
+    private String stateDiffBadge = "";
     private View emptyState;
     private TextView emptyTitle;
     private TextView emptyBody;
@@ -177,7 +187,13 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         sessionMeta = findViewById(R.id.session_meta);
         modelChip = findViewById(R.id.model_chip);
         footerStats = findViewById(R.id.footer_stats);
+        footerSep = findViewById(R.id.footer_sep);
+        contextBarWrap = findViewById(R.id.context_bar_wrap);
+        contextBarFill = findViewById(R.id.context_bar_fill);
+        diffBadge = findViewById(R.id.diff_badge);
+        btnStop = findViewById(R.id.btn_stop);
         steerToggle = findViewById(R.id.steer_toggle);
+        steerModePlan = findViewById(R.id.steer_mode_plan);
         steerModeSteer = findViewById(R.id.steer_mode_steer);
         steerModeQueue = findViewById(R.id.steer_mode_queue);
         if (sessionMeta != null) sessionMeta.setTypeface(AppFonts.mono(this, false));
@@ -185,6 +201,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         if (footerStats != null) {
             footerStats.setTypeface(AppFonts.mono(this, false));
             footerStats.setVisibility(View.GONE);
+        }
+        if (diffBadge != null) {
+            diffBadge.setTypeface(AppFonts.mono(this, false));
+            diffBadge.setVisibility(View.GONE);
         }
         if (statusText != null) statusText.setTypeface(AppFonts.mono(this, false));
         composer = findViewById(R.id.composer);
@@ -225,6 +245,18 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             maybeScrollToBottom(false);
             snapshotChat();
         });
+        adapter.setAgentActionListener(new MessageAdapter.AgentActionListener() {
+            @Override public void onRetry(@NonNull ChatMessage message) {
+                retryLastUserPrompt();
+            }
+            @Override public void onFork(@NonNull ChatMessage message) {
+                if (!isConnected()) {
+                    Toast.makeText(MainActivity.this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                showForkPicker();
+            }
+        });
         list.setAdapter(adapter);
         restoreChatSnapshot();
         list.addOnScrollListener(new RecyclerView.OnScrollListener() {
@@ -263,19 +295,32 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 showModelPicker();
             });
         }
+        if (steerModePlan != null) {
+            steerModePlan.setOnClickListener(v -> {
+                composerMode = 0;
+                updateSteerUi();
+            });
+        }
         if (steerModeSteer != null) {
             steerModeSteer.setOnClickListener(v -> {
-                steerMode = true;
+                composerMode = 1;
                 updateSteerUi();
             });
         }
         if (steerModeQueue != null) {
             steerModeQueue.setOnClickListener(v -> {
-                steerMode = false;
+                composerMode = 2;
                 updateSteerUi();
             });
         }
+        if (btnStop != null) {
+            btnStop.setOnClickListener(v -> {
+                rpc("clear_queue", null);
+                rpc("abort", null);
+            });
+        }
         updateSteerUi();
+        if (steerToggle != null) steerToggle.setVisibility(View.VISIBLE);
         // status_chip 仍在布局中但已隐藏；保留空安全引用以免旧逻辑 NPE
         View statusChip = findViewById(R.id.status_chip);
         if (statusChip != null) statusChip.setVisibility(View.GONE);
@@ -586,7 +631,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             generationStatus.setVisibility(on ? View.VISIBLE : View.GONE);
             if (on && (changed || generationStatus.length() == 0)) generationStatus.setText(R.string.generation_active);
         }
-        if (steerToggle != null) steerToggle.setVisibility(on ? View.VISIBLE : View.GONE);
+        // Plan/Steer/Queue always available for dense Pocket layout; stop only while streaming.
+        if (steerToggle != null) steerToggle.setVisibility(View.VISIBLE);
+        if (btnStop != null) btnStop.setVisibility(on ? View.VISIBLE : View.GONE);
         if (list != null) {
             list.setItemAnimator(on ? null : new androidx.recyclerview.widget.DefaultItemAnimator());
         }
@@ -649,22 +696,18 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             attach.setEnabled(connected && !streaming && !busyAttach);
             attach.setAlpha(connected && !streaming && !busyAttach ? 1f : 0.4f);
         }
-        // 流式中：有正文 → 发送 steer/follow_up；空正文 → 中止
-        if (streaming) {
-            if (hasText) {
-                send.setImageResource(R.drawable.ic_send);
-                send.setContentDescription(getString(R.string.action_send));
-            } else {
-                send.setImageResource(R.drawable.ic_stop);
-                send.setContentDescription(getString(R.string.action_stop));
-            }
-        } else {
-            send.setImageResource(R.drawable.ic_send);
-            send.setContentDescription(getString(R.string.action_send));
-        }
-        boolean canSend = streaming || (connected && !busyAttach && hasText);
+        // 流式中 stop 独立；send 仅在有正文时发 steer/follow_up
+        send.setImageResource(R.drawable.ic_send);
+        send.setContentDescription(getString(R.string.action_send));
+        boolean canSend = streaming
+                ? hasText
+                : (connected && !busyAttach && hasText);
         send.setEnabled(canSend);
         send.setAlpha(canSend ? 1f : 0.45f);
+        if (btnStop != null) {
+            btnStop.setEnabled(streaming);
+            btnStop.setAlpha(streaming ? 1f : 0.4f);
+        }
     }
 
     // ---------- 附件 ----------
@@ -821,13 +864,57 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     private void refreshSessionMeta() {
         if (sessionMeta == null) return;
-        if (!modelStatus.isEmpty()) {
-            sessionMeta.setText(modelStatus);
-        } else if (isConnected()) {
-            sessionMeta.setText(R.string.status_online);
-        } else {
-            sessionMeta.setText(R.string.status_connecting);
+        StringBuilder meta = new StringBuilder();
+        if (!stateCwd.isEmpty()) {
+            meta.append(shortPath(stateCwd));
         }
+        if (!stateBranch.isEmpty()) {
+            if (meta.length() > 0) meta.append(" · ");
+            meta.append(stateBranch);
+        }
+        if (meta.length() == 0) {
+            // Fallback: session file basename or model — still only if we have real data.
+            String file = shortPath(currentSessionPath);
+            if (!file.isEmpty()) meta.append(file);
+            else if (!modelStatus.isEmpty()) meta.append(modelStatus);
+        }
+        if (meta.length() == 0) {
+            sessionMeta.setVisibility(View.GONE);
+        } else {
+            sessionMeta.setVisibility(View.VISIBLE);
+            sessionMeta.setText(meta.toString());
+        }
+        if (diffBadge != null) {
+            if (stateDiffBadge.isEmpty()) {
+                diffBadge.setVisibility(View.GONE);
+            } else {
+                diffBadge.setVisibility(View.VISIBLE);
+                diffBadge.setText(stateDiffBadge);
+                int addColor = ContextCompat.getColor(this, R.color.diff_add);
+                int delColor = ContextCompat.getColor(this, R.color.diff_del);
+                // Keep plain text; colors live in badge background contrast.
+                diffBadge.setTextColor(ContextCompat.getColor(this, R.color.text_secondary));
+                // Silence unused when no spannable — still useful for future tint.
+                if (addColor == delColor) { /* no-op */ }
+            }
+        }
+    }
+
+    private static String shortPath(String path) {
+        if (path == null || path.isEmpty()) return "";
+        String p = path;
+        if (p.endsWith("/")) p = p.substring(0, p.length() - 1);
+        int slash = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+        if (slash >= 0 && slash < p.length() - 1) {
+            String leaf = p.substring(slash + 1);
+            // Prefer parent/leaf when leaf looks like a session file.
+            int prev = Math.max(p.lastIndexOf('/', slash - 1), p.lastIndexOf('\\', slash - 1));
+            if (leaf.contains(".") && prev >= 0) {
+                return p.substring(prev + 1);
+            }
+            return leaf;
+        }
+        return p;
     }
 
     private void refreshModelChip() {
@@ -846,17 +933,20 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private void updateSteerUi() {
-        if (steerModeSteer == null || steerModeQueue == null) return;
-        if (steerMode) {
-            steerModeSteer.setBackgroundResource(R.drawable.bg_segmented_on);
-            steerModeSteer.setTextColor(ContextCompat.getColor(this, R.color.md_theme_onPrimary));
-            steerModeQueue.setBackground(null);
-            steerModeQueue.setTextColor(ContextCompat.getColor(this, R.color.text_muted));
-        } else {
-            steerModeQueue.setBackgroundResource(R.drawable.bg_segmented_on);
-            steerModeQueue.setTextColor(ContextCompat.getColor(this, R.color.md_theme_onPrimary));
-            steerModeSteer.setBackground(null);
-            steerModeSteer.setTextColor(ContextCompat.getColor(this, R.color.text_muted));
+        int on = R.drawable.bg_segmented_on;
+        int onFg = ContextCompat.getColor(this, R.color.md_theme_onPrimary);
+        int offFg = ContextCompat.getColor(this, R.color.text_muted);
+        TextView[] modes = {steerModePlan, steerModeSteer, steerModeQueue};
+        for (int i = 0; i < modes.length; i++) {
+            TextView tv = modes[i];
+            if (tv == null) continue;
+            if (i == composerMode) {
+                tv.setBackgroundResource(on);
+                tv.setTextColor(onFg);
+            } else {
+                tv.setBackground(null);
+                tv.setTextColor(offFg);
+            }
         }
     }
 
@@ -899,47 +989,123 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private void applySessionStats(@Nullable JSONObject data) {
-        if (footerStats == null) return;
+        // Footer connection line always stays; metric chips only when RPC provides values.
         if (data == null) {
-            footerStats.setVisibility(View.GONE);
+            hideFooterMetrics();
             return;
         }
         StringBuilder sb = new StringBuilder();
+        Double contextPct = null;
         boolean hasTokens = data.has("contextTokens") && !data.isNull("contextTokens");
         boolean hasWindow = data.has("contextWindow") && !data.isNull("contextWindow");
         if (hasTokens && hasWindow) {
-            sb.append(data.opt("contextTokens")).append('/').append(data.opt("contextWindow"));
+            double tokens = asDouble(data.opt("contextTokens"));
+            double window = asDouble(data.opt("contextWindow"));
+            if (window > 0) {
+                contextPct = Math.max(0, Math.min(100, tokens * 100.0 / window));
+                sb.append(String.format(java.util.Locale.US, "%.0f%%", contextPct));
+            } else {
+                sb.append(formatNumber(data.opt("contextTokens")))
+                        .append('/').append(formatNumber(data.opt("contextWindow")));
+            }
+        } else if (data.has("contextPercent") && !data.isNull("contextPercent")) {
+            contextPct = asDouble(data.opt("contextPercent"));
+            if (contextPct <= 1.0) contextPct *= 100;
+            sb.append(String.format(java.util.Locale.US, "%.0f%%", contextPct));
         } else if (hasTokens) {
-            sb.append(data.opt("contextTokens"));
-        } else if (hasWindow) {
-            sb.append(data.opt("contextWindow"));
+            sb.append(formatNumber(data.opt("contextTokens")));
         }
+
         if (data.has("cacheRate") && !data.isNull("cacheRate")) {
             if (sb.length() > 0) sb.append(" · ");
-            Object rate = data.opt("cacheRate");
-            if (rate instanceof Number) {
-                double v = ((Number) rate).doubleValue();
-                if (v <= 1.0) sb.append(String.format(java.util.Locale.US, "%.0f%%", v * 100));
-                else sb.append(String.format(java.util.Locale.US, "%.0f%%", v));
-            } else {
-                sb.append(rate);
-            }
+            sb.append("cache ").append(formatPercent(data.opt("cacheRate")));
+        } else if (data.has("cachePercent") && !data.isNull("cachePercent")) {
+            if (sb.length() > 0) sb.append(" · ");
+            sb.append("cache ").append(formatPercent(data.opt("cachePercent")));
         }
+
         if (data.has("cost") && !data.isNull("cost")) {
             if (sb.length() > 0) sb.append(" · ");
             Object cost = data.opt("cost");
             if (cost instanceof Number) {
-                sb.append(String.format(java.util.Locale.US, "$%.4f", ((Number) cost).doubleValue()));
+                sb.append(String.format(java.util.Locale.US, "$%.2f", ((Number) cost).doubleValue()));
             } else {
-                sb.append(cost);
+                String c = String.valueOf(cost);
+                if (!c.isEmpty()) sb.append(c.startsWith("$") ? c : "$" + c);
             }
         }
-        if (sb.length() == 0) {
-            footerStats.setVisibility(View.GONE);
-        } else {
-            footerStats.setText(sb.toString());
-            footerStats.setVisibility(View.VISIBLE);
+
+        if ((data.has("inputTokens") && !data.isNull("inputTokens"))
+                || (data.has("outputTokens") && !data.isNull("outputTokens"))) {
+            if (sb.length() > 0) sb.append(" · ");
+            if (data.has("inputTokens") && !data.isNull("inputTokens")) {
+                sb.append("↑").append(formatNumber(data.opt("inputTokens")));
+            }
+            if (data.has("outputTokens") && !data.isNull("outputTokens")) {
+                if (data.has("inputTokens") && !data.isNull("inputTokens")) sb.append(' ');
+                sb.append("↓").append(formatNumber(data.opt("outputTokens")));
+            }
+        } else if (data.has("totalTokens") && !data.isNull("totalTokens")) {
+            if (sb.length() > 0) sb.append(" · ");
+            sb.append(formatNumber(data.opt("totalTokens"))).append(" tok");
         }
+
+        boolean hasMetrics = sb.length() > 0 || contextPct != null;
+        if (footerSep != null) footerSep.setVisibility(hasMetrics ? View.VISIBLE : View.GONE);
+        if (contextBarWrap != null) {
+            if (contextPct != null) {
+                contextBarWrap.setVisibility(View.VISIBLE);
+                if (contextBarFill != null) {
+                    int track = contextBarWrap.getWidth();
+                    if (track <= 0) track = Math.round(36 * getResources().getDisplayMetrics().density);
+                    int fill = Math.max(0, Math.round(track * (float) (contextPct / 100.0)));
+                    android.view.ViewGroup.LayoutParams lp = contextBarFill.getLayoutParams();
+                    lp.width = fill;
+                    contextBarFill.setLayoutParams(lp);
+                }
+            } else {
+                contextBarWrap.setVisibility(View.GONE);
+            }
+        }
+        if (footerStats != null) {
+            if (sb.length() == 0) {
+                footerStats.setVisibility(View.GONE);
+            } else {
+                footerStats.setText(sb.toString());
+                footerStats.setVisibility(View.VISIBLE);
+            }
+        }
+    }
+
+    private void hideFooterMetrics() {
+        if (footerStats != null) footerStats.setVisibility(View.GONE);
+        if (footerSep != null) footerSep.setVisibility(View.GONE);
+        if (contextBarWrap != null) contextBarWrap.setVisibility(View.GONE);
+    }
+
+    private static double asDouble(Object v) {
+        if (v instanceof Number) return ((Number) v).doubleValue();
+        try { return Double.parseDouble(String.valueOf(v)); } catch (Exception e) { return 0; }
+    }
+
+    private static String formatPercent(Object rate) {
+        if (rate instanceof Number) {
+            double v = ((Number) rate).doubleValue();
+            if (v <= 1.0) return String.format(java.util.Locale.US, "%.0f%%", v * 100);
+            return String.format(java.util.Locale.US, "%.0f%%", v);
+        }
+        String s = String.valueOf(rate);
+        return s.endsWith("%") ? s : s + "%";
+    }
+
+    private static String formatNumber(Object n) {
+        if (n instanceof Number) {
+            long v = ((Number) n).longValue();
+            if (v >= 1_000_000) return String.format(java.util.Locale.US, "%.1fM", v / 1_000_000.0);
+            if (v >= 10_000) return String.format(java.util.Locale.US, "%.1fk", v / 1000.0);
+            return String.valueOf(v);
+        }
+        return String.valueOf(n);
     }
 
     private void maybeRequestSessionStats() {
@@ -1060,6 +1226,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 dispatchSteerOrFollowUp(text);
                 return;
             }
+            // 空正文时 stop 由独立按钮处理；此处仍兼容旧点击
             rpc("clear_queue", null);
             rpc("abort", null);
             return;
@@ -1067,7 +1234,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         submit();
     }
 
-    /** 流式中有正文：按 Steer/Queue 开关发 steer 或 follow_up。 */
+    /** 流式中有正文：steer → steer；plan/queue → follow_up。 */
     private void dispatchSteerOrFollowUp(String text) {
         if (!isConnected()) {
             Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
@@ -1082,11 +1249,34 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         } catch (Exception e) {
             throw new IllegalStateException("steer/follow_up params", e);
         }
-        String cmd = steerMode ? "steer" : "follow_up";
+        String cmd = composerMode == 1 ? "steer" : "follow_up";
         pendingPromptRpcId = rpc(cmd, params);
         pendingComposerText = text;
         stickToBottom = true;
         maybeScrollToBottom(true);
+        updateSendEnabled();
+    }
+
+    /** 重试：把最近一条用户正文填回输入框，便于再发。 */
+    private void retryLastUserPrompt() {
+        if (adapter == null) return;
+        String last = "";
+        java.util.List<ChatMessage> snap = adapter.snapshot();
+        for (int i = snap.size() - 1; i >= 0; i--) {
+            ChatMessage m = snap.get(i);
+            if (m.role == ChatMessage.Role.USER && m.text != null && !m.text.isEmpty()) {
+                last = m.text;
+                break;
+            }
+        }
+        if (last.isEmpty()) {
+            Toast.makeText(this, R.string.fork_empty, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (composer != null) {
+            composer.setText(last);
+            composer.setSelection(last.length());
+        }
         updateSendEnabled();
     }
 
@@ -1570,6 +1760,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         if ("get_state".equals(command) && data != null) {
             applyGetStateModel(data);
+            applyGetStateWorkspace(data);
             // BridgeService 只交付最新、且未跨模型/会话/运行状态变更的 get_state。
             String path = data.optString("sessionFile", data.optString("sessionPath", ""));
             if (!path.equals(currentSessionPath)) {
@@ -1608,6 +1799,71 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         applyGetStateModel(null);
         ModelRpc.Applied applied = ModelRpc.fromModelObject(data);
         if (resumed && applied != null) Toast.makeText(this, applied.label, Toast.LENGTH_SHORT).show();
+    }
+
+    /**
+     * Optional workspace chrome from get_state. Missing fields stay hidden —
+     * never render em-dash placeholders.
+     */
+    private void applyGetStateWorkspace(@Nullable JSONObject data) {
+        if (data == null) return;
+        stateCwd = firstString(data, "cwd", "workingDirectory", "workDir", "directory");
+        stateBranch = firstString(data, "gitBranch", "branch", "git_branch");
+        // Nested git object support
+        JSONObject git = data.optJSONObject("git");
+        if (stateBranch.isEmpty() && git != null) {
+            stateBranch = firstString(git, "branch", "gitBranch", "name");
+        }
+        if (stateCwd.isEmpty() && git != null) {
+            stateCwd = firstString(git, "cwd", "root", "workTree");
+        }
+        stateDiffBadge = buildDiffBadge(data);
+        if (stateDiffBadge.isEmpty() && git != null) {
+            stateDiffBadge = buildDiffBadge(git);
+        }
+        // Some stats may also arrive on get_state — apply without erasing connection line.
+        if (data.has("contextTokens") || data.has("contextWindow") || data.has("cacheRate")
+                || data.has("cost") || data.has("contextPercent") || data.has("totalTokens")) {
+            applySessionStats(data);
+        }
+    }
+
+    private static String firstString(JSONObject data, String... keys) {
+        for (String key : keys) {
+            if (data.has(key) && !data.isNull(key)) {
+                String v = data.optString(key, "").trim();
+                if (!v.isEmpty() && !"null".equalsIgnoreCase(v)) return v;
+            }
+        }
+        return "";
+    }
+
+    private static String buildDiffBadge(JSONObject data) {
+        int add = optNonNeg(data, "additions", "linesAdded", "insertions", "added");
+        int del = optNonNeg(data, "deletions", "linesRemoved", "removed", "deleted");
+        int files = optNonNeg(data, "filesChanged", "changedFiles", "files", "fileCount");
+        if (add < 0 && del < 0 && files < 0) return "";
+        StringBuilder sb = new StringBuilder();
+        if (add >= 0) sb.append('+').append(add);
+        if (del >= 0) {
+            if (sb.length() > 0) sb.append(' ');
+            sb.append('-').append(del);
+        }
+        if (files >= 0) {
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(files).append(files == 1 ? " file" : " files");
+        }
+        return sb.toString();
+    }
+
+    private static int optNonNeg(JSONObject data, String... keys) {
+        for (String key : keys) {
+            if (data.has(key) && !data.isNull(key)) {
+                Object v = data.opt(key);
+                if (v instanceof Number) return Math.max(0, ((Number) v).intValue());
+            }
+        }
+        return -1;
     }
 
     private void applyGetStateModel(@Nullable JSONObject data) {

@@ -114,6 +114,9 @@ public final class TranscriptReducer {
                 String output = old == null ? "" : old.output;
                 String state = "running";
                 long duration = -1;
+                int additions = old == null ? -1 : old.additions;
+                int deletions = old == null ? -1 : old.deletions;
+                String summary = old == null ? "" : old.summary;
                 if ("tool_execution_update".equals(event.optString("type"))) {
                     // partialResult is the latest cumulative result (bash/read tool contract), not an append delta.
                     JSONObject result = event.optJSONObject("partialResult");
@@ -126,8 +129,17 @@ public final class TranscriptReducer {
                             || (details != null && details.optBoolean("cancelled")));
                     state = cancelled ? "cancelled" : event.optBoolean("isError") ? "error" : "done";
                     duration = event.optLong("durationMs", -1);
+                    int[] diff = toolDiffOf(result, details);
+                    additions = diff[0];
+                    deletions = diff[1];
+                    summary = toolSummaryOf(result, details, output, duration);
+                    if (result != null && (result.optBoolean("needsApproval")
+                            || (details != null && details.optBoolean("needsApproval")))) {
+                        state = ChatMessage.ToolData.STATE_PENDING;
+                    }
                 }
-                ChatMessage.ToolData data = new ChatMessage.ToolData(id, name, command, output, state, duration);
+                ChatMessage.ToolData data = new ChatMessage.ToolData(id, name, command, output, state,
+                        duration, additions, deletions, summary);
                 tools.put(id, data);
                 Integer row = toolRows.get(id);
                 boolean append = row == null;
@@ -162,7 +174,8 @@ public final class TranscriptReducer {
                     Integer row = toolRows.get(item.getKey());
                     if (row != null && "running".equals(data.state)) {
                         ChatMessage.ToolData ended = new ChatMessage.ToolData(data.id, data.name, data.command,
-                                data.output, event.optBoolean("aborted") ? "cancelled" : "done", data.durationMs);
+                                data.output, event.optBoolean("aborted") ? "cancelled" : "done", data.durationMs,
+                                data.additions, data.deletions, data.summary);
                         item.setValue(ended);
                         edits.add(new Edit(row, ChatMessage.tool(ended, toolTimes.getOrDefault(data.id, 0L)), false));
                     }
@@ -263,6 +276,73 @@ public final class TranscriptReducer {
         return args.length() == 0 ? "" : args.toString();
     }
 
+    /** [additions, deletions]; -1 means field absent. */
+    private static int[] toolDiffOf(JSONObject result, JSONObject details) {
+        int add = firstInt(result, "additions", "added", "linesAdded", "insertions");
+        int del = firstInt(result, "deletions", "removed", "linesRemoved", "deletionsCount");
+        if (add < 0 && details != null) add = firstInt(details, "additions", "added", "linesAdded", "insertions");
+        if (del < 0 && details != null) del = firstInt(details, "deletions", "removed", "linesRemoved", "deletionsCount");
+        if (add < 0 && del < 0 && details != null) {
+            JSONObject diff = details.optJSONObject("diff");
+            if (diff != null) {
+                add = firstInt(diff, "additions", "added", "linesAdded");
+                del = firstInt(diff, "deletions", "removed", "linesRemoved");
+            }
+        }
+        return new int[]{add, del};
+    }
+
+    private static int firstInt(JSONObject obj, String... keys) {
+        if (obj == null) return -1;
+        for (String key : keys) {
+            if (obj.has(key) && !obj.isNull(key)) {
+                Object v = obj.opt(key);
+                if (v instanceof Number) return Math.max(0, ((Number) v).intValue());
+            }
+        }
+        return -1;
+    }
+
+    /** Compact status like "48 passed · 3.1s"; empty if nothing useful. */
+    private static String toolSummaryOf(JSONObject result, JSONObject details, String output, long durationMs) {
+        if (result != null) {
+            String s = result.optString("summary", "");
+            if (!s.isEmpty()) return s;
+        }
+        if (details != null) {
+            String s = details.optString("summary", "");
+            if (!s.isEmpty()) return s;
+            if (details.has("passed") || details.has("failed")) {
+                StringBuilder sb = new StringBuilder();
+                if (details.has("passed") && !details.isNull("passed")) sb.append(details.opt("passed")).append(" passed");
+                if (details.has("failed") && !details.isNull("failed")) {
+                    if (sb.length() > 0) sb.append(" · ");
+                    sb.append(details.opt("failed")).append(" failed");
+                }
+                if (durationMs > 0) {
+                    if (sb.length() > 0) sb.append(" · ");
+                    sb.append(formatDurationShort(durationMs));
+                }
+                if (sb.length() > 0) return sb.toString();
+            }
+        }
+        // Heuristic: last non-empty line of short test-like output.
+        if (output != null && output.length() > 0 && output.length() < 400) {
+            String[] lines = output.trim().split("\n");
+            String last = lines[lines.length - 1].trim();
+            if (last.matches("(?i).*\\b(passed|failed|ok|tests?)\\b.*") && last.length() < 80) {
+                return last;
+            }
+        }
+        return "";
+    }
+
+    private static String formatDurationShort(long ms) {
+        if (ms < 1000) return ms + "ms";
+        if (ms < 60_000) return String.format(java.util.Locale.US, "%.1fs", ms / 1000f);
+        return String.format(java.util.Locale.US, "%dm%02ds", ms / 60_000, (ms % 60_000) / 1000);
+    }
+
     public static List<ChatMessage> history(JSONObject data) {
         List<ChatMessage> result = new ArrayList<>();
         TranscriptReducer reader = new TranscriptReducer();
@@ -280,14 +360,24 @@ public final class TranscriptReducer {
                 String name = message.optString("toolName", call == null ? "tool" : call.name);
                 JSONObject details = message.optJSONObject("details");
                 boolean cancelled = message.optBoolean("cancelled") || (details != null && details.optBoolean("cancelled"));
+                String output = textOfMessage(message);
+                long durationMs = message.optLong("durationMs", -1);
+                int[] diff = toolDiffOf(message, details);
+                String summary = toolSummaryOf(message, details, output, durationMs);
+                String state = cancelled ? "cancelled"
+                        : message.optBoolean("needsApproval") ? ChatMessage.ToolData.STATE_PENDING
+                        : message.optBoolean("isError") ? "error" : "done";
                 result.add(ChatMessage.tool(new ChatMessage.ToolData(id, name, call == null ? "" : call.command,
-                        textOfMessage(message), cancelled ? "cancelled" : message.optBoolean("isError") ? "error" : "done",
-                        message.optLong("durationMs", -1)), timestamp));
+                        output, state, durationMs, diff[0], diff[1], summary), timestamp));
             } else if ("bashExecution".equals(role)) {
                 String state = message.optBoolean("cancelled") ? "cancelled"
+                        : message.optBoolean("needsApproval") ? ChatMessage.ToolData.STATE_PENDING
                         : message.optInt("exitCode", 0) == 0 ? "done" : "error";
+                String output = message.optString("output");
+                long durationMs = message.optLong("durationMs", -1);
+                String summary = toolSummaryOf(message, message.optJSONObject("details"), output, durationMs);
                 result.add(ChatMessage.tool(new ChatMessage.ToolData("history-bash-" + i, "bash",
-                        message.optString("command"), message.optString("output"), state, -1), timestamp));
+                        message.optString("command"), output, state, durationMs, -1, -1, summary), timestamp));
             } else if ("user".equals(role)) {
                 // 用户消息走结构化解析：原生 image 块变成附件缩略图，文件 metadata 尾部被剥离。
                 ChatMessage user = ChatMessage.fromUserContent(message);
