@@ -64,6 +64,7 @@ const ALLOWED = new Set([
   "new_session", "switch_session", "fork", "clone",
   "get_state", "get_messages", "get_last_assistant_text", "get_tree", "get_entries",
   "get_session_stats", "get_fork_messages",
+  "get_commands", // 斜杠命令发现：扩展 / prompt 模板 / skills
   "set_model", "cycle_model", "get_available_models",
   "set_thinking_level", "cycle_thinking_level", "get_available_thinking_levels",
   "set_steering_mode", "set_follow_up_mode",
