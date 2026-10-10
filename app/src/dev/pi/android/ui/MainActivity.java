@@ -40,6 +40,7 @@ import java.util.List;
 import java.util.Map;
 
 import dev.pi.android.R;
+import dev.pi.android.bridge.AgentState;
 import dev.pi.android.bridge.BridgeService;
 import dev.pi.android.model.ChatMessage;
 import dev.pi.android.model.SlashCommand;
@@ -63,6 +64,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             service.setHost(MainActivity.this);
             service.takePendingAsk();
             lastConfig = SettingsActivity.configSignature(MainActivity.this);
+            restoreFromAgentState();
             refreshEmptyState();
             if (pendingPrompt != null) requestSend(pendingPrompt);
             if (isConnected() && pendingUiTarget != null) {
@@ -134,6 +136,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     protected void onCreate(Bundle savedInstanceState) {
         SettingsActivity.applySavedTheme(this);
         super.onCreate(savedInstanceState);
+        AgentState.get().loadCache(this);
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         setContentView(R.layout.activity_main);
 
@@ -168,8 +171,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         adapter = new MessageAdapter(size -> {
             refreshEmptyState();
             maybeScrollToBottom(false);
+            snapshotChat();
         });
         list.setAdapter(adapter);
+        restoreChatSnapshot();
         list.addOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
             public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
@@ -248,10 +253,41 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         });
 
         handleIntentExtras(getIntent());
-        setConnectionVisual("connecting", getString(R.string.status_connecting));
+        restoreFromAgentState();
+        if (!"online".equals(AgentState.get().status())) {
+            setConnectionVisual("connecting", getString(R.string.status_connecting));
+        }
         refreshEmptyState();
-        reconnect();
+        // 已连接时不强制 reconnect，避免主题重建重复握手
+        reconnectIfConfigured();
         if (isConnected() && uiTarget != null) openUiTarget(uiTarget);
+    }
+
+    private void restoreFromAgentState() {
+        AgentState st = AgentState.get();
+        if (!st.provider().isEmpty()) currentProvider = st.provider();
+        if (!st.modelId().isEmpty()) currentModelId = st.modelId();
+        if (!st.thinking().isEmpty()) currentThinking = st.thinking();
+        if (!st.modelLabel().isEmpty() || !st.thinking().isEmpty()) {
+            String name = st.modelLabel().isEmpty() ? getString(R.string.status_online) : st.modelLabel();
+            modelStatus = name + (st.thinking().isEmpty() ? "" : " · " + st.thinking());
+            if ("online".equals(st.status()) || (service != null && service.isConnected())) {
+                setConnectionVisual("online", modelStatus);
+            }
+        }
+        if (!st.chatSessionPath().isEmpty()) currentSessionPath = st.chatSessionPath();
+    }
+
+    private void restoreChatSnapshot() {
+        List<ChatMessage> snap = AgentState.get().chatSnapshot();
+        if (snap.isEmpty() || adapter == null) return;
+        adapter.replaceAll(snap);
+        maybeScrollToBottom(true);
+    }
+
+    private void snapshotChat() {
+        if (adapter == null) return;
+        AgentState.get().replaceChat(currentSessionPath, adapter.snapshot());
     }
 
     private void handleIntentExtras(@Nullable Intent intent) {
@@ -350,8 +386,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     protected void onResume() {
         super.onResume();
         resumed = true;
+        restoreFromAgentState();
+        if (serviceBound && service != null) {
+            service.setHost(this);
+            service.takePendingAsk();
+        }
         reconnectIfConfigured();
-        if (serviceBound && service != null) service.takePendingAsk();
         if (isConnected()) refreshSlashCommands();
         refreshEmptyState();
     }
@@ -383,6 +423,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     @Override
+    protected void onPause() {
+        snapshotChat();
+        super.onPause();
+    }
+
+    @Override
     protected void onStop() {
         super.onStop();
         resumed = false;
@@ -390,8 +436,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     @Override
     protected void onDestroy() {
+        snapshotChat();
         if (serviceBound) {
-            if (service != null) service.setHost(null);
+            if (service != null) service.clearHostIf(this);
             unbindService(svcConn);
             serviceBound = false;
         }
@@ -978,16 +1025,15 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             return;
         }
         if ("get_state".equals(command) && data != null) {
-            JSONObject model = data.optJSONObject("model");
-            String name = model != null ? model.optString("name", model.optString("id")) : null;
-            if (model != null) {
-                currentProvider = model.optString("provider", currentProvider);
-                currentModelId = model.optString("id", model.optString("modelId", currentModelId));
-            }
-            String thinking = data.optString("thinkingLevel", null);
-            if (thinking != null) currentThinking = thinking;
-            modelStatus = (name != null ? name : getString(R.string.status_online))
-                    + (thinking != null && !thinking.isEmpty() ? " · " + thinking : "");
+            // BridgeService 已同步 AgentState；再读一份填本地字段
+            AgentState st = AgentState.get();
+            if (!st.provider().isEmpty()) currentProvider = st.provider();
+            if (!st.modelId().isEmpty()) currentModelId = st.modelId();
+            if (!st.thinking().isEmpty()) currentThinking = st.thinking();
+            String name = !st.modelLabel().isEmpty()
+                    ? st.modelLabel()
+                    : getString(R.string.status_online);
+            modelStatus = name + (st.thinking().isEmpty() ? "" : " · " + st.thinking());
             setConnectionVisual("online", modelStatus);
             String path = data.optString("sessionFile", data.optString("sessionPath", ""));
             if (!path.isEmpty()) currentSessionPath = path;
@@ -1283,6 +1329,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         applySessionTitle();
         rpc("new_session", null);
         adapter.clear();
+        AgentState.get().clearChat();
         stickToBottom = true;
         refreshEmptyState();
     }
@@ -1305,6 +1352,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                     rpc("set_model", params);
                     currentProvider = provider;
                     currentModelId = modelId;
+                    AgentState.get().setModel(provider, modelId, MainActivity.this);
                     Toast.makeText(this, provider + " / " + modelId, Toast.LENGTH_SHORT).show();
                     rpc("get_state", null);
                 });
@@ -1325,6 +1373,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
             rpc("set_thinking_level", params);
             currentThinking = level;
+            AgentState.get().setThinking(level, MainActivity.this);
             setConnectionVisual("online",
                     (currentModelId.isEmpty() ? getString(R.string.status_online) : currentModelId)
                             + " · " + level);

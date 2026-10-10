@@ -49,6 +49,8 @@
     <string name="settings_port_label">端口</string>
     <string name="settings_token_label">Token</string>
     <string name="settings_token_hint">~/.pi/agent/pi-android.token</string>
+    <string name="settings_token_show">显示 Token</string>
+    <string name="settings_token_hide">隐藏 Token</string>
     <string name="settings_help">返回聊天页后会按新配置自动重连。连接器须绑 loopback，且不要默认开启 --allow-bash。</string>
     <string name="settings_saved">已保存，返回后会重连</string>
     <string name="settings_theme">主题</string>

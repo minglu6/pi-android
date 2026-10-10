@@ -6,8 +6,11 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.IBinder;
+import android.text.InputType;
+import android.text.method.PasswordTransformationMethod;
 import android.view.View;
 import android.widget.EditText;
+import android.widget.ImageButton;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -28,6 +31,7 @@ import java.util.Map;
 
 import dev.pi.android.BuildInfo;
 import dev.pi.android.R;
+import dev.pi.android.bridge.AgentState;
 import dev.pi.android.bridge.BridgeService;
 import dev.pi.android.ui.ExtensionUi;
 
@@ -45,6 +49,8 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
     private EditText hostEdit;
     private EditText portEdit;
     private EditText tokenEdit;
+    private ImageButton tokenToggle;
+    private boolean tokenVisible;
     private TextView modelValue;
     private TextView thinkingValue;
     private TextView themeValue;
@@ -57,16 +63,15 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
     private String currentModelLabel = "";
     private String currentThinking = "";
 
+    private final AgentState.Listener agentListener = this::applyAgentStateToUi;
+
     private final android.content.ServiceConnection svcConn = new android.content.ServiceConnection() {
         @Override public void onServiceConnected(ComponentName name, IBinder binder) {
             service = ((BridgeService.LocalBinder) binder).get();
             serviceBound = true;
             service.setHost(SettingsActivity.this);
-            if (service.isConnected()) {
-                service.rpc("get_state", null);
-                service.rpc("get_available_models", null);
-                service.rpc("get_available_thinking_levels", null);
-            }
+            applyAgentStateToUi();
+            refreshFromService();
         }
 
         @Override public void onServiceDisconnected(ComponentName name) {
@@ -136,6 +141,8 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         setContentView(R.layout.activity_settings);
 
+        AgentState.get().loadCache(this);
+
         View top = findViewById(R.id.settings_top);
         View root = findViewById(R.id.settings_root);
         ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {
@@ -150,6 +157,7 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
         hostEdit = findViewById(R.id.host);
         portEdit = findViewById(R.id.port);
         tokenEdit = findViewById(R.id.token);
+        tokenToggle = findViewById(R.id.token_toggle);
         modelValue = findViewById(R.id.pref_model_value);
         thinkingValue = findViewById(R.id.pref_thinking_value);
         themeValue = findViewById(R.id.pref_theme_value);
@@ -157,8 +165,15 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
 
         hostEdit.setText(host(this));
         portEdit.setText(String.valueOf(port(this)));
+        // 默认掩码；绝不把 token 打到日志
         tokenEdit.setText(token(this));
+        applyTokenVisibility(false);
+        if (tokenToggle != null) {
+            tokenToggle.setOnClickListener(v -> applyTokenVisibility(!tokenVisible));
+        }
+
         refreshThemeLabel();
+        applyAgentStateToUi();
         if (aboutVersion != null) {
             aboutVersion.setText(getString(R.string.settings_version_fmt, BuildInfo.HEAD, BuildInfo.BUILD_TIME));
         }
@@ -167,8 +182,20 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
         findViewById(R.id.pref_thinking).setOnClickListener(v -> showThinkingPicker());
         findViewById(R.id.pref_theme).setOnClickListener(v -> showThemePicker());
 
+        AgentState.get().addListener(agentListener);
+
         Intent svc = new Intent(this, BridgeService.class);
         bindService(svc, svcConn, Context.BIND_AUTO_CREATE);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        applyAgentStateToUi();
+        if (serviceBound && service != null) {
+            service.setHost(this);
+            refreshFromService();
+        }
     }
 
     @Override
@@ -179,12 +206,61 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
 
     @Override
     protected void onDestroy() {
+        AgentState.get().removeListener(agentListener);
         if (serviceBound) {
-            if (service != null) service.setHost(null);
+            if (service != null) service.clearHostIf(this);
             unbindService(svcConn);
             serviceBound = false;
         }
         super.onDestroy();
+    }
+
+    private void applyTokenVisibility(boolean visible) {
+        tokenVisible = visible;
+        if (tokenEdit == null) return;
+        int sel = tokenEdit.getSelectionEnd();
+        if (visible) {
+            tokenEdit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+            tokenEdit.setTransformationMethod(null);
+            if (tokenToggle != null) {
+                tokenToggle.setImageResource(R.drawable.ic_visibility_off);
+                tokenToggle.setContentDescription(getString(R.string.settings_token_hide));
+            }
+        } else {
+            tokenEdit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+            tokenEdit.setTransformationMethod(PasswordTransformationMethod.getInstance());
+            if (tokenToggle != null) {
+                tokenToggle.setImageResource(R.drawable.ic_visibility);
+                tokenToggle.setContentDescription(getString(R.string.settings_token_show));
+            }
+        }
+        if (sel >= 0) {
+            try {
+                tokenEdit.setSelection(Math.min(sel, tokenEdit.getText().length()));
+            } catch (IndexOutOfBoundsException ignored) {
+            }
+        }
+    }
+
+    private void applyAgentStateToUi() {
+        AgentState st = AgentState.get();
+        String label = st.modelLabel();
+        String thinking = st.thinking();
+        if (label != null && !label.isEmpty()) {
+            currentModelLabel = label;
+            if (modelValue != null) modelValue.setText(label);
+        }
+        if (thinking != null && !thinking.isEmpty()) {
+            currentThinking = thinking;
+            if (thinkingValue != null) thinkingValue.setText(thinking);
+        }
+    }
+
+    private void refreshFromService() {
+        if (service == null || !service.isConnected()) return;
+        service.rpc("get_state", null);
+        service.rpc("get_available_models", null);
+        service.rpc("get_available_thinking_levels", null);
     }
 
     private void saveConnectorFields() {
@@ -235,9 +311,9 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
             Toast.makeText(this, R.string.models_not_ready, Toast.LENGTH_SHORT).show();
             return;
         }
-        String curProv = "";
-        String curId = "";
-        if (currentModelLabel != null && currentModelLabel.contains(" / ")) {
+        String curProv = AgentState.get().provider();
+        String curId = AgentState.get().modelId();
+        if ((curProv == null || curProv.isEmpty()) && currentModelLabel != null && currentModelLabel.contains(" / ")) {
             String[] parts = currentModelLabel.split(" / ", 2);
             curProv = parts[0];
             curId = parts[1];
@@ -251,6 +327,7 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
                 throw new IllegalStateException("set_model params", e);
             }
             service.rpc("set_model", params);
+            AgentState.get().setModel(provider, modelId, SettingsActivity.this);
             currentModelLabel = provider + " / " + modelId;
             if (modelValue != null) modelValue.setText(currentModelLabel);
         });
@@ -274,6 +351,7 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
                 throw new IllegalStateException("set_thinking_level params", e);
             }
             service.rpc("set_thinking_level", params);
+            AgentState.get().setThinking(level, SettingsActivity.this);
             currentThinking = level;
             if (thinkingValue != null) thinkingValue.setText(currentThinking);
         });
@@ -294,11 +372,7 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
     // ---------- BridgeService.UiHost ----------
 
     @Override public void onStatus(String state, @Nullable String error) {
-        if ("online".equals(state) && service != null) {
-            service.rpc("get_state", null);
-            service.rpc("get_available_models", null);
-            service.rpc("get_available_thinking_levels", null);
-        }
+        if ("online".equals(state)) refreshFromService();
     }
 
     @Override public void onEvent(JSONObject ev) { /* ignore on settings */ }
@@ -335,13 +409,8 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
             return;
         }
         if ("get_state".equals(command)) {
-            JSONObject model = data.optJSONObject("model");
-            if (model != null) {
-                currentModelLabel = model.optString("name", model.optString("id", ""));
-                if (modelValue != null && !currentModelLabel.isEmpty()) modelValue.setText(currentModelLabel);
-            }
-            currentThinking = data.optString("thinkingLevel", "");
-            if (thinkingValue != null && !currentThinking.isEmpty()) thinkingValue.setText(currentThinking);
+            // BridgeService 已写入 AgentState；此处只刷新 UI
+            applyAgentStateToUi();
         }
     }
 

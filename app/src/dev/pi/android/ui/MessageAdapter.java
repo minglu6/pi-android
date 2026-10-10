@@ -86,6 +86,11 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
         return items.size();
     }
 
+    /** 主题/旋转重建时写入 AgentState 的不可变快照。 */
+    public List<ChatMessage> snapshot() {
+        return new ArrayList<>(items);
+    }
+
     /** 对话是否为空：系统 chip 不算「有内容」。 */
     public boolean onlySystemOrEmpty() {
         for (ChatMessage m : items) {

@@ -123,6 +123,7 @@ public class BridgeService extends Service {
             @Override
             public void onStatus(String state, @Nullable String error) {
                 dbg("status " + state);
+                AgentState.get().setStatus(state);
                 if ("online".equals(state)) bridge.rpc("get_state", null);
                 notifyOngoing(state);
                 if (host != null) host.onStatus(state, error);
@@ -131,6 +132,10 @@ public class BridgeService extends Service {
             @Override
             public void onResponse(String id, boolean ok, String command, @Nullable JSONObject data, @Nullable String error) {
                 dbg("resp " + command + " ok=" + ok);
+                // 无论当前 UiHost 是谁，都更新共享快照（主题重建时 Settings/Main 都会丢实例字段）
+                if (ok && "get_state".equals(command)) {
+                    AgentState.get().applyGetState(data, BridgeService.this);
+                }
                 if (host != null) host.onResponse(id, ok, command, data, error);
             }
 
@@ -231,8 +236,25 @@ public class BridgeService extends Service {
         dbg("setHost " + (h != null));
         if (h != null) {
             publishStatuses();
-            if (!bridge.isConnected()) connectWithSaved();
+            if (!bridge.isConnected()) {
+                connectWithSaved();
+            } else {
+                // 主题重建后 Activity 重新 bind：同步推送 online，避免卡在「连接中」
+                h.onStatus("online", null);
+            }
         }
+    }
+
+    /** 仅当 h 仍是当前 host 时清空，避免主题重建时旧 Activity onDestroy 误清新 host。 */
+    public void clearHostIf(@Nullable UiHost h) {
+        if (h != null && this.host == h) {
+            this.host = null;
+            dbg("clearHostIf cleared");
+        }
+    }
+
+    public boolean isHost(@Nullable UiHost h) {
+        return h != null && this.host == h;
     }
 
     public String rpc(String command, @Nullable JSONObject params) {
