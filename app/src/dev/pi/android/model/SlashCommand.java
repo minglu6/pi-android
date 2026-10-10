@@ -27,14 +27,34 @@ public final class SlashCommand {
     @NonNull public final String rawName;
     @Nullable public final String description;
     @Nullable public final String source; // extension | prompt | skill | app
+    /** user | project | temporary | path — from get_commands location / sourceInfo.scope */
+    @Nullable public final String location;
 
     public SlashCommand(@NonNull String rawName, @Nullable String description,
                         @Nullable String source, @Nullable String appAction) {
+        this(rawName, description, source, appAction, null);
+    }
+
+    public SlashCommand(@NonNull String rawName, @Nullable String description,
+                        @Nullable String source, @Nullable String appAction,
+                        @Nullable String location) {
         this.rawName = rawName.startsWith("/") ? rawName.substring(1) : rawName;
         this.name = "/" + this.rawName;
         this.description = description;
         this.source = source;
         this.appAction = appAction;
+        this.location = location;
+    }
+
+    public boolean isSkill() {
+        return "skill".equals(source) || rawName.startsWith("skill:");
+    }
+
+    /** Display label without leading skill: prefix. */
+    @NonNull
+    public String skillLabel() {
+        if (rawName.startsWith("skill:")) return rawName.substring("skill:".length());
+        return rawName;
     }
 
     public boolean matches(@Nullable String typed) {
@@ -86,7 +106,15 @@ public final class SlashCommand {
             String desc = o.optString("description", null);
             if (desc != null && desc.trim().isEmpty()) desc = null;
             String source = o.optString("source", null);
-            out.add(new SlashCommand(n, desc, source, null));
+            String location = o.optString("location", null);
+            JSONObject sourceInfo = o.optJSONObject("sourceInfo");
+            if (sourceInfo != null) {
+                if (location == null || location.isEmpty()) {
+                    location = sourceInfo.optString("scope", sourceInfo.optString("source", null));
+                }
+            }
+            if (location != null && location.trim().isEmpty()) location = null;
+            out.add(new SlashCommand(n, desc, source, null, location));
         }
         return out;
     }
@@ -108,7 +136,8 @@ public final class SlashCommand {
                     String desc = (s.description != null && !s.description.isEmpty())
                             ? s.description : app.description;
                     byRaw.put(app.rawName.toLowerCase(Locale.ROOT),
-                            new SlashCommand(app.rawName, desc, s.source != null ? s.source : "app", app.appAction));
+                            new SlashCommand(app.rawName, desc, s.source != null ? s.source : "app",
+                                    app.appAction, s.location));
                 } else {
                     byRaw.put(s.rawName.toLowerCase(Locale.ROOT), s);
                 }
@@ -139,6 +168,7 @@ public final class SlashCommand {
                 o.put("name", c.rawName);
                 if (c.description != null) o.put("description", c.description);
                 if (c.source != null) o.put("source", c.source);
+                if (c.location != null) o.put("location", c.location);
                 arr.put(o);
             } catch (Exception ignored) {
             }

@@ -61,4 +61,18 @@ public final class SlashCommandStore {
         }
         return out;
     }
+
+    /** Skills from last get_commands (source=skill), including cached. */
+    @NonNull
+    public List<SlashCommand> skills() {
+        List<SlashCommand> out = new ArrayList<>();
+        for (SlashCommand c : server) {
+            if (c.isSkill()) out.add(c);
+        }
+        return out;
+    }
+
+    public boolean hasServerCommands() {
+        return server != null && !server.isEmpty();
+    }
 }
