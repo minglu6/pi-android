@@ -1,11 +1,8 @@
 package dev.pi.android.ui;
 
-import android.content.ComponentName;
 import android.content.Context;
-import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Bundle;
-import android.os.IBinder;
 import android.text.InputType;
 import android.text.method.PasswordTransformationMethod;
 import android.view.View;
@@ -22,25 +19,19 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 
-import org.json.JSONObject;
-
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 import dev.pi.android.BuildInfo;
 import dev.pi.android.R;
-import dev.pi.android.bridge.AgentState;
-import dev.pi.android.bridge.BridgeService;
 import dev.pi.android.model.PickerItem;
-import dev.pi.android.ui.ExtensionUi;
 import dev.pi.android.util.AppFonts;
 
 /**
- * 独立设置页：连接器、模型/思考（只读状态）、主题、关于。
- * 模型与思考档位切换只在聊天页 composer 模型芯片 / Pocket picker。
+ * 独立设置页：连接器、外观、关于。
+ * 模型与思考档位只在聊天页顶栏 / composer 模型芯片切换。
  */
-public class SettingsActivity extends AppCompatActivity implements BridgeService.UiHost {
+public class SettingsActivity extends AppCompatActivity {
 
     private static final String PREF = "pi_bridge";
     private static final String K_HOST = "host";
@@ -53,32 +44,9 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
     private EditText tokenEdit;
     private ImageButton tokenToggle;
     private boolean tokenVisible;
-    private TextView modelValue;
-    private TextView thinkingValue;
     private TextView themeValue;
     private TextView termFontValue;
     private TextView termSizeValue;
-
-    private BridgeService service;
-    private boolean serviceBound;
-    private boolean visible;
-
-    private final AgentState.Listener agentListener = this::applyAgentStateToUi;
-
-    private final android.content.ServiceConnection svcConn = new android.content.ServiceConnection() {
-        @Override public void onServiceConnected(ComponentName name, IBinder binder) {
-            service = ((BridgeService.LocalBinder) binder).get();
-            serviceBound = true;
-            service.setHost(SettingsActivity.this);
-            applyAgentStateToUi();
-            refreshFromService();
-        }
-
-        @Override public void onServiceDisconnected(ComponentName name) {
-            serviceBound = false;
-            service = null;
-        }
-    };
 
     public static String host(Context ctx) {
         return prefs(ctx).getString(K_HOST, "127.0.0.1");
@@ -141,8 +109,6 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         setContentView(R.layout.activity_settings);
 
-        AgentState.get().loadCache(this);
-
         View top = findViewById(R.id.settings_top);
         View root = findViewById(R.id.settings_root);
         ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {
@@ -158,8 +124,6 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
         portEdit = findViewById(R.id.port);
         tokenEdit = findViewById(R.id.token);
         tokenToggle = findViewById(R.id.token_toggle);
-        modelValue = findViewById(R.id.pref_model_value);
-        thinkingValue = findViewById(R.id.pref_thinking_value);
         themeValue = findViewById(R.id.pref_theme_value);
         TextView aboutVersion = findViewById(R.id.about_version);
 
@@ -173,12 +137,10 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
         }
 
         refreshThemeLabel();
-        applyAgentStateToUi();
         if (aboutVersion != null) {
             aboutVersion.setText(getString(R.string.settings_version_fmt, BuildInfo.HEAD, BuildInfo.BUILD_TIME));
         }
 
-        // pref_model / pref_thinking are read-only status; switch via composer chip.
         findViewById(R.id.pref_theme).setOnClickListener(v -> showThemePicker());
 
         termFontValue = findViewById(R.id.pref_term_font_value);
@@ -192,40 +154,12 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
         if (prefTermSize != null) {
             prefTermSize.setOnClickListener(v -> showTermSizePicker());
         }
-
-        AgentState.get().addListener(agentListener);
-
-        Intent svc = new Intent(this, BridgeService.class);
-        bindService(svc, svcConn, Context.BIND_AUTO_CREATE);
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-        visible = true;
-        applyAgentStateToUi();
-        if (serviceBound && service != null) {
-            service.setHost(this);
-            refreshFromService();
-        }
     }
 
     @Override
     protected void onPause() {
-        visible = false;
         super.onPause();
         saveConnectorFields();
-    }
-
-    @Override
-    protected void onDestroy() {
-        AgentState.get().removeListener(agentListener);
-        if (serviceBound) {
-            if (service != null) service.clearHostIf(this);
-            unbindService(svcConn);
-            serviceBound = false;
-        }
-        super.onDestroy();
     }
 
     private void applyTokenVisibility(boolean visible) {
@@ -253,20 +187,6 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
             } catch (IndexOutOfBoundsException ignored) {
             }
         }
-    }
-
-    private void applyAgentStateToUi() {
-        AgentState st = AgentState.get();
-        String model = st.modelLabel();
-        String thinking = st.thinking();
-        if (modelValue != null) modelValue.setText(model.isEmpty() ? "—" : model);
-        if (thinkingValue != null) thinkingValue.setText(thinking.isEmpty() ? "—" : thinking);
-    }
-
-    private void refreshFromService() {
-        if (service == null || !service.isConnected()) return;
-        // Only need current identity for read-only display; lists live in MainActivity picker.
-        service.rpc("get_state", null);
     }
 
     private void saveConnectorFields() {
@@ -370,46 +290,5 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("端口无效: " + s, e);
         }
-    }
-
-    // ---------- BridgeService.UiHost ----------
-
-    @Override public void onStatus(String state, @Nullable String error) {
-        // starting ≡ running: connector is up — refresh read-only model/thinking status.
-        if ("online".equals(state) || "starting".equals(state)) refreshFromService();
-    }
-
-    @Override public void onEvent(JSONObject ev) {
-        if ("thinking_level_changed".equals(ev.optString("type"))) applyAgentStateToUi();
-    }
-
-    @Override
-    public void onResponse(String id, boolean ok, String command, @Nullable JSONObject data, @Nullable String error) {
-        if (!ok) {
-            if (visible && "get_state".equals(command)) {
-                String detail = error != null && !error.isEmpty() ? error : getString(R.string.rpc_failed);
-                Toast.makeText(this, detail, Toast.LENGTH_LONG).show();
-            }
-            return;
-        }
-        // set_model / set_thinking_level happen from MainActivity; AgentState listener refreshes UI.
-        if ("set_model".equals(command) || "set_thinking_level".equals(command)
-                || "get_state".equals(command)) {
-            applyAgentStateToUi();
-        }
-    }
-
-    @Override public void onFailure(@Nullable Throwable t) { /* ignore */ }
-
-    @Override public void onExtStatus(Map<String, String> statuses) { /* ignore */ }
-
-    @Override public void onExtTitle(String title) { /* ignore */ }
-
-    @Override public boolean isVisible() { return visible; }
-
-    @Override
-    public boolean showChoice(String id, String kind, String title, String hint, List<String> options,
-                              String prefill, ExtensionUi.AnswerSink sink) {
-        return false; // 设置页不处理扩展提问，留给 MainActivity / 通知
     }
 }

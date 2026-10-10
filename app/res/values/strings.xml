@@ -47,9 +47,6 @@
     <string name="settings_title">设置</string>
     <string name="settings_back">返回</string>
     <string name="settings_section_connector">连接器</string>
-    <string name="settings_section_model">模型与思考</string>
-    <string name="settings_model_label">模型</string>
-    <string name="settings_thinking_label">思考</string>
     <string name="settings_section_appearance">外观</string>
     <string name="settings_section_about">关于</string>
     <string name="settings_host_label">地址</string>
@@ -65,8 +62,6 @@
     <string name="settings_theme_system">跟随系统</string>
     <string name="settings_theme_light">浅色</string>
     <string name="settings_theme_dark">深色</string>
-    <string name="settings_value_unknown">未获取</string>
-    <string name="settings_need_connector">连接器未连接，无法切换</string>
     <string name="settings_version_fmt">版本 %1$s · %2$s</string>
     <string name="action_more">更多</string>
     <string name="bridge_missing_token">未设置 Token</string>
