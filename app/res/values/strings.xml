@@ -138,7 +138,6 @@
     <string name="attach_kind_file">文件</string>
     <string name="attach_view_prompt">请查看这些附件。</string>
     <string name="prompt_failed_restore">发送失败，内容和附件已还原</string>
-    <string name="action_more">更多</string>
     <string name="action_copy">复制</string>
     <string name="action_retry">重试</string>
     <string name="composer_steer">引导</string>
