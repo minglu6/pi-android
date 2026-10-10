@@ -12,10 +12,10 @@ Pi（[@earendil-works/pi-coding-agent](https://github.com/earendil-works/pi)）�
 ## Quick start
 
 ```sh
-# 1) Token（600），APK 与桥共用
+# 1) Token（600），APK 与连接器共用
 umask 077; head -c 24 /dev/urandom | base64 > ~/.pi/agent/pi-android.token
 
-# 2) Termux 侧常驻桥
+# 2) Termux 侧常驻连接器
 sv up pi-rpc-bridge          # 或一次性：~/bin/pi-rpc-bridge
 
 # 3) 构建 APK（需 ANDROID_JAR + aapt2/d8/apksigner，见 CONTRIBUTING.md）
@@ -53,7 +53,7 @@ APK 关闭不会销毁 Termux 里的任何东西；反过来，Termux 里的 Pi 
 
 | 路径 | 是什么 |
 | --- | --- |
-| `bridge/pi-rpc-bridge.mjs` | WebSocket ↔ Pi RPC 桥（Termux / Node） |
+| `bridge/pi-rpc-bridge.mjs` | WebSocket ↔ Pi RPC 连接器（Termux / Node） |
 | `app/src/dev/pi/android/` | APK：`ui/` · `bridge/` · `model/` · `util/` |
 | `app/tools/` | 无 Gradle 脚本：`fetch-aars` / `gen-dep-r` / `assemble` / `axml-package` |
 | `app/build.sh` | `aapt2 → javac → d8 → assemble → apksigner` |
@@ -119,7 +119,7 @@ gh run watch
 
 ## 安全边界
 
-- 桥只绑 `127.0.0.1`，token 必填（文件权限建议 600）
+- 连接器只绑 `127.0.0.1`，token 必填（文件权限建议 600）
 - 命令白名单默认**不含 `bash`**；`--allow-bash` 等于把 shell 交给能连 loopback 的 App
 - 依赖 sha256 清单：`app/libs/manifest.json`（重建后核对）
 

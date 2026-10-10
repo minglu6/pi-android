@@ -95,11 +95,12 @@ gh workflow run build-apk.yml --ref master
 gh run watch
 ```
 
-## Bridge (Termux)
+## Connector / 连接器 (Termux)
 
-APK talks to `bridge/pi-rpc-bridge.mjs` on loopback + token. Keep the bridge
-bound to `127.0.0.1` and do **not** enable `--allow-bash` by default. See README
-「安全边界」and `NOTICE.md` for trademark / logo rules.
+APK talks to `bridge/pi-rpc-bridge.mjs` on loopback + token（用户可见文案称「连接器」；
+代码里仍用 `BridgeService` 等标识符）。Keep it bound to `127.0.0.1` and do **not**
+enable `--allow-bash` by default. See README「安全边界」and `NOTICE.md` for trademark /
+logo rules.
 
 ## Style
 
