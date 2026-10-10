@@ -97,26 +97,33 @@ public class ChatMessage {
     public final boolean streaming;
     /** 结构化工具卡片数据；旧构造器产生的消息为 null，Adapter 走 legacy 文本 fallback。 */
     public final ToolData tool;
+    /** Session entry id for fork RPC when provided by get_messages / events. */
+    public final String entryId;
 
     public ChatMessage(Role role, String text) {
-        this(role, text, System.currentTimeMillis(), false);
+        this(role, text, System.currentTimeMillis(), false, "");
     }
 
     public ChatMessage(Role role, String text, boolean streaming) {
-        this(role, text, System.currentTimeMillis(), streaming);
+        this(role, text, System.currentTimeMillis(), streaming, "");
     }
 
     public ChatMessage(Role role, String text, long timestampMs) {
-        this(role, text, timestampMs, false);
+        this(role, text, timestampMs, false, "");
     }
 
     public ChatMessage(Role role, String text, long timestampMs, boolean streaming) {
+        this(role, text, timestampMs, streaming, "");
+    }
+
+    public ChatMessage(Role role, String text, long timestampMs, boolean streaming, String entryId) {
         this.role = role;
         String original = text == null ? "" : text;
         this.text = role == Role.USER ? parseFinalAttachments(original, attachments) : original;
         this.timestampMs = timestampMs;
         this.streaming = streaming;
         this.tool = null;
+        this.entryId = entryId == null ? "" : entryId;
     }
 
     private ChatMessage(ToolData data, long timestampMs) {
@@ -125,6 +132,7 @@ public class ChatMessage {
         this.timestampMs = timestampMs;
         this.streaming = false;
         this.tool = data;
+        this.entryId = "";
     }
 
     private ChatMessage(ChatMessage source) {
@@ -133,7 +141,20 @@ public class ChatMessage {
         timestampMs = source.timestampMs;
         streaming = source.streaming;
         tool = source.tool;
+        entryId = source.entryId;
         attachments.addAll(source.attachments);
+    }
+
+    public ChatMessage withEntryId(String id) {
+        if (id == null || id.isEmpty() || id.equals(entryId)) return this;
+        if (tool != null) {
+            ChatMessage copy = tool(tool, timestampMs);
+            // tool messages don't carry entryId for fork; keep empty
+            return copy;
+        }
+        ChatMessage m = new ChatMessage(role, text, timestampMs, streaming, id);
+        m.attachments.addAll(attachments);
+        return m;
     }
 
     public ChatMessage copy() { return new ChatMessage(this); }

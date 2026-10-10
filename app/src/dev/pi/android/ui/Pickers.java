@@ -48,20 +48,65 @@ public final class Pickers {
                                  @Nullable String currentProvider,
                                  @Nullable String currentModelId,
                                  @NonNull ModelListener listener) {
-        List<PickerItem> items = buildModelItems(activity, labels, refs, currentProvider, currentModelId);
+        showModelThinking(activity, labels, refs, null, currentProvider, currentModelId, null,
+                listener, null, null);
+    }
+
+    /**
+     * Pocket-style combined sheet: 模型 (searchable, grouped) + 思考 segment,
+     * optional 设为默认 footer.
+     */
+    public static void showModelThinking(@NonNull Activity activity,
+                                         @NonNull List<CharSequence> labels,
+                                         @NonNull List<String[]> refs,
+                                         @Nullable List<CharSequence> thinkingLevels,
+                                         @Nullable String currentProvider,
+                                         @Nullable String currentModelId,
+                                         @Nullable String currentThinking,
+                                         @NonNull ModelListener modelListener,
+                                         @Nullable ThinkingListener thinkingListener,
+                                         @Nullable Runnable onSetDefault) {
+        final List<PickerItem> modelItems = buildModelItems(activity, labels, refs,
+                currentProvider, currentModelId);
+        final List<PickerItem> thinkItems = new ArrayList<>();
+        if (thinkingLevels != null) {
+            for (CharSequence level : thinkingLevels) {
+                String lv = String.valueOf(level);
+                thinkItems.add(PickerItem.row(lv, thinkingDesc(activity, lv), lv,
+                        currentThinking != null && currentThinking.equalsIgnoreCase(lv)));
+            }
+        }
+        final String[] lastModel = {currentProvider == null ? "" : currentProvider,
+                currentModelId == null ? "" : currentModelId};
         PickerSheet sheet = new PickerSheet(activity, R.string.action_model, true, item -> {
             Object p = item.payload;
-            // payload 必须是 get_available_models 的 {provider,id}，禁止用展示 label
             if (p instanceof String[]) {
                 String[] ref = (String[]) p;
                 if (ref.length >= 2 && ref[0] != null && ref[1] != null
                         && !ref[0].isEmpty() && !ref[1].isEmpty()) {
-                    // 最近使用由服务在 set_model 确认成功后记录，失败选择不能污染最近列表。
-                    listener.onModel(ref[0], ref[1]);
+                    lastModel[0] = ref[0];
+                    lastModel[1] = ref[1];
+                    modelListener.onModel(ref[0], ref[1]);
                 }
+            } else if (p instanceof String && thinkingListener != null) {
+                thinkingListener.onThinking((String) p);
             }
         });
-        sheet.setItems(items);
+        if (thinkingLevels != null && !thinkingLevels.isEmpty() && thinkingListener != null) {
+            sheet.enableSegments(
+                    activity.getString(R.string.picker_tab_models),
+                    activity.getString(R.string.picker_tab_thinking),
+                    index -> sheet.setItems(index == 0 ? modelItems : thinkItems));
+        }
+        if (onSetDefault != null) {
+            sheet.enableFooter(activity.getString(R.string.picker_set_default), () -> {
+                if (!lastModel[0].isEmpty() && !lastModel[1].isEmpty()) {
+                    dev.pi.android.util.DefaultModel.save(activity, lastModel[0], lastModel[1]);
+                }
+                onSetDefault.run();
+            });
+        }
+        sheet.setItems(modelItems);
         sheet.show();
     }
 

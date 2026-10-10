@@ -94,7 +94,8 @@ public final class AgentState {
 
     public void setStatus(String s) {
         status = s == null ? "offline" : s;
-        if (!"online".equals(status)) {
+        // starting ≡ running: connector/Pi is up — do not invalidate model freshness.
+        if (!"online".equals(status) && !"starting".equals(status)) {
             fresh = false;
             modelRevision++;
         }

@@ -14,6 +14,7 @@ import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+// LayoutInflater used for code blocks
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.style.ForegroundColorSpan;
@@ -48,7 +49,9 @@ import java.util.concurrent.TimeUnit;
 import dev.pi.android.R;
 import dev.pi.android.model.ChatMessage;
 import dev.pi.android.util.AppFonts;
+import dev.pi.android.util.DiffLite;
 import dev.pi.android.util.MarkdownLite;
+import dev.pi.android.util.SyntaxLite;
 
 /**
  * 聊天列表：用户右对齐气泡、助手全宽正文 + 小头像、工具卡片、系统居中 chip。
@@ -87,11 +90,79 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
         void onChanged(int size);
     }
 
-    /** 助手消息动作：复制 / 重试 / 分叉 / 更多。 */
+    /** 助手 / 用户消息动作。 */
     public interface AgentActionListener {
         void onRetry(@NonNull ChatMessage message);
 
+        void onRetryOtherModel(@NonNull ChatMessage message);
+
         void onFork(@NonNull ChatMessage message);
+
+        void onEditResend(@NonNull ChatMessage userMessage);
+    }
+
+    private static final int CODE_FOLD_LINES = 40;
+
+    static final class Seg {
+        final boolean code;
+        final String lang;
+        final String body;
+        Seg(boolean code, String lang, String body) {
+            this.code = code;
+            this.lang = lang;
+            this.body = body;
+        }
+    }
+
+    private static String firstNLines(String s, int n) {
+        int seen = 0;
+        for (int i = 0; i < s.length(); i++) {
+            if (s.charAt(i) == '\n') {
+                seen++;
+                if (seen >= n) return s.substring(0, i) + "\n…";
+            }
+        }
+        return s;
+    }
+
+    private static List<Seg> splitMarkdown(String raw) {
+        List<Seg> out = new ArrayList<>();
+        if (raw == null || raw.isEmpty()) return out;
+        int i = 0;
+        final int n = raw.length();
+        StringBuilder text = new StringBuilder();
+        while (i < n) {
+            if (raw.startsWith("```", i)) {
+                if (text.length() > 0) {
+                    out.add(new Seg(false, "", text.toString()));
+                    text.setLength(0);
+                }
+                int endFence = raw.indexOf("```", i + 3);
+                if (endFence < 0) {
+                    text.append(raw.substring(i));
+                    break;
+                }
+                int lineEnd = raw.indexOf('\n', i + 3);
+                String lang = "";
+                int contentStart;
+                if (lineEnd >= 0 && lineEnd < endFence) {
+                    lang = raw.substring(i + 3, lineEnd).trim();
+                    contentStart = lineEnd + 1;
+                } else {
+                    contentStart = i + 3;
+                }
+                String code = raw.substring(contentStart, endFence);
+                if (code.endsWith("\n")) code = code.substring(0, code.length() - 1);
+                out.add(new Seg(true, lang, code));
+                i = endFence + 3;
+                if (i < n && raw.charAt(i) == '\n') i++;
+                continue;
+            }
+            text.append(raw.charAt(i));
+            i++;
+        }
+        if (text.length() > 0) out.add(new Seg(false, "", text.toString()));
+        return out;
     }
 
     private final List<ChatMessage> items = new ArrayList<>();
@@ -317,12 +388,14 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
 
         // 用户 / 助手可选行头与动作
         TextView userHeader;
+        LinearLayout agentBody;
         View agentActionsRow;
         View agentReactions;
         TextView agentActionCopy;
         TextView agentActionRetry;
         TextView agentActionFork;
         TextView agentActionMore;
+        final Map<String, Boolean> codeExpanded = new HashMap<>();
 
         VH(@NonNull View itemView, int type) {
             super(itemView);
@@ -334,6 +407,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                 userHeader = itemView.findViewById(R.id.user_header);
             }
             if (type == TYPE_AGENT) {
+                agentBody = itemView.findViewById(R.id.agent_body);
                 agentActionsRow = itemView.findViewById(R.id.agent_actions);
                 agentReactions = itemView.findViewById(R.id.agent_reactions);
                 agentActionCopy = itemView.findViewById(R.id.agent_action_copy);
@@ -391,27 +465,123 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                     break;
                 case TYPE_AGENT:
                 default: {
-                    CharSequence body = MarkdownLite.render(ctx, msg.text, codeBg, codeFg);
                     if (msg.streaming) {
+                        CharSequence body = MarkdownLite.render(ctx, msg.text, codeBg, codeFg);
                         SpannableStringBuilder sb = new SpannableStringBuilder(body);
                         sb.append(ctx.getString(R.string.streaming_marker));
-                        text.setText(sb);
+                        if (text != null) {
+                            text.setVisibility(View.VISIBLE);
+                            text.setText(sb);
+                        }
+                        clearExtraAgentViews();
                         if (agentActionsRow != null) agentActionsRow.setVisibility(View.GONE);
                         if (agentReactions != null) agentReactions.setVisibility(View.GONE);
                     } else {
-                        text.setText(body);
+                        bindAgentBody(msg, codeBg, codeFg);
                         bindAgentActions(msg);
                     }
                     break;
                 }
             }
             itemView.setOnLongClickListener(v -> {
+                if (type == TYPE_USER && MessageAdapter.this.agentActions != null
+                        && msg.text != null && !msg.text.isEmpty()) {
+                    PopupMenu menu = new PopupMenu(ctx, v);
+                    menu.getMenu().add(0, 1, 0, R.string.action_edit_resend);
+                    menu.getMenu().add(0, 2, 1, R.string.action_copy);
+                    menu.setOnMenuItemClickListener(item -> {
+                        if (item.getItemId() == 1) {
+                            MessageAdapter.this.agentActions.onEditResend(msg);
+                            return true;
+                        }
+                        if (item.getItemId() == 2) {
+                            copyPlain(msg.text);
+                            return true;
+                        }
+                        return false;
+                    });
+                    menu.show();
+                    return true;
+                }
                 String when = formatTime(msg.timestampMs);
                 if (!when.isEmpty()) {
                     Toast.makeText(ctx, when, Toast.LENGTH_SHORT).show();
                 }
                 return true;
             });
+        }
+
+        private void clearExtraAgentViews() {
+            if (agentBody == null || text == null) return;
+            for (int i = agentBody.getChildCount() - 1; i >= 0; i--) {
+                View child = agentBody.getChildAt(i);
+                if (child != text) agentBody.removeViewAt(i);
+            }
+        }
+
+        private void bindAgentBody(ChatMessage msg, int codeBg, int codeFg) {
+            if (agentBody == null || text == null) {
+                if (text != null) text.setText(MarkdownLite.render(ctx, msg.text, codeBg, codeFg));
+                return;
+            }
+            clearExtraAgentViews();
+            List<Seg> segs = splitMarkdown(msg.text == null ? "" : msg.text);
+            boolean firstText = true;
+            for (int si = 0; si < segs.size(); si++) {
+                Seg seg = segs.get(si);
+                if (seg.code) {
+                    View block = LayoutInflater.from(ctx).inflate(R.layout.item_code_block, agentBody, false);
+                    TextView lang = block.findViewById(R.id.code_lang);
+                    TextView body = block.findViewById(R.id.code_body);
+                    TextView copy = block.findViewById(R.id.code_copy);
+                    TextView fold = block.findViewById(R.id.code_fold);
+                    String langLabel = SyntaxLite.normalizeLang(seg.lang);
+                    lang.setText(langLabel);
+                    body.setTypeface(AppFonts.mono(ctx, false));
+                    final String key = "code|" + si + "|" + seg.body.hashCode();
+                    boolean expanded = Boolean.TRUE.equals(codeExpanded.get(key));
+                    int lines = countLines(seg.body);
+                    boolean foldable = lines > CODE_FOLD_LINES;
+                    String shown = (!foldable || expanded) ? seg.body
+                            : firstNLines(seg.body, CODE_FOLD_LINES);
+                    int kw = ContextCompat.getColor(ctx, R.color.pi_blue);
+                    int str = ContextCompat.getColor(ctx, R.color.status_online);
+                    int cmt = ContextCompat.getColor(ctx, R.color.text_muted);
+                    int num = ContextCompat.getColor(ctx, R.color.pi_amber);
+                    body.setText(SyntaxLite.highlight(shown, langLabel, kw, str, cmt, num));
+                    body.setBackgroundColor(codeBg);
+                    if (foldable) {
+                        fold.setVisibility(View.VISIBLE);
+                        fold.setText(expanded ? R.string.code_fold : R.string.code_show_all);
+                        fold.setOnClickListener(v -> {
+                            codeExpanded.put(key, !Boolean.TRUE.equals(codeExpanded.get(key)));
+                            int pos = getBindingAdapterPosition();
+                            if (pos != RecyclerView.NO_POSITION) notifyItemChanged(pos);
+                        });
+                    } else {
+                        fold.setVisibility(View.GONE);
+                    }
+                    final String copyText = seg.body;
+                    copy.setOnClickListener(v -> copyPlain(copyText));
+                    agentBody.addView(block);
+                } else if (!seg.body.isEmpty()) {
+                    if (firstText) {
+                        text.setVisibility(View.VISIBLE);
+                        text.setText(MarkdownLite.render(ctx, seg.body, codeBg, codeFg));
+                        firstText = false;
+                    } else {
+                        TextView tv = new TextView(ctx);
+                        tv.setText(MarkdownLite.render(ctx, seg.body, codeBg, codeFg));
+                        tv.setTextColor(ContextCompat.getColor(ctx, R.color.text_primary));
+                        tv.setTextSize(14);
+                        tv.setTextIsSelectable(true);
+                        agentBody.addView(tv);
+                    }
+                }
+            }
+            if (firstText) {
+                text.setVisibility(View.GONE);
+            }
         }
 
         private void bindAgentActions(ChatMessage msg) {
@@ -441,22 +611,23 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                 agentActionMore.setOnClickListener(v -> {
                     PopupMenu menu = new PopupMenu(ctx, v);
                     menu.getMenu().add(0, 1, 0, R.string.action_copy);
-                    menu.getMenu().add(0, 2, 1, R.string.action_retry);
-                    menu.getMenu().add(0, 3, 2, R.string.action_fork_short);
+                    menu.getMenu().add(0, 2, 1, R.string.retry_same);
+                    menu.getMenu().add(0, 3, 2, R.string.retry_other);
+                    menu.getMenu().add(0, 4, 3, R.string.action_fork_short);
                     menu.setOnMenuItemClickListener(item -> {
+                        if (MessageAdapter.this.agentActions == null) return false;
                         switch (item.getItemId()) {
                             case 1:
                                 copyPlain(copyText);
                                 return true;
                             case 2:
-                                if (MessageAdapter.this.agentActions != null) {
-                                    MessageAdapter.this.agentActions.onRetry(msg);
-                                }
+                                MessageAdapter.this.agentActions.onRetry(msg);
                                 return true;
                             case 3:
-                                if (MessageAdapter.this.agentActions != null) {
-                                    MessageAdapter.this.agentActions.onFork(msg);
-                                }
+                                MessageAdapter.this.agentActions.onRetryOtherModel(msg);
+                                return true;
+                            case 4:
+                                MessageAdapter.this.agentActions.onFork(msg);
                                 return true;
                             default:
                                 return false;
@@ -708,12 +879,21 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
             if (showCommand) toolCommand.setText(command);
             toolOutput.setVisibility(expanded && hasOutput ? View.VISIBLE : View.GONE);
             if (expanded && hasOutput) {
-                toolOutput.setText(output);
+                boolean isEdit = "edit".equals(name) || "write".equals(name);
+                if (isEdit && DiffLite.looksLikeDiff(output)) {
+                    toolOutput.setText(DiffLite.render(output,
+                            ContextCompat.getColor(ctx, R.color.diff_add),
+                            ContextCompat.getColor(ctx, R.color.diff_del),
+                            ContextCompat.getColor(ctx, R.color.text_muted),
+                            ContextCompat.getColor(ctx, R.color.text_secondary)));
+                } else {
+                    toolOutput.setText(output);
+                    toolOutput.setTextColor(ContextCompat.getColor(ctx,
+                            ChatMessage.ToolData.STATE_ERROR.equals(state)
+                                    ? R.color.status_offline
+                                    : R.color.text_secondary));
+                }
                 toolOutput.setMaxLines(Integer.MAX_VALUE);
-                toolOutput.setTextColor(ContextCompat.getColor(ctx,
-                        ChatMessage.ToolData.STATE_ERROR.equals(state)
-                                ? R.color.status_offline
-                                : R.color.text_secondary));
             }
 
             int outLines = countLines(output);

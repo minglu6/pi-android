@@ -137,7 +137,8 @@ public class BridgeService extends Service {
                 dbg("status " + state);
                 AgentState.get().setStatus(state);
                 if (!bridge.isConnected()) failUploadCallbacks("连接已断开，附件草稿已保留");
-                if (!"online".equals(state)) modelSync.reset();
+                // starting ≡ running for UI/sync: connector is up, do not wipe model sync.
+                if (!"online".equals(state) && !"starting".equals(state)) modelSync.reset();
                 // starting 也可发送：桥的 online 仅表示鉴权，不保证 Pi 已启动。
                 if (("online".equals(state) || "starting".equals(state)) && bridge.isConnected()) {
                     rpc("get_state", null);
@@ -475,13 +476,23 @@ public class BridgeService extends Service {
                 PendingIntent.FLAG_UPDATE_CURRENT | immutableFlag());
         return new NotificationCompat.Builder(this, CHANNEL)
                 .setSmallIcon(R.drawable.ic_pi_logo)
-                .setContentTitle("Pi 连接器 · " + state)
+                .setContentTitle("Pi 连接器 · " + connectionStateLabel(state))
                 .setContentText(isConnected() ? "已连接（点一下打开对话）" : "未连接")
                 .setContentIntent(pi)
                 .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .addAction(android.R.drawable.ic_menu_close_clear_cancel, "停止连接器", stopPi)
                 .build();
+    }
+
+    /** Map bridge status codes to Chinese labels; "starting" shows as 运行中 (running). */
+    private String connectionStateLabel(String state) {
+        if ("starting".equals(state)) return getString(R.string.status_starting_pi); // 运行中
+        if ("online".equals(state)) return getString(R.string.status_online);
+        if ("offline".equals(state)) return getString(R.string.status_offline);
+        if ("connecting".equals(state)) return getString(R.string.status_connecting);
+        // Already-localized strings (e.g. startForeground("正在连接…"))
+        return state == null || state.isEmpty() ? getString(R.string.status_offline) : state;
     }
 
     /**

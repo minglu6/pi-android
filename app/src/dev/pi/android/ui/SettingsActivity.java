@@ -453,7 +453,8 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
     // ---------- BridgeService.UiHost ----------
 
     @Override public void onStatus(String state, @Nullable String error) {
-        if ("online".equals(state)) refreshFromService();
+        // starting ≡ running: connector is up — keep model lists, same as online.
+        if ("online".equals(state) || "starting".equals(state)) refreshFromService();
         else {
             modelLabels.clear();
             modelRefs.clear();
