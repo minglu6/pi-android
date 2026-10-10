@@ -8,15 +8,12 @@ import android.view.View;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import android.widget.FrameLayout;
-import android.widget.ImageView;
 import android.widget.TextView;
 
-import androidx.annotation.DrawableRes;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.StringRes;
 import androidx.core.content.ContextCompat;
-import androidx.core.graphics.drawable.DrawableCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -55,7 +52,6 @@ public final class PickerSheet {
     private final TextView segA;
     private final TextView segB;
     private final TextView footerAction;
-    private final ImageView titleIcon;
     private String query = "";
     private int segmentIndex;
     @Nullable private OnSegment segmentListener;
@@ -71,7 +67,6 @@ public final class PickerSheet {
 
         TextView title = root.findViewById(R.id.picker_title);
         title.setText(titleRes);
-        titleIcon = root.findViewById(R.id.picker_title_icon);
         search = root.findViewById(R.id.picker_search);
         empty = root.findViewById(R.id.picker_empty);
         list = root.findViewById(R.id.picker_list);
@@ -152,20 +147,6 @@ public final class PickerSheet {
             footerAction.setText(label);
             footerAction.setVisibility(View.VISIBLE);
         }
-    }
-
-    /** Optional 24dp title mark (e.g. official MCP connector). Tint matches overflow icons. */
-    public void setTitleIcon(@DrawableRes int iconRes) {
-        if (titleIcon == null) return;
-        android.graphics.drawable.Drawable icon = ContextCompat.getDrawable(activity, iconRes);
-        if (icon == null) {
-            titleIcon.setVisibility(View.GONE);
-            return;
-        }
-        icon = DrawableCompat.wrap(icon.mutate());
-        DrawableCompat.setTint(icon, ContextCompat.getColor(activity, R.color.text_secondary));
-        titleIcon.setImageDrawable(icon);
-        titleIcon.setVisibility(View.VISIBLE);
     }
 
     public void setItems(@NonNull List<PickerItem> items) {

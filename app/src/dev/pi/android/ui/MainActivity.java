@@ -116,14 +116,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private String pendingCwdListRpc = "";
     private String pendingCwdSetRpc = "";
     private String cwdBrowsePath = "";
-    private String pendingMcpListRpc = "";
-    private String pendingSkillsTrustRpc = "";
     private String pendingPiVersionRpc = "";
     private String pendingPiUpdateRpc = "";
     @Nullable private DetailSheet updateProgressSheet;
-    private boolean mcpSupported = true;
-    private boolean skillsSupported = true;
-    @Nullable private Boolean projectTrusted;
     private TextView footerStats;
     private TextView footerSep;
     private View contextBarWrap;
@@ -1163,12 +1158,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         addOverflowItem(m, 6, 3, R.string.menu_export, R.drawable.ic_menu_export);
         addOverflowItem(m, 7, 4, R.string.menu_files, R.drawable.ic_menu_files);
         addOverflowItem(m, 8, 5, R.string.menu_changes, R.drawable.ic_menu_changes);
-        if (mcpSupported) {
-            addOverflowItem(m, 9, 6, R.string.menu_mcp, R.drawable.ic_mcp);
-        }
-        if (skillsSupported) {
-            addOverflowItem(m, 10, 7, R.string.menu_skills, R.drawable.ic_menu_skills);
-        }
         menu.setOnMenuItemClickListener(this::onOverflowItem);
         menu.show();
     }
@@ -1200,12 +1189,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 return true;
             case 8:
                 openChangesSheet();
-                return true;
-            case 9:
-                openMcpSheet();
-                return true;
-            case 10:
-                openSkillsSheet();
                 return true;
             case 11:
                 startCheckUpdate();
@@ -1904,8 +1887,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 || "get_cwd".equals(command)
                 || "set_cwd".equals(command)
                 || "list_cwd_entries".equals(command)
-                || "list_mcp_servers".equals(command)
-                || "get_project_trust".equals(command)
                 || "check_pi_version".equals(command)
                 || "run_pi_update".equals(command);
     }
@@ -2054,7 +2035,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             return;
         }
         if ("get_commands".equals(command)) {
-            skillsSupported = true;
             if (slashStore != null) slashStore.applyServerResponse(data);
             // 若正在输入 /，刷新面板
             if (composer != null) updateSlashSuggestions(composer.getText().toString());
@@ -2856,8 +2836,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 || "git_branches".equals(command) || "git_checkout".equals(command)
                 || "git_diff".equals(command) || "read_project_file".equals(command)
                 || "list_cwd_entries".equals(command) || "set_cwd".equals(command)
-                || "get_cwd".equals(command)
-                || "list_mcp_servers".equals(command) || "get_project_trust".equals(command)) {
+                || "get_cwd".equals(command)) {
             boolean userFacing = ("git_branches".equals(command) && id.equals(pendingBranchesRpc))
                     || ("git_status".equals(command) && id.equals(pendingChangesRpc))
                     || ("list_project_files".equals(command)
@@ -2866,27 +2845,19 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                     || ("git_diff".equals(command) && id.equals(pendingDiffRpc))
                     || ("git_checkout".equals(command) && id.equals(pendingCheckoutRpc))
                     || ("list_cwd_entries".equals(command) && id.equals(pendingCwdListRpc))
-                    || ("set_cwd".equals(command) && id.equals(pendingCwdSetRpc))
-                    || ("list_mcp_servers".equals(command) && id.equals(pendingMcpListRpc))
-                    || ("get_project_trust".equals(command) && id.equals(pendingSkillsTrustRpc));
+                    || ("set_cwd".equals(command) && id.equals(pendingCwdSetRpc));
             if (userFacing && resumed) {
                 if (isConnectorCommandRejected(error, command)) {
                     if ("list_cwd_entries".equals(command) || "set_cwd".equals(command)
                             || "get_cwd".equals(command)) {
                         setCwdSupported(false);
                     }
-                    if ("list_mcp_servers".equals(command)) mcpSupported = false;
                     Toast.makeText(this, R.string.connector_update_required, Toast.LENGTH_LONG).show();
                 } else if ("list_cwd_entries".equals(command) || "set_cwd".equals(command)) {
                     Toast.makeText(this,
                             error != null && !error.isEmpty() ? error
                                     : getString(R.string.cwd_unavailable),
                             Toast.LENGTH_SHORT).show();
-                } else if ("list_mcp_servers".equals(command)) {
-                    Toast.makeText(this, R.string.mcp_unavailable, Toast.LENGTH_SHORT).show();
-                } else if ("get_project_trust".equals(command)) {
-                    // Trust optional — still show skills without trust header.
-                    showSkillsSheetWithTrust(null);
                 } else {
                     Toast.makeText(this,
                             "git_branches".equals(command) || "git_status".equals(command)
@@ -2898,9 +2869,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                     || "get_cwd".equals(command))
                     && isConnectorCommandRejected(error, command)) {
                 setCwdSupported(false);
-            } else if ("list_mcp_servers".equals(command)
-                    && isConnectorCommandRejected(error, command)) {
-                mcpSupported = false;
             }
             clearPendingPocketId(command, id);
             return true;
@@ -3078,25 +3046,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
             return true;
         }
-        if ("list_mcp_servers".equals(command) && id.equals(pendingMcpListRpc)) {
-            clearPendingPocketId(command, id);
-            mcpSupported = true;
-            if (data != null && data.has("projectTrusted") && !data.isNull("projectTrusted")) {
-                projectTrusted = data.optBoolean("projectTrusted");
-            }
-            ProjectSheets.showMcpServers(this, data, this::showMcpServerDetail, this::runMcpCommand);
-            return true;
-        }
-        if ("get_project_trust".equals(command) && id.equals(pendingSkillsTrustRpc)) {
-            clearPendingPocketId(command, id);
-            Boolean trusted = null;
-            if (data != null && data.has("trusted") && !data.isNull("trusted")) {
-                trusted = data.optBoolean("trusted");
-                projectTrusted = trusted;
-            }
-            showSkillsSheetWithTrust(trusted);
-            return true;
-        }
         if ("check_pi_version".equals(command) && id.equals(pendingPiVersionRpc)) {
             pendingPiVersionRpc = "";
             // Soft probe only — confirm sheet already shown; Toast version if useful.
@@ -3138,28 +3087,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             if (id.equals(pendingCwdListRpc)) pendingCwdListRpc = "";
         } else if ("set_cwd".equals(command)) {
             if (id.equals(pendingCwdSetRpc)) pendingCwdSetRpc = "";
-        } else if ("list_mcp_servers".equals(command)) {
-            if (id.equals(pendingMcpListRpc)) pendingMcpListRpc = "";
-        } else if ("get_project_trust".equals(command)) {
-            if (id.equals(pendingSkillsTrustRpc)) pendingSkillsTrustRpc = "";
         }
-    }
-
-    private void openMcpSheet() {
-        if (!isConnected()) {
-            Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (!mcpSupported) {
-            Toast.makeText(this, R.string.mcp_unavailable, Toast.LENGTH_SHORT).show();
-            return;
-        }
-        Toast.makeText(this, R.string.mcp_loading, Toast.LENGTH_SHORT).show();
-        pendingMcpListRpc = rpc("list_mcp_servers", null);
-    }
-
-    private void runMcpCommand() {
-        runNoticeCommand("/mcp");
     }
 
     /** Overflow / Settings「检测更新」: confirm → bridge `run_pi_update` (documented `pi update`). */
@@ -3232,123 +3160,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 .setLog(log.length() == 0 ? null : log.toString().trim())
                 .setCancelLabel(getString(android.R.string.ok))
                 .show();
-    }
-
-    private void showMcpServerDetail(@NonNull JSONObject server) {
-        String name = server.optString("name", "");
-        String status = ProjectSheets.mcpStatusLabel(this, server.optString("status", "configured"));
-        String source = "project".equals(server.optString("source"))
-                ? getString(R.string.mcp_source_project) : getString(R.string.mcp_source_user);
-        String transport = server.optString("transport", "");
-        String desc = server.optString("description", "");
-        String detail = server.optString("detail", "");
-        String exposure = server.optString("exposure", "");
-        List<String> chipLabels = new ArrayList<>();
-        chipLabels.add(status);
-        chipLabels.add(source);
-        if (!transport.isEmpty() && !"unknown".equals(transport)) chipLabels.add(transport);
-        StringBuilder body = new StringBuilder();
-        if (!exposure.isEmpty()) body.append("exposure: ").append(exposure);
-        if (!desc.isEmpty()) {
-            if (body.length() > 0) body.append("\n\n");
-            body.append(desc);
-        }
-        if (!detail.isEmpty()) {
-            if (body.length() > 0) body.append("\n\n");
-            body.append(detail);
-        }
-        List<DetailSheet.Action> actions = new ArrayList<>();
-        actions.add(new DetailSheet.Action() {
-            @NonNull @Override public String label() { return getString(R.string.mcp_run_command); }
-            @Override public void run() { runMcpCommand(); }
-        });
-        if (!name.isEmpty()) {
-            actions.add(new DetailSheet.Action() {
-                @NonNull @Override public String label() { return getString(R.string.mcp_detail_run_get); }
-                @Override public void run() { runNoticeCommand("/mcp get " + name); }
-            });
-        }
-        new DetailSheet(this, name.isEmpty() ? getString(R.string.menu_mcp) : name)
-                .setTitleIcon(R.drawable.ic_mcp)
-                .setChips(chipLabels)
-                .setBody(body.length() == 0 ? null : body.toString())
-                .setPrimaryActions(actions)
-                .show();
-    }
-
-    private void showSkillDetail(@NonNull SlashCommand skill) {
-        List<String> chipLabels = new ArrayList<>();
-        if (skill.location != null && !skill.location.isEmpty()) {
-            if ("project".equals(skill.location)) {
-                chipLabels.add(getString(R.string.mcp_source_project));
-            } else if ("user".equals(skill.location)) {
-                chipLabels.add(getString(R.string.mcp_source_user));
-            } else {
-                chipLabels.add(skill.location);
-            }
-        }
-        if (skill.source != null && !skill.source.isEmpty()) chipLabels.add(skill.source);
-        String title = skill.skillLabel();
-        if (title == null || title.isEmpty()) title = skill.name;
-        List<DetailSheet.Action> actions = new ArrayList<>();
-        actions.add(new DetailSheet.Action() {
-            @NonNull @Override public String label() { return getString(R.string.skills_insert_action); }
-            @Override public void run() { insertSkillIntoComposer(skill); }
-        });
-        new DetailSheet(this, title)
-                .setTitleIcon(R.drawable.ic_menu_skills)
-                .setChips(chipLabels)
-                .setBody(skill.description)
-                .setPrimaryActions(actions)
-                .show();
-    }
-
-    private void openSkillsSheet() {
-        if (!isConnected()) {
-            Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (!skillsSupported) {
-            Toast.makeText(this, R.string.skills_unavailable, Toast.LENGTH_SHORT).show();
-            return;
-        }
-        Toast.makeText(this, R.string.skills_loading, Toast.LENGTH_SHORT).show();
-        refreshSlashCommands();
-        if (projectTrusted != null) {
-            showSkillsSheetWithTrust(projectTrusted);
-            return;
-        }
-        pendingSkillsTrustRpc = rpc("get_project_trust", null);
-    }
-
-    private void showSkillsSheetWithTrust(@Nullable Boolean trusted) {
-        if (slashStore == null) {
-            Toast.makeText(this, R.string.skills_unavailable, Toast.LENGTH_SHORT).show();
-            return;
-        }
-        List<SlashCommand> skills = slashStore.skills();
-        if (skills.isEmpty() && !slashStore.hasServerCommands()) {
-            // get_commands may still be in flight — nudge once.
-            refreshSlashCommands();
-        }
-        ProjectSheets.showSkills(this, skills, trusted, this::showSkillDetail);
-    }
-
-    private void insertSkillIntoComposer(@NonNull SlashCommand skill) {
-        if (composer == null) return;
-        String insert = skill.name.startsWith("/") ? skill.name + " " : "/" + skill.name + " ";
-        Editable cur = composer.getText();
-        String text = cur == null ? "" : cur.toString();
-        if (text.isEmpty() || text.trim().equals("/")) {
-            composer.setText(insert);
-        } else if (!text.endsWith(" ") && !text.endsWith("\n")) {
-            composer.setText(text + " " + insert);
-        } else {
-            composer.setText(text + insert);
-        }
-        Editable after = composer.getText();
-        if (after != null) composer.setSelection(after.length());
-        Toast.makeText(this, getString(R.string.skills_inserted, insert.trim()), Toast.LENGTH_SHORT).show();
     }
 
     /** Browse working directory; {@code path} null/empty lists current session cwd. */
