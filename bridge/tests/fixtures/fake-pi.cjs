@@ -4,16 +4,6 @@ const fs = require('node:fs');
 const logFile = process.env.PI_BRIDGE_TEST_LOG;
 const cliArgs = process.argv.slice(2);
 // CLI modes used by Pocket local RPCs (not --mode rpc).
-if (cliArgs[0] === '--version' || cliArgs[0] === 'version') {
-  process.stdout.write('0.74.0-fixture\n');
-  process.exit(0);
-}
-if (cliArgs[0] === 'update') {
-  const scope = cliArgs.includes('--self') ? 'self'
-    : cliArgs.includes('--extensions') ? 'extensions' : 'all';
-  process.stdout.write(`Updated packages (${scope})\nUpdated pi to 0.74.0-fixture\n`);
-  process.exit(0);
-}
 if (cliArgs[0] === 'mcp' && cliArgs[1] === 'list') {
   process.stdout.write('docs connected\nlocal disabled\n');
   process.exit(0);

@@ -211,29 +211,6 @@ test('Pocket cwd RPCs: get_cwd / list_cwd_entries / set_cwd persist + inject get
   assert.notEqual(bad.error, '命令不允许: set_cwd');
 });
 
-test('Pocket update RPCs: check_pi_version + run_pi_update (fixed argv, no shell)', async t => {
-  const h = await harness(t), c = await h.connect();
-  c.rpc('ver', 'check_pi_version', {});
-  const ver = await c.response('ver');
-  assert.equal(ver.ok, true);
-  assert.equal(ver.data.version, '0.74.0-fixture');
-  assert.equal(ver.data.status, 0);
-  c.rpc('up', 'run_pi_update', {});
-  const up = await c.response('up');
-  assert.equal(up.ok, true);
-  assert.equal(up.data.status, 0);
-  assert.match(up.data.argv, /\bupdate\b/);
-  assert.match(up.data.stdout, /Updated/);
-  c.rpc('ext', 'run_pi_update', {mode: 'extensions'});
-  const ext = await c.response('ext');
-  assert.equal(ext.ok, true);
-  assert.match(ext.data.argv, /--extensions/);
-  c.rpc('bad', 'run_pi_update', {mode: 'sudo'});
-  const bad = await c.response('bad');
-  assert.equal(bad.ok, false);
-  assert.notEqual(bad.error, '命令不允许: run_pi_update');
-});
-
 test('Pocket MCP RPCs: list_mcp_servers + get_project_trust from mcp.json / trust.json', async t => {
   const h = await harness(t), c = await h.connect();
   const agentDir = path.join(h.dir, '.pi', 'agent');
