@@ -1,11 +1,13 @@
 package dev.pi.android.ui;
 
+import android.graphics.drawable.GradientDrawable;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.ArrayList;
@@ -116,6 +118,7 @@ public class SessionListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
 
     static class SessionVH extends RecyclerView.ViewHolder {
         final View card;
+        final View dot;
         final TextView title;
         final TextView preview;
         final TextView time;
@@ -123,6 +126,7 @@ public class SessionListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
         SessionVH(@NonNull View itemView) {
             super(itemView);
             card = itemView.findViewById(R.id.session_card);
+            dot = itemView.findViewById(R.id.session_dot);
             title = itemView.findViewById(R.id.session_title);
             preview = itemView.findViewById(R.id.session_preview);
             time = itemView.findViewById(R.id.session_time);
@@ -140,6 +144,13 @@ public class SessionListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
             card.setBackgroundResource(entry.current
                     ? R.drawable.bg_session_item_current
                     : R.drawable.bg_session_item);
+            if (dot != null) {
+                GradientDrawable shape = new GradientDrawable();
+                shape.setShape(GradientDrawable.OVAL);
+                shape.setColor(ContextCompat.getColor(itemView.getContext(),
+                        entry.current ? R.color.pi_blue : R.color.text_muted));
+                dot.setBackground(shape);
+            }
             card.setOnClickListener(v -> {
                 if (listener != null) listener.onOpen(entry);
             });

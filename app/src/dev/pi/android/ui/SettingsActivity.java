@@ -34,7 +34,9 @@ import dev.pi.android.R;
 import dev.pi.android.bridge.AgentState;
 import dev.pi.android.bridge.BridgeService;
 import dev.pi.android.bridge.ModelRpc;
+import dev.pi.android.model.PickerItem;
 import dev.pi.android.ui.ExtensionUi;
+import dev.pi.android.util.AppFonts;
 
 /**
  * 独立设置页：连接器、模型/思考、主题、关于。
@@ -55,6 +57,8 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
     private TextView modelValue;
     private TextView thinkingValue;
     private TextView themeValue;
+    private TextView termFontValue;
+    private TextView termSizeValue;
 
     private BridgeService service;
     private boolean serviceBound;
@@ -185,6 +189,18 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
         findViewById(R.id.pref_thinking).setOnClickListener(v -> showThinkingPicker());
         findViewById(R.id.pref_theme).setOnClickListener(v -> showThemePicker());
 
+        termFontValue = findViewById(R.id.pref_term_font_value);
+        termSizeValue = findViewById(R.id.pref_term_size_value);
+        refreshTermFontLabels();
+        View prefTermFont = findViewById(R.id.pref_term_font);
+        if (prefTermFont != null) {
+            prefTermFont.setOnClickListener(v -> showTermFontPicker());
+        }
+        View prefTermSize = findViewById(R.id.pref_term_size);
+        if (prefTermSize != null) {
+            prefTermSize.setOnClickListener(v -> showTermSizePicker());
+        }
+
         AgentState.get().addListener(agentListener);
 
         Intent svc = new Intent(this, BridgeService.class);
@@ -302,6 +318,59 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
             applySavedTheme(this);
             refreshThemeLabel();
         });
+    }
+
+    private void refreshTermFontLabels() {
+        if (termFontValue != null) {
+            termFontValue.setText(AppFonts.FAMILY_SYSTEM.equals(AppFonts.family(this))
+                    ? R.string.settings_term_font_system
+                    : R.string.settings_term_font_nerd);
+        }
+        if (termSizeValue != null) {
+            termSizeValue.setText(getString(R.string.settings_term_size_fmt, AppFonts.sizeSp(this)));
+        }
+    }
+
+    private void showTermFontPicker() {
+        List<PickerItem> items = new ArrayList<>();
+        String cur = AppFonts.family(this);
+        items.add(PickerItem.row(
+                getString(R.string.settings_term_font_nerd),
+                getString(R.string.settings_term_font_desc_nerd),
+                AppFonts.FAMILY_NERD,
+                AppFonts.FAMILY_NERD.equals(cur)));
+        items.add(PickerItem.row(
+                getString(R.string.settings_term_font_system),
+                getString(R.string.settings_term_font_desc_system),
+                AppFonts.FAMILY_SYSTEM,
+                AppFonts.FAMILY_SYSTEM.equals(cur)));
+        PickerSheet sheet = new PickerSheet(this, R.string.settings_term_font, false, item -> {
+            if (item.payload instanceof String) {
+                AppFonts.setFamily(this, (String) item.payload);
+                refreshTermFontLabels();
+            }
+        });
+        sheet.setItems(items);
+        sheet.show();
+    }
+
+    private void showTermSizePicker() {
+        final float[] choices = {10f, 12f, 13f, 14f, 16f, 18f, 20f, 24f};
+        List<PickerItem> items = new ArrayList<>();
+        float cur = AppFonts.sizeSp(this);
+        for (float sp : choices) {
+            items.add(PickerItem.row(
+                    String.format(java.util.Locale.US, "%.0f sp", sp), null, sp,
+                    Math.abs(sp - cur) < 0.1f));
+        }
+        PickerSheet sheet = new PickerSheet(this, R.string.settings_term_size, false, item -> {
+            if (item.payload instanceof Float) {
+                AppFonts.setSizeSp(this, (Float) item.payload);
+                refreshTermFontLabels();
+            }
+        });
+        sheet.setItems(items);
+        sheet.show();
     }
 
     private void showModelPicker() {
