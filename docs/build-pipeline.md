@@ -25,16 +25,48 @@ PHONE_VD_SERIAL=<serial> phone-vd-start --app dev.pi.android   # 必须在虚拟
 ## 依赖清单（一次即可）
 
 ```sh
+cd app
 python3 tools/fetch-aars.py \
   --root androidx.appcompat:appcompat:1.7.0 \
   --root androidx.recyclerview:recyclerview:1.3.2 \
   --root androidx.constraintlayout:constraintlayout:2.2.1 \
   --root com.google.android.material:material:1.12.0 \
   --root org.jetbrains.kotlin:kotlin-stdlib:1.9.24 \
+  --root com.squareup.okhttp3:okhttp:4.12.0 \
   --exclude org.jetbrains.kotlin:kotlin-stdlib-jdk7 \
   --exclude org.jetbrains.kotlin:kotlin-stdlib-jdk8 \
   --exclude org.jetbrains.kotlin:kotlin-stdlib-common
 python3 tools/axml-package.py --all --libs libs      # 读每个 AAR 的 package（生成 libs/packages.json）
+```
+
+`okhttp` 必须显式 `--root`：源码 `BridgeConnection` 直接 `import okhttp3.*`，传递依赖图里
+AndroidX 不会带上它。
+
+## CI（GitHub Actions）
+
+仓库工作流 [`.github/workflows/build-apk.yml`](../.github/workflows/build-apk.yml) 在每次
+**push 到 `master`**、**手动 `workflow_dispatch`**、以及 **`v*` tag** 时：
+
+1. 装 JDK 17 + Android cmdline-tools，拉 `platforms;android-36` 与 `build-tools;35.0.0`
+   （提供 `aapt2` / `d8` / `apksigner` 与 `android.jar`，与 `app/build.sh` 的 TARGET_SDK=36 对齐）；
+2. 按上面的命令拉依赖并跑 `axml-package.py`；
+3. `ANDROID_JAR=…/platforms/android-36/android.jar bash app/build.sh --only-apk`；
+4. 上传产物 **`pi-android` artifact**（路径 `app/out/pi-android.apk`）；tag 推送时额外挂到
+   GitHub Release。
+
+签名用 `build.sh` 现场生成的自签 `pi-android.jks`（默认密码 `android`），**不需要**仓库 Secrets。
+
+### 下载 APK
+
+1. 打开仓库 **Actions** → 选中一次成功的 **Build APK** 运行；
+2. 页面底部 **Artifacts** → 下载 `pi-android`（解压得到 `pi-android.apk`）；
+3. 或对 tag：在 **Releases** 页直接下 APK。
+
+手动触发：
+
+```sh
+gh workflow run build-apk.yml --ref master
+gh run watch   # 或打开 Actions 页看进度
 ```
 
 ## 坑目录（全部实证，按被踩顺序）
