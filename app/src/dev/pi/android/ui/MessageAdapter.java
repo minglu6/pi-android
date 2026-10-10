@@ -853,26 +853,45 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                 }
             }
 
-            int stateColor = stateColor(state);
-            toolStateBar.setBackgroundColor(stateColor);
-            toolGlyph.setText(glyphFor(name));
-            toolGlyph.setTextColor(stateColor);
-            toolName.setText(name.isEmpty() ? ctx.getString(R.string.tool_legacy_name) : name);
+            final boolean isThinking = ChatMessage.ToolData.NAME_THINKING.equals(name);
 
-            String subject = firstLine(command);
+            int stateColor = stateColor(state);
+            toolStateBar.setBackgroundColor(isThinking
+                    ? ContextCompat.getColor(ctx, R.color.text_muted) : stateColor);
+            toolGlyph.setText(glyphFor(name));
+            toolGlyph.setTextColor(isThinking
+                    ? ContextCompat.getColor(ctx, R.color.text_muted) : stateColor);
+            if (isThinking) {
+                toolName.setText(R.string.tool_thinking);
+            } else {
+                toolName.setText(name.isEmpty() ? ctx.getString(R.string.tool_legacy_name) : name);
+            }
+
+            String subject = isThinking ? "" : firstLine(command);
             toolSubject.setText(subject);
             toolSubject.setVisibility(subject.isEmpty() ? View.GONE : View.VISIBLE);
 
-            String status = !summary.isEmpty() ? summary : statusText(state, durationMs);
+            String status;
+            if (isThinking) {
+                if (ChatMessage.ToolData.STATE_RUNNING.equals(state)) {
+                    status = ctx.getString(R.string.tool_thinking_running);
+                } else if (durationMs > 0) {
+                    status = formatDuration(durationMs);
+                } else {
+                    status = "";
+                }
+            } else {
+                status = !summary.isEmpty() ? summary : statusText(state, durationMs);
+            }
             toolStatus.setText(status);
             toolStatus.setVisibility(status.isEmpty() ? View.GONE : View.VISIBLE);
             toolStatus.setTextColor(ChatMessage.ToolData.STATE_PENDING.equals(state)
                     ? ContextCompat.getColor(ctx, R.color.pi_amber)
-                    : stateColor);
+                    : (isThinking ? ContextCompat.getColor(ctx, R.color.text_muted) : stateColor));
             toolChevron.setText(expanded ? "▾" : "▸");
 
             final boolean hasOutput = !output.isEmpty();
-            boolean showCommand = expanded && !command.isEmpty();
+            boolean showCommand = expanded && !command.isEmpty() && !isThinking;
             boolean showBody = expanded && (hasOutput || showCommand);
             toolOutputScroll.setVisibility(showBody ? View.VISIBLE : View.GONE);
             toolCommand.setVisibility(showCommand ? View.VISIBLE : View.GONE);
@@ -889,7 +908,8 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                 } else {
                     toolOutput.setText(output);
                     toolOutput.setTextColor(ContextCompat.getColor(ctx,
-                            ChatMessage.ToolData.STATE_ERROR.equals(state)
+                            isThinking ? R.color.text_muted
+                                    : ChatMessage.ToolData.STATE_ERROR.equals(state)
                                     ? R.color.status_offline
                                     : R.color.text_secondary));
                 }
@@ -951,10 +971,12 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
             return ContextCompat.getColor(ctx, res);
         }
 
-        /** pi-pocket GLYPHS：bash "$"、read "→"、write "+"、edit "✎"、grep/find "⌕"、subagent "⑂"。 */
+        /** pi-pocket GLYPHS：thinking "⋯"、bash "$"、read "→"、write "+"、edit "✎"、grep/find "⌕"、subagent "⑂"。 */
         private String glyphFor(String name) {
             if (name == null) return "›";
             switch (name) {
+                case ChatMessage.ToolData.NAME_THINKING:
+                    return "⋯";
                 case "bash":
                     return "$";
                 case "read":

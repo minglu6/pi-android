@@ -21,14 +21,18 @@ public final class TranscriptReducer {
     }
 
     private final Map<Integer, StringBuilder> textBlocks = new TreeMap<>();
+    private final Map<Integer, StringBuilder> thinkingBlocks = new TreeMap<>();
     private final Map<String, ChatMessage.ToolData> tools = new LinkedHashMap<>();
     private final Map<String, Integer> toolRows = new LinkedHashMap<>();
     private final Map<String, Long> toolTimes = new LinkedHashMap<>();
     /** 协调器回填了 N 行历史后累加；此后所有绝对行号都要平移。
-        已登记的行号（assistantRow / toolRows）在 shiftRows 时一并平移。 */
+        已登记的行号（assistantRow / thinkingRow / toolRows）在 shiftRows 时一并平移。 */
     private int rowShift = 0;
     private int assistantRow = -1;
+    private int thinkingRow = -1;
     private long assistantTime;
+    private long thinkingStartMs;
+    private String thinkingId = "";
     private String lastError = "";
     /** 本轮已经在 UI 里出现过的助手正文（跨消息累积），用于 agent_end 去重补拍。 */
     private String lastRunText = "";
@@ -38,14 +42,16 @@ public final class TranscriptReducer {
         if (inserted <= 0) return;
         rowShift += inserted;
         if (assistantRow >= 0) assistantRow += inserted;
+        if (thinkingRow >= 0) thinkingRow += inserted;
         for (Map.Entry<String, Integer> entry : toolRows.entrySet()) {
             entry.setValue(entry.getValue() + inserted);
         }
     }
 
     public void reset() {
-        textBlocks.clear(); tools.clear(); toolRows.clear(); toolTimes.clear();
-        assistantRow = -1; assistantTime = 0; lastError = ""; rowShift = 0;
+        textBlocks.clear(); thinkingBlocks.clear(); tools.clear(); toolRows.clear(); toolTimes.clear();
+        assistantRow = -1; thinkingRow = -1; assistantTime = 0; thinkingStartMs = 0;
+        thinkingId = ""; lastError = ""; rowShift = 0;
     }
 
     public List<Edit> accept(JSONObject event, int size) {
@@ -59,8 +65,10 @@ public final class TranscriptReducer {
             case "message_start": {
                 JSONObject message = event.optJSONObject("message");
                 if (message != null && "assistant".equals(message.optString("role"))) {
-                    textBlocks.clear(); assistantRow = -1;
+                    textBlocks.clear(); thinkingBlocks.clear();
+                    assistantRow = -1; thinkingRow = -1; thinkingStartMs = 0;
                     assistantTime = message.optLong("timestamp", System.currentTimeMillis());
+                    thinkingId = "thinking:" + assistantTime;
                 }
                 break;
             }
@@ -80,8 +88,33 @@ public final class TranscriptReducer {
                         textBlocks.put(index, new StringBuilder(update.optString("content")));
                         if (assistantRow >= 0 || !joinedText().isEmpty()) assistant(edits, size, joinedText(), true);
                         break;
+                    case "thinking_start":
+                        thinkingBlocks.put(index, new StringBuilder());
+                        if (thinkingStartMs <= 0) thinkingStartMs = System.currentTimeMillis();
+                        if (thinkingId.isEmpty()) thinkingId = "thinking:" + System.currentTimeMillis();
+                        break;
+                    case "thinking_delta": {
+                        if (thinkingStartMs <= 0) thinkingStartMs = System.currentTimeMillis();
+                        if (thinkingId.isEmpty()) thinkingId = "thinking:" + System.currentTimeMillis();
+                        thinkingBlocks.computeIfAbsent(index, key -> new StringBuilder())
+                                .append(update.optString("delta"));
+                        String think = joinedThinking();
+                        // Hide until real content arrives — never invent thinking.
+                        if (!think.isEmpty()) thinking(edits, size, think, true, -1);
+                        break;
+                    }
+                    case "thinking_end": {
+                        thinkingBlocks.put(index, new StringBuilder(update.optString("content")));
+                        String think = joinedThinking();
+                        if (!think.isEmpty()) {
+                            long duration = thinkingStartMs > 0
+                                    ? Math.max(0, System.currentTimeMillis() - thinkingStartMs) : -1;
+                            thinking(edits, size, think, false, duration);
+                        }
+                        break;
+                    }
                     case "toolcall_end": rememberCall(update.optJSONObject("toolCall")); break;
-                    default: break; // Thinking/signatures/JSON tool arguments are not assistant prose.
+                    default: break; // signatures/JSON tool arguments are not assistant prose.
                 }
                 break;
             }
@@ -89,18 +122,30 @@ public final class TranscriptReducer {
                 JSONObject message = event.optJSONObject("message");
                 if (message == null || !"assistant".equals(message.optString("role"))) break;
                 rememberCalls(message);
+                // Authoritative thinking blocks from the final message (hide if empty).
+                String think = thinkingOfMessage(message);
+                if (think.isEmpty() && !joinedThinking().isEmpty()) think = joinedThinking();
+                if (!think.isEmpty()) {
+                    long duration = thinkingStartMs > 0
+                            ? Math.max(0, System.currentTimeMillis() - thinkingStartMs) : -1;
+                    if (assistantTime > 0) thinkingId = "thinking:" + assistantTime;
+                    thinking(edits, size, think, false, duration);
+                }
                 String text = textOfMessage(message);
                 // 正文为空但流里曾出现过文字（重新连接/纯工具消息后 delta 已丢失）：
                 // 保留已渲染的正文，不让权威空消息把它抹掉。
                 if (text.isEmpty() && !joinedText().isEmpty()) text = joinedText();
+                int nextSize = size + (int) edits.stream().filter(e -> e.append).count();
                 if ("error".equals(message.optString("stopReason"))) {
-                    if (assistantRow >= 0 || !text.isEmpty()) assistant(edits, size, text, false);
+                    if (assistantRow >= 0 || !text.isEmpty()) assistant(edits, nextSize, text, false);
                     error(edits, size + (int) edits.stream().filter(e -> e.append).count(), message);
                 } else if (!text.isEmpty() || assistantRow >= 0) {
-                    assistant(edits, size, text, false);
+                    assistant(edits, nextSize, text, false);
                 }
                 if (!text.isEmpty()) lastRunText += text;
-                textBlocks.clear(); assistantRow = -1; assistantTime = 0;
+                textBlocks.clear(); thinkingBlocks.clear();
+                assistantRow = -1; thinkingRow = -1; assistantTime = 0;
+                thinkingStartMs = 0; thinkingId = "";
                 break;
             }
             case "tool_execution_start":
@@ -167,8 +212,15 @@ public final class TranscriptReducer {
             }
             case "agent_settled": {
                 // Stop/reconnect must not leave spinning cards or streaming cursors forever.
+                if (thinkingRow >= 0 && !joinedThinking().isEmpty()) {
+                    long duration = thinkingStartMs > 0
+                            ? Math.max(0, System.currentTimeMillis() - thinkingStartMs) : -1;
+                    thinking(edits, size, joinedThinking(), false, duration);
+                }
                 if (assistantRow >= 0) assistant(edits, size, joinedText(), false);
-                textBlocks.clear(); assistantRow = -1; assistantTime = 0;
+                textBlocks.clear(); thinkingBlocks.clear();
+                assistantRow = -1; thinkingRow = -1; assistantTime = 0;
+                thinkingStartMs = 0; thinkingId = "";
                 for (Map.Entry<String, ChatMessage.ToolData> item : tools.entrySet()) {
                     ChatMessage.ToolData data = item.getValue();
                     Integer row = toolRows.get(item.getKey());
@@ -196,6 +248,26 @@ public final class TranscriptReducer {
         }
         edits.add(new Edit(assistantRow,
                 new ChatMessage(ChatMessage.Role.AGENT, text, assistantTime, streaming, ""), append));
+    }
+
+    /** Emit/update the 「思考」 tool-timeline row. No-op when text is empty. */
+    private void thinking(List<Edit> edits, int size, String text, boolean streaming, long durationMs) {
+        if (text == null || text.isEmpty()) return;
+        if (thinkingId.isEmpty()) {
+            thinkingId = "thinking:" + (assistantTime > 0 ? assistantTime : System.currentTimeMillis());
+        }
+        String state = streaming ? ChatMessage.ToolData.STATE_RUNNING : ChatMessage.ToolData.STATE_DONE;
+        ChatMessage.ToolData data = new ChatMessage.ToolData(
+                thinkingId, ChatMessage.ToolData.NAME_THINKING, "", text, state, durationMs);
+        boolean append = thinkingRow < 0;
+        if (append) {
+            thinkingRow = size;
+            toolRows.put(thinkingId, thinkingRow);
+            toolTimes.put(thinkingId, thinkingStartMs > 0 ? thinkingStartMs : System.currentTimeMillis());
+        }
+        tools.put(thinkingId, data);
+        long ts = toolTimes.getOrDefault(thinkingId, System.currentTimeMillis());
+        edits.add(new Edit(thinkingRow, ChatMessage.tool(data, ts), append));
     }
 
     private void error(List<Edit> edits, int size, JSONObject message) {
@@ -232,6 +304,34 @@ public final class TranscriptReducer {
     private String joinedText() {
         StringBuilder result = new StringBuilder();
         for (StringBuilder block : textBlocks.values()) result.append(block);
+        return result.toString();
+    }
+
+    private String joinedThinking() {
+        StringBuilder result = new StringBuilder();
+        for (StringBuilder block : thinkingBlocks.values()) {
+            if (block.length() == 0) continue;
+            if (result.length() > 0) result.append("\n\n");
+            result.append(block);
+        }
+        return result.toString();
+    }
+
+    /** Extract thinking blocks from an assistant message; never invents content. */
+    public static String thinkingOfMessage(JSONObject message) {
+        if (message == null) return "";
+        JSONArray content = message.optJSONArray("content");
+        if (content == null) return "";
+        StringBuilder result = new StringBuilder();
+        for (int i = 0; i < content.length(); i++) {
+            JSONObject block = content.optJSONObject(i);
+            if (block == null || !"thinking".equals(block.optString("type"))) continue;
+            String think = block.optString("thinking", "");
+            if (think.isEmpty()) think = block.optString("text", "");
+            if (think.isEmpty()) continue;
+            if (result.length() > 0) result.append("\n\n");
+            result.append(think);
+        }
         return result.toString();
     }
 
@@ -391,8 +491,17 @@ public final class TranscriptReducer {
                 shown.attachments.addAll(user.attachments);
                 result.add(shown);
             } else {
-                String text = HistoryPresentation.displayText(message, textOfMessage(message));
                 String entryId = message.optString("entryId", "");
+                if ("assistant".equals(role)) {
+                    String think = thinkingOfMessage(message);
+                    if (!think.isEmpty()) {
+                        long thinkDur = message.optLong("thinkingDurationMs", -1);
+                        result.add(ChatMessage.tool(new ChatMessage.ToolData(
+                                "thinking:history:" + i, ChatMessage.ToolData.NAME_THINKING,
+                                "", think, ChatMessage.ToolData.STATE_DONE, thinkDur), timestamp));
+                    }
+                }
+                String text = HistoryPresentation.displayText(message, textOfMessage(message));
                 if ("assistant".equals(role) && "error".equals(message.optString("stopReason"))) {
                     if (!text.isEmpty() && message.has("errorMessage")) {
                         result.add(new ChatMessage(ChatMessage.Role.AGENT, text, timestamp, false, entryId));

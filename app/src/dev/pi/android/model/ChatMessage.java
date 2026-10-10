@@ -60,6 +60,9 @@ public class ChatMessage {
 
         public static final String STATE_PENDING = "pending";
 
+        /** Synthetic tool-timeline row for assistant thinking blocks (RPC thinking_*). */
+        public static final String NAME_THINKING = "thinking";
+
         public final String id;
         public final String name;
         public final String command;
