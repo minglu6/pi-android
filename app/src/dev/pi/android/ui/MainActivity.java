@@ -2694,28 +2694,48 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
             setBashRunning(false);
             pendingBashRpc = "";
+            // Old Termux bridge reject: "命令不允许: bash" — tell user to update/restart connector.
+            if (resumed && isConnectorCommandRejected(error, "bash")) {
+                Toast.makeText(this, R.string.connector_update_required, Toast.LENGTH_LONG).show();
+            }
             return true;
         }
         if ("list_project_files".equals(command) || "git_status".equals(command)
                 || "git_branches".equals(command) || "git_checkout".equals(command)
                 || "git_diff".equals(command) || "read_project_file".equals(command)) {
-            // Hide missing RPCs — only toast when user explicitly opened a sheet.
-            if (("git_branches".equals(command) && id.equals(pendingBranchesRpc))
+            boolean userFacing = ("git_branches".equals(command) && id.equals(pendingBranchesRpc))
                     || ("git_status".equals(command) && id.equals(pendingChangesRpc))
-                    || ("list_project_files".equals(command) && id.equals(pendingFilesRpc))
+                    || ("list_project_files".equals(command)
+                        && (id.equals(pendingFilesRpc) || id.equals(pendingMentionRpc)))
                     || ("read_project_file".equals(command) && id.equals(pendingReadRpc))
                     || ("git_diff".equals(command) && id.equals(pendingDiffRpc))
-                    || ("git_checkout".equals(command) && id.equals(pendingCheckoutRpc))) {
-                if (resumed) Toast.makeText(this,
-                        "git_branches".equals(command) || "git_status".equals(command)
-                                || "git_checkout".equals(command) || "git_diff".equals(command)
-                                ? R.string.git_unavailable : R.string.file_viewer_failed,
-                        Toast.LENGTH_SHORT).show();
+                    || ("git_checkout".equals(command) && id.equals(pendingCheckoutRpc));
+            if (userFacing && resumed) {
+                if (isConnectorCommandRejected(error, command)) {
+                    Toast.makeText(this, R.string.connector_update_required, Toast.LENGTH_LONG).show();
+                } else {
+                    Toast.makeText(this,
+                            "git_branches".equals(command) || "git_status".equals(command)
+                                    || "git_checkout".equals(command) || "git_diff".equals(command)
+                                    ? R.string.git_unavailable : R.string.file_viewer_failed,
+                            Toast.LENGTH_SHORT).show();
+                }
             }
             clearPendingPocketId(command, id);
             return true;
         }
         return false;
+    }
+
+    /** True when an old bridge rejected the command with allow-list error (or unknown cmd). */
+    private static boolean isConnectorCommandRejected(@Nullable String error, String command) {
+        if (error == null || error.isEmpty()) return false;
+        String e = error.trim();
+        if (e.startsWith("命令不允许")) return true;
+        if (e.contains("命令不允许: " + command)) return true;
+        String lower = e.toLowerCase(java.util.Locale.US);
+        return lower.contains("unknown command") || lower.contains("not allowed")
+                || lower.contains("unsupported");
     }
 
     private boolean handlePocketRpcResponse(String id, String command, @Nullable JSONObject data,
@@ -2938,23 +2958,23 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         if (query.contains(" ") || query.contains("\n")) return;
         if (query.length() > 64) return;
         long now = System.currentTimeMillis();
-        if (query.equals(lastMentionQuery) && now - lastMentionAt < 400) return;
-        // Wait until at least 1 char after @ to avoid spam on lone @
-        if (query.isEmpty()) return;
+        // Lone "@" and further typing both query list_project_files (empty query = top files).
+        if (query.equals(lastMentionQuery) && now - lastMentionAt < 280) return;
         lastMentionQuery = query;
         lastMentionAt = now;
         main.removeCallbacks(mentionRunnable);
-        main.postDelayed(mentionRunnable, 220);
+        // Lone "@" fires immediately; typed filters keep a short debounce.
+        main.postDelayed(mentionRunnable, query.isEmpty() ? 0 : 180);
     }
 
     private final Runnable mentionRunnable = () -> {
         if (!isConnected()) return;
         String q = lastMentionQuery;
-        if (q == null || q.isEmpty()) return;
+        if (q == null) return;
         JSONObject params = new JSONObject();
         try {
             params.put("query", q);
-            params.put("limit", 60);
+            params.put("limit", 80);
         } catch (Exception e) {
             throw new IllegalStateException("mention params", e);
         }
