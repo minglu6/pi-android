@@ -204,6 +204,7 @@ public final class ProjectSheets {
         PickerSheet sheet = new PickerSheet(activity, R.string.menu_mcp, true, item -> {
             if (item.payload instanceof JSONObject) pick.onPick((JSONObject) item.payload);
         });
+        sheet.setTitleIcon(R.drawable.ic_mcp);
         sheet.enableFooter(activity.getString(R.string.mcp_run_command), () -> {
             sheet.dismiss();
             runMcp.run();
