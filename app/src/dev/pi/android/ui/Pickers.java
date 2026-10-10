@@ -56,7 +56,7 @@ public final class Pickers {
                 String[] ref = (String[]) p;
                 if (ref.length >= 2 && ref[0] != null && ref[1] != null
                         && !ref[0].isEmpty() && !ref[1].isEmpty()) {
-                    RecentModels.touch(activity, ref[0], ref[1]);
+                    // 最近使用由服务在 set_model 确认成功后记录，失败选择不能污染最近列表。
                     listener.onModel(ref[0], ref[1]);
                 }
             }

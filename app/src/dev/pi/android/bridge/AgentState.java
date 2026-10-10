@@ -37,6 +37,9 @@ public final class AgentState {
     private volatile String modelId = "";
     private volatile String modelLabel = "";
     private volatile String thinking = "";
+    private volatile boolean fresh;
+    private boolean cacheLoaded;
+    private volatile long modelRevision;
     private final List<ChatMessage> chatSnapshot = new ArrayList<>();
     private volatile String chatSessionPath = "";
 
@@ -54,7 +57,10 @@ public final class AgentState {
         listeners.remove(l);
     }
 
-    public void loadCache(@NonNull Context ctx) {
+    public synchronized void loadCache(@NonNull Context ctx) {
+        // 缓存只用于进程冷启动，Activity 重建不能覆盖已收到的权威状态。
+        if (cacheLoaded || fresh) return;
+        cacheLoaded = true;
         SharedPreferences p = prefs(ctx);
         provider = p.getString(K_PROVIDER, "");
         modelId = p.getString(K_MODEL_ID, "");
@@ -76,31 +82,39 @@ public final class AgentState {
     public String modelId() { return modelId; }
     public String modelLabel() { return modelLabel; }
     public String thinking() { return thinking; }
+    /** true 仅表示本连接已收到完整 get_state；磁盘缓存不是当前服务端状态。 */
+    public boolean isFresh() { return fresh; }
+    public long modelRevision() { return modelRevision; }
+
+    public void invalidateFresh() {
+        fresh = false;
+        modelRevision++;
+        notifyListeners();
+    }
 
     public void setStatus(String s) {
         status = s == null ? "offline" : s;
+        if (!"online".equals(status)) {
+            fresh = false;
+            modelRevision++;
+        }
         notifyListeners();
     }
 
     /** 从 get_state 的 data 更新；ctx 非空时落盘。 */
     public void applyGetState(@Nullable JSONObject data, @Nullable Context ctx) {
         if (data == null) return;
-        JSONObject model = data.optJSONObject("model");
-        if (model != null) {
-            provider = model.optString("provider", provider);
-            modelId = model.optString("id", model.optString("modelId", modelId));
-            // name 通常已是「provider / id」展示串，直接采用，避免二次拼接
-            String name = model.optString("name", "");
-            if (!name.isEmpty()) {
-                modelLabel = name;
-            } else if (!provider.isEmpty() && !modelId.isEmpty()) {
-                modelLabel = provider + " / " + modelId;
-            } else if (!modelId.isEmpty()) {
-                modelLabel = modelId;
-            }
-        }
-        String th = data.optString("thinkingLevel", null);
-        if (th != null) thinking = th;
+        ModelRpc.Applied model = ModelRpc.fromGetState(data);
+        String nextProvider = model == null ? "" : model.provider;
+        String nextId = model == null ? "" : model.modelId;
+        if (!provider.equals(nextProvider) || !modelId.equals(nextId)) modelRevision++;
+        // get_state 是完整快照，省略 model 表示没有选中模型，不能继承上个会话的身份。
+        provider = nextProvider;
+        modelId = nextId;
+        modelLabel = model == null ? "" : model.label;
+        thinking = data.isNull("thinkingLevel") ? "" : data.optString("thinkingLevel", "");
+        fresh = true;
+        cacheLoaded = true;
         if (ctx != null) persist(ctx);
         notifyListeners();
     }
@@ -110,19 +124,25 @@ public final class AgentState {
     }
 
     public void setModel(String provider, String modelId, @Nullable String label, @Nullable Context ctx) {
-        this.provider = provider == null ? "" : provider;
-        this.modelId = modelId == null ? "" : modelId;
+        String nextProvider = provider == null ? "" : provider;
+        String nextId = modelId == null ? "" : modelId;
+        if (!this.provider.equals(nextProvider) || !this.modelId.equals(nextId)) modelRevision++;
+        this.provider = nextProvider;
+        this.modelId = nextId;
         if (label != null && !label.trim().isEmpty()) {
             modelLabel = label.trim();
-        } else if (!this.provider.isEmpty() && !this.modelId.isEmpty()) {
-            modelLabel = this.provider + " / " + this.modelId;
+        } else {
+            modelLabel = this.provider.isEmpty() ? this.modelId
+                    : this.modelId.isEmpty() ? "" : this.provider + " / " + this.modelId;
         }
+        cacheLoaded = true;
         if (ctx != null) persist(ctx);
         notifyListeners();
     }
 
     public void setThinking(String level, @Nullable Context ctx) {
         thinking = level == null ? "" : level;
+        cacheLoaded = true;
         if (ctx != null) persist(ctx);
         notifyListeners();
     }

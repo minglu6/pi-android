@@ -1,0 +1,2 @@
+# Local pinned test dependency; deliberately never commit the binary.
+/lib/

@@ -46,6 +46,7 @@ Termux: pi-rpc-bridge  →  bridge/pi-rpc-bridge.mjs  →  pi --mode rpc
 ```
 
 APK 关闭不会销毁 Termux 里的任何东西；反过来，Termux 里的 Pi 也不用为 APK 活着。
+桥默认使用 Pi 的持久会话；显式 `--no-session` 才是临时会话，进程结束后不会保留。
 
 本仓库**不是** Pocket Pi fork：本机已有 Termux + Pi，薄客户端只走官方 `pi --mode rpc`，
 不必打包第二套 bootstrap。代价是 RPC 演进时本仓库要跟着加；好处是 `pkg upgrade` 更新 Pi
@@ -94,6 +95,13 @@ gh run watch
 ```
 
 签名为 CI / `build.sh` 自签 keystore，**无需**仓库 Secrets。
+注意：CI 临时 keystore 每次不同，与本机固定 keystore 也不同；这些包不能互相覆盖升级。
+请保留本机 `app/pi-android.jks`（不要提交），不要为绕过签名随意卸载或清除数据。
+
+## Regression tests
+
+隔离 RPC、真实 Java 状态/连接测试、设备 UI fixture 与本次修复证据，见
+[`docs/debugging-20261010.md`](docs/debugging-20261010.md)。CI 会在打包前运行隔离回归。
 
 ## Status（已实现 / 待办）
 
@@ -121,7 +129,7 @@ gh run watch
 ## 安全边界
 
 - 连接器只绑 `127.0.0.1`，token 必填（文件权限建议 600）
-- 命令白名单默认**不含 `bash`**；`--allow-bash` 等于把 shell 交给能连 loopback 的 App
+- 命令白名单默认**不含直接 `bash` RPC**；`--allow-bash` 显式开启。该白名单不限制 prompt 驱动的 agent 工具，不是工具权限沙箱
 - 依赖 sha256 清单：`app/libs/manifest.json`（重建后核对）
 
 ## License

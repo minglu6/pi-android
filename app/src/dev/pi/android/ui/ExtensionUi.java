@@ -1,7 +1,5 @@
 package dev.pi.android.ui;
 
-import android.widget.Toast;
-
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
@@ -128,7 +126,10 @@ public class ExtensionUi {
                     return true;
             }
         } catch (Throwable t) {
-            respondCancelled(req.optString("id"));
+            String id = req.optString("id");
+            finish(id);
+            respondCancelled(id);
+            pump();
             return true;
         }
     }
@@ -149,7 +150,7 @@ public class ExtensionUi {
         AnswerSink answer = new AnswerSink() {
             @Override
             public void value(String v) {
-                finish(id);
+                if (!finish(id)) return;
                 JSONObject r = new JSONObject();
                 try {
                     r.put("id", id);
@@ -162,7 +163,7 @@ public class ExtensionUi {
 
             @Override
             public void confirmed(boolean yes) {
-                finish(id);
+                if (!finish(id)) return;
                 JSONObject r = new JSONObject();
                 try {
                     r.put("id", id);
@@ -175,7 +176,7 @@ public class ExtensionUi {
 
             @Override
             public void cancelled() {
-                finish(id);
+                if (!finish(id)) return;
                 respondCancelled(id);
                 pump();
             }
@@ -238,9 +239,12 @@ public class ExtensionUi {
         }
     }
 
-    private void finish(String id) {
+    private boolean finish(String id) {
+        // 作答、超时、重连取消可能竞争；旧 sink 不得结束下一条提问或重复回答。
+        if (!awaiting || awaitingId == null || !awaitingId.equals(id)) return false;
         awaiting = false;
-        if (awaitingId != null && awaitingId.equals(id)) awaitingId = null;
+        awaitingId = null;
+        return true;
     }
 
     /** UI 被系统/屏幕状态弄没了时的兜底：把正在等的请求取消掉，别让 Pi 干等。 */

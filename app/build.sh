@@ -32,8 +32,7 @@ i=0
 while IFS= read -r d; do
   i=$((i+1))
   # 每个依赖一个 zip，避免 --dir 合并时资源 id 冲突报错
-  aapt2 compile --dir "$d" -o "$BUILD/compiled-libs/lib${i}.zip" 2>/dev/null \
-    || aapt2 compile --dir "$d" -o "$BUILD/compiled-libs/lib${i}-partial.zip" || true
+  aapt2 compile --dir "$d" -o "$BUILD/compiled-libs/lib${i}.zip"
 done < <(find "$LIBS" -type d -name res | sort)
 LIB_RES_ZIPS=($(ls "$BUILD/compiled-libs"/*.zip 2>/dev/null | sed "s|^|-R |"))
 echo "     依赖资源包: ${#LIB_RES_ZIPS[@]} 个"
@@ -70,11 +69,15 @@ public final class BuildInfo {
 JAVA
 
 find "$HERE/src" "$BUILD/gen" -name '*.java' > "$BUILD/sources.txt"
-javac -encoding UTF-8 -nowarn \
+if ! javac -encoding UTF-8 -nowarn \
     -source 11 -target 11 \
     -cp "$CP" \
-    -d "$BUILD/classes" @"$BUILD/sources.txt" 2>&1 \
-    | grep -v 'bootstrap class path\|source value\|target value\| deprecat\|警告\|warning' || true
+    -d "$BUILD/classes" @"$BUILD/sources.txt" > "$BUILD/javac.log" 2>&1; then
+    command cat "$BUILD/javac.log" >&2
+    exit 1
+fi
+# 只过滤成功构建的告警，不能吞编译失败后继续打包缺类的 APK。
+grep -v 'bootstrap class path\|source value\|target value\| deprecat\|警告\|warning' "$BUILD/javac.log" || true
 
 echo "[4/6] d8 生成 dex"
 # 依赖的 classes.jar 里才有 androidx 的类实现，必须一起打进 dex

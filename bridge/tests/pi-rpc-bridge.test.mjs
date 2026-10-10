@@ -1,0 +1,247 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {randomBytes} from 'node:crypto';
+import {once} from 'node:events';
+import fs from 'node:fs/promises';
+import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {WebSocket} from 'ws';
+
+const bridgeFile = fileURLToPath(new URL('../pi-rpc-bridge.mjs', import.meta.url));
+const fixtureFile = fileURLToPath(new URL('./fixtures/fake-pi.cjs', import.meta.url));
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function waitFor(read, predicate, ms = 4000) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    const value = await read();
+    if (predicate(value)) return value;
+    await sleep(10);
+  }
+  throw new Error('Synthetic fixture wait timed out');
+}
+async function availablePort() {
+  const server = net.createServer();
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const port = server.address().port;
+  await new Promise(resolve => server.close(resolve));
+  return port;
+}
+
+async function harness(t, {tokenMode = 'valid', piMissing = false, bridgeArgs = []} = {}) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-bridge-test-'));
+  await fs.chmod(dir, 0o700);
+  const sessions = path.join(dir, 'sessions');
+  await fs.mkdir(sessions);
+  const token = randomBytes(24).toString('hex'); // Synthetic; never log it.
+  const tokenFile = path.join(dir, 'token');
+  if (tokenMode !== 'missing') await fs.writeFile(tokenFile, tokenMode === 'empty' ? '\n' : token, {mode: 0o600});
+  const fakePi = path.join(dir, 'fake-pi.cjs');
+  await fs.writeFile(fakePi, `#!${process.execPath}\n` + await fs.readFile(fixtureFile, 'utf8'), {mode: 0o700});
+  const logFile = path.join(dir, 'synthetic-input.jsonl');
+  await fs.writeFile(logFile, '');
+  const port = await availablePort(); // Never connects to the production port.
+  const processBridge = spawn(process.execPath, [bridgeFile, '--host', '127.0.0.1', '--port', String(port),
+    '--cwd', dir, '--sessions-dir', sessions, '--token-file', tokenFile, '--idle-exit', '0',
+    '--pi-bin', piMissing ? path.join(dir, 'does-not-exist') : fakePi, ...bridgeArgs], {
+    cwd: dir, env: {...process.env, HOME: dir, PI_BRIDGE_TEST_LOG: logFile, PI_BRIDGE_EXIT_ON_IDLE: '0'},
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  let stderr = '';
+  processBridge.stderr.setEncoding('utf8');
+  processBridge.stderr.on('data', s => { stderr += s; });
+  const exited = once(processBridge, 'exit');
+  const sockets = [];
+  t.after(async () => {
+    for (const socket of sockets) socket.terminate();
+    if (processBridge.exitCode === null && processBridge.signalCode === null) processBridge.kill('SIGTERM');
+    await Promise.race([exited, sleep(4000)]);
+    if (processBridge.exitCode === null && processBridge.signalCode === null) {
+      processBridge.kill('SIGKILL'); await exited;
+    }
+    await fs.rm(dir, {recursive: true, force: true});
+  });
+  if (tokenMode === 'valid') {
+    await waitFor(() => stderr, s => s.includes('listening ws://'));
+  }
+  async function connect(auth = true) {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+    sockets.push(ws);
+    const frames = [];
+    ws.on('message', data => { frames.push(JSON.parse(String(data))); });
+    ws.on('error', () => {});
+    await once(ws, 'open');
+    const c = {
+      ws, frames,
+      send: obj => ws.send(JSON.stringify(obj)),
+      rpc: (id, rpc, params = {}) => ws.send(JSON.stringify({id, rpc, params})),
+      response: id => waitFor(() => frames.find(f => f.kind === 'response' && f.id === id), Boolean),
+      event: method => waitFor(() => frames.find(f => f.kind === 'event' && f.event.method === method), Boolean),
+      close: async () => { const closed = once(ws, 'close'); ws.close(); await closed; },
+    };
+    if (auth) {
+      c.send({auth: token});
+      await waitFor(() => frames, list => list.some(f => f.kind === 'status' && f.state === 'online'));
+    }
+    return c;
+  }
+  async function commands() {
+    const s = await fs.readFile(logFile, 'utf8');
+    return s.trim() ? s.trim().split('\n').map(line => JSON.parse(line)) : [];
+  }
+  return {dir, sessions, connect, commands, processBridge, exited, stderr: () => stderr};
+}
+
+for (const [label, bridgeArgs, ephemeral] of [
+  ['default', [], false], ['legacy --session', ['--session'], false],
+  ['explicit --no-session', ['--no-session'], true],
+  ['explicit Pi --no-session', ['--pi-arg=--no-session'], true],
+]) {
+  test(`${label}: persistent by default, ephemeral only when explicit`, async t => {
+    const h = await harness(t, {bridgeArgs}), c = await h.connect();
+    c.rpc('args', 'get_state');
+    const args = (await c.response('args')).data.fixtureArgs;
+    assert.equal(args.includes('--no-session'), ephemeral);
+    assert.equal(args.includes('--session'), false);
+    assert.deepEqual(args.slice(0, 2), ['--mode', 'rpc']);
+  });
+}
+
+test('same client IDs from two sockets are correlated by unique internal IDs, out of order', async t => {
+  const h = await harness(t), a = await h.connect(), b = await h.connect();
+  a.rpc('a1', 'get_messages', {fixtureTag: 'A', fixtureDelay: 150});
+  b.rpc('a1', 'get_messages', {fixtureTag: 'B'});
+  const rb = await b.response('a1'), ra = await a.response('a1');
+  assert.equal(ra.data.tag, 'A'); assert.equal(rb.data.tag, 'B');
+  const commands = await h.commands();
+  assert.notEqual(commands[0].id, commands[1].id);
+  assert.notEqual(commands[0].id, 'a1');
+  assert.equal(a.frames.filter(f => f.kind === 'response').length, 1);
+  assert.equal(b.frames.filter(f => f.kind === 'response').length, 1);
+});
+
+test('unmatched IDs and missing IDs cannot steal pending requests or become broadcast events', async t => {
+  const h = await harness(t), c = await h.connect();
+  c.rpc('fresh', 'get_messages', {fixtureTag: 'fresh', fixtureDelay: 150});
+  c.rpc('trigger', 'prompt', {message: '/fixture-unmatched'});
+  await c.response('trigger');
+  assert.equal((await c.response('fresh')).data.tag, 'fresh');
+  assert(!c.frames.some(f => f.kind === 'event' && f.event.type === 'response'));
+});
+
+test('params cannot override command type or ordinary ID; direct bash remains disabled', async t => {
+  const h = await harness(t), c = await h.connect();
+  c.rpc('type', 'get_state', {type: 'bash', command: 'synthetic-never-executed'});
+  c.rpc('id', 'get_state', {id: 'override'});
+  c.rpc('bash', 'bash', {command: 'synthetic-never-executed'});
+  for (const id of ['type', 'id', 'bash']) assert.equal((await c.response(id)).ok, false);
+  assert.deepEqual(await h.commands(), []);
+});
+
+test('UI answer uses Pi UI ID, has no regular pending response, and is consumed exactly once', async t => {
+  const h = await harness(t), c = await h.connect();
+  c.rpc('ask', 'prompt', {message: '/fixture-ui'});
+  const request = await c.event('confirm');
+  c.rpc('answer', 'extension_ui_response', {id: request.event.id, confirmed: true});
+  assert.equal((await c.response('ask')).ok, true);
+  c.rpc('repeat', 'extension_ui_response', {id: request.event.id, cancelled: true});
+  assert.equal((await c.response('repeat')).ok, false);
+  assert(!c.frames.some(f => f.kind === 'response' && f.id === 'answer'));
+  await c.close();
+  await sleep(80);
+  const answers = (await h.commands()).filter(r => r.type === 'extension_ui_response');
+  assert.equal(answers.length, 1);
+  assert.deepEqual(answers[0], {type: 'extension_ui_response', id: 'fixture-ui-id', confirmed: true});
+});
+
+test('last authenticated disconnect cancels dialog even while an unauthenticated socket stays', async t => {
+  const h = await harness(t), c = await h.connect();
+  await h.connect(false);
+  c.rpc('ask', 'prompt', {message: '/fixture-ui'});
+  await c.event('confirm'); await c.close();
+  const commands = await waitFor(h.commands, rows => rows.some(r => r.cancelled));
+  assert(commands.some(r => r.type === 'extension_ui_response' && r.id === 'fixture-ui-id' && r.cancelled));
+});
+
+test('disconnected owner response is dropped, not sent to another socket or broadcast', async t => {
+  const h = await harness(t), a = await h.connect(), b = await h.connect();
+  a.rpc('a1', 'get_messages', {fixtureTag: 'old-owner', fixtureDelay: 150});
+  await waitFor(h.commands, rows => rows.length === 1); await a.close();
+  b.rpc('a1', 'get_messages', {fixtureTag: 'new-owner', fixtureDelay: 250});
+  assert.equal((await b.response('a1')).data.tag, 'new-owner');
+  assert.equal(b.frames.filter(f => f.kind === 'response').length, 1);
+  assert(!b.frames.some(f => f.kind === 'event' && f.event.type === 'response'));
+});
+
+test('exit rejects outstanding requests and resets partial stdout, dialogs and stderr before restart', async t => {
+  const h = await harness(t), c = await h.connect();
+  c.rpc('old-ask', 'prompt', {message: '/fixture-ui'}); await c.event('confirm');
+  c.rpc('old-state', 'get_state', {fixtureDelay: 200});
+  c.rpc('exit', 'prompt', {message: '/fixture-exit'});
+  for (const id of ['old-ask', 'old-state', 'exit']) assert.equal((await c.response(id)).ok, false);
+  c.rpc('stale-ui', 'extension_ui_response', {id: 'fixture-ui-id', confirmed: true});
+  assert.equal((await c.response('stale-ui')).ok, false);
+  c.rpc('new-state', 'get_state');
+  assert.equal((await c.response('new-state')).ok, true);
+  c.rpc('new-name', 'get_session_name');
+  assert.equal((await c.response('new-name')).data.name, '');
+  c.send({type: 'stop_pi'});
+  const offline = await waitFor(() => c.frames.filter(f => f.kind === 'status' && f.error?.startsWith('pi exited')), rows => rows.length === 2);
+  assert.equal(offline[1].stderr, '');
+});
+
+test('canonical session name survives cancelled switch/failed rename and follows successful switch', async t => {
+  const h = await harness(t), c = await h.connect();
+  c.rpc('rename', 'set_session_name', {name: 'synthetic A'}); await c.response('rename');
+  c.rpc('switch-cancel', 'switch_session', {sessionPath: path.join(h.sessions, 'B.jsonl'), fixtureCancel: true});
+  assert.equal((await c.response('switch-cancel')).data.cancelled, true);
+  c.rpc('bad-name', 'set_session_name', {name: ' '}); assert.equal((await c.response('bad-name')).ok, false);
+  c.rpc('name-A', 'get_session_name'); assert.equal((await c.response('name-A')).data.name, 'synthetic A');
+  c.rpc('switch', 'switch_session', {sessionPath: path.join(h.sessions, 'B.jsonl'), fixtureName: 'synthetic B'}); await c.response('switch');
+  c.rpc('name-B', 'get_session_name'); assert.equal((await c.response('name-B')).data.name, 'synthetic B');
+  c.rpc('new', 'new_session'); await c.response('new');
+  c.rpc('name-empty', 'get_session_name'); assert.equal((await c.response('name-empty')).data.name, '');
+});
+
+for (const tokenMode of ['missing', 'empty']) {
+  test(`${tokenMode} token fails closed before opening a listener`, async t => {
+    const h = await harness(t, {tokenMode});
+    const [code] = await h.exited;
+    assert.notEqual(code, 0);
+    assert(!h.stderr().includes('listening ws://'));
+  });
+}
+
+test('null/array records cannot crash unauthenticated bridge; wrong token cannot dispatch', async t => {
+  const h = await harness(t), c = await h.connect(false);
+  c.send(null); c.send([]);
+  await sleep(30);
+  c.send({auth: 'wrong-synthetic-token'});
+  await waitFor(() => c.frames, frames => frames.some(f => f.error === 'bad token'));
+  assert.equal(h.processBridge.exitCode, null); assert.deepEqual(await h.commands(), []);
+  const valid = await h.connect(); valid.rpc('ok', 'get_state'); assert.equal((await valid.response('ok')).ok, true);
+});
+
+test('spawn failure rejects pending command without unhandled stdin error', async t => {
+  const h = await harness(t, {piMissing: true}), c = await h.connect();
+  c.rpc('fail', 'get_state'); assert.equal((await c.response('fail')).ok, false);
+  await sleep(50); assert.equal(h.processBridge.exitCode, null);
+});
+
+test('session deletion refuses a symlink parent escape and a leaf symlink', async t => {
+  const h = await harness(t), c = await h.connect();
+  const outside = path.join(h.dir, 'outside'); await fs.mkdir(outside);
+  const victim = path.join(outside, 'synthetic.jsonl'); await fs.writeFile(victim, 'synthetic fixture');
+  await fs.symlink(outside, path.join(h.sessions, 'escape'));
+  await fs.symlink(victim, path.join(h.sessions, 'leaf.jsonl'));
+  for (const [id, target] of [['parent', path.join(h.sessions, 'escape/synthetic.jsonl')], ['leaf', path.join(h.sessions, 'leaf.jsonl')]]) {
+    c.rpc(id, 'delete_session', {sessionPath: target}); assert.equal((await c.response(id)).ok, false);
+  }
+  assert.equal(await fs.readFile(victim, 'utf8'), 'synthetic fixture');
+  const normal = path.join(h.sessions, 'normal.jsonl'); await fs.writeFile(normal, '{}\n');
+  c.rpc('normal', 'delete_session', {sessionPath: normal}); assert.equal((await c.response('normal')).ok, true);
+  await assert.rejects(fs.access(normal)); assert.deepEqual(await h.commands(), []);
+});

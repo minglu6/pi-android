@@ -115,8 +115,11 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private static final long THINKING_TIMEOUT_MS = 90_000L;
     private final Runnable thinkingTimeout = this::onThinkingTimeout;
     private final Runnable settleAfterAgentEnd = () -> {
-        if (streaming) settleStreaming(false);
+        if (streaming) rpc("get_state", null);
     };
+    private boolean historyNeedsSync = true;
+    private String historyRequest = "";
+    private int assistantRow = -1;
     private String pendingPrompt;
     private String lastConfig;
     private String currentSessionPath = "";
@@ -137,6 +140,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private String currentProvider = "";
     private String currentModelId = "";
     private String currentThinking = "";
+    private long thinkingModelRevision = -1;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -357,6 +361,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             composer.setText("");
             adapter.add(new ChatMessage(ChatMessage.Role.USER, text));
             blocks.clear();
+            assistantRow = -1;
+            historyRequest = "";
             setStreaming(true);
             JSONObject params = new JSONObject();
             try {
@@ -398,7 +404,11 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             service.takePendingAsk();
         }
         reconnectIfConfigured();
-        if (isConnected()) refreshSlashCommands();
+        if (isConnected()) {
+            historyNeedsSync = true;
+            rpc("get_state", null);
+            refreshSlashCommands();
+        }
         refreshEmptyState();
     }
 
@@ -421,6 +431,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     private String rpc(String command, @Nullable JSONObject params) {
         if (service == null) return "";
+        if ("prompt".equals(command) || "new_session".equals(command)
+                || "switch_session".equals(command) || "fork".equals(command)
+                || "abort".equals(command)) historyRequest = "";
         return service.rpc(command, params);
     }
 
@@ -528,9 +541,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     private void onThinkingTimeout() {
         if (!streaming) return;
-        android.util.Log.w(TAG, "thinking timeout");
-        rpc("abort", null);
-        failPrompt(getString(R.string.prompt_timeout));
+        // 长工具调用、重试或扩展提问可能合法地静默超过 90 秒，不擅自 abort。
+        rpc("get_state", null);
+        main.postDelayed(thinkingTimeout, THINKING_TIMEOUT_MS);
     }
 
     private void updateSendEnabled() {
@@ -661,8 +674,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                     reconnect();
                     break;
                 case "stop":
+                    rpc("clear_queue", null);
                     rpc("abort", null);
-                    setStreaming(false);
                     break;
                 default:
                     break;
@@ -692,8 +705,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     private void onSendOrStop() {
         if (streaming) {
+            rpc("clear_queue", null);
             rpc("abort", null);
-            settleStreaming(false);
             return;
         }
         submit();
@@ -720,6 +733,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         hideSlashSuggestions();
         adapter.add(new ChatMessage(ChatMessage.Role.USER, text));
         blocks.clear();
+        assistantRow = -1;
+        historyRequest = "";
         setStreaming(true);
         JSONObject params = new JSONObject();
         try {
@@ -734,6 +749,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private void setConnectionVisual(String state, String label) {
+        if ("online".equals(state)) label = HistoryPresentation.statusLabel(modelStatus, label);
         if (statusText != null) statusText.setText(label);
         if (statusDot == null) return;
         int color;
@@ -896,8 +912,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             case "online":
                 lastConfig = SettingsActivity.configSignature(this);
                 setConnectionVisual("online", getString(R.string.status_online));
+                historyNeedsSync = true;
                 rpc("get_state", null);
-                rpc("get_session_name", null);
                 refreshSlashCommands();
                 refreshEmptyState();
                 if (pendingUiTarget != null) {
@@ -913,6 +929,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 break;
             case "offline":
             default:
+                historyRequest = "";
+                historyNeedsSync = true;
                 setStreaming(false);
                 setConnectionVisual("offline", getString(R.string.status_offline));
                 showConnectionBanner(
@@ -942,10 +960,13 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 failPrompt(error != null && !error.isEmpty() ? error : getString(R.string.prompt_failed));
                 return;
             }
-            if ("set_model".equals(command)) {
+            if ("set_model".equals(command) || "set_thinking_level".equals(command)
+                    || "get_state".equals(command) || "get_available_models".equals(command)
+                    || "get_available_thinking_levels".equals(command)) {
                 String detail = error != null && !error.isEmpty() ? error : getString(R.string.rpc_failed);
-                failPrompt(getString(R.string.set_model_failed, detail));
-                rpc("get_state", null);
+                // 配置失败不是 prompt 失败：不能改变正在运行的任务/Stop 状态。
+                if (resumed) Toast.makeText(this, "set_model".equals(command)
+                        ? getString(R.string.set_model_failed, detail) : detail, Toast.LENGTH_LONG).show();
                 return;
             }
             Toast.makeText(this, R.string.rpc_failed, Toast.LENGTH_SHORT).show();
@@ -961,6 +982,11 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             applySetModelSuccess(data);
             return;
         }
+        if ("set_thinking_level".equals(command)) {
+            // 服务会 get_state；不能把请求值当成 Pi 的实际档位。
+            applyGetStateModel(null);
+            return;
+        }
         if ("list_sessions".equals(command)) {
             if (data != null && data.has("error") && !data.isNull("error")
                     && !data.optString("error").isEmpty()) {
@@ -973,7 +999,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         if ("delete_session".equals(command)) {
             Toast.makeText(this, R.string.session_deleted, Toast.LENGTH_SHORT).show();
             if (data != null && data.optString("path").equals(currentSessionPath)) {
-                currentSessionPath = "";
                 startNewSession();
                 if (sessionsSheet != null) sessionsSheet.dismiss();
             } else {
@@ -982,13 +1007,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             return;
         }
         if ("set_session_name".equals(command)) {
-            // 名字已在本地乐观更新；连接器也会本地跟踪
-            applySessionTitle();
+            rpc("get_state", null);
             return;
         }
         if ("get_session_name".equals(command) && data != null) {
-            currentSessionName = data.optString("name", data.optString("sessionName", ""));
-            applySessionTitle();
+            // 会话名以 get_state 为准，避免本地兼容命令的旧名覆盖它。
+            rpc("get_state", null);
             return;
         }
         if ("get_commands".equals(command)) {
@@ -1001,15 +1025,23 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             if (data.optBoolean("cancelled", false)) {
                 Toast.makeText(this, R.string.rpc_failed, Toast.LENGTH_SHORT).show();
             } else {
-                stickToBottom = true;
-                rpc("get_messages", null);
-                rpc("get_session_name", null);
-                refreshSlashCommands();
+                syncSessionAfterChange();
             }
             return;
         }
         if ("get_messages".equals(command)) {
-            renderHistory(data);
+            // 服务向所有 Activity 扇出响应，只接收本页最新的历史请求。
+            if (id.equals(historyRequest) && !streaming) {
+                historyRequest = "";
+                blocks.clear();
+                assistantRow = -1;
+                toolRows.clear();
+                renderHistory(data);
+            }
+            return;
+        }
+        if ("abort".equals(command)) {
+            settleStreaming(true);
             return;
         }
         if ("get_fork_messages".equals(command) && data != null) {
@@ -1046,18 +1078,17 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             if (data.optBoolean("cancelled", false)) {
                 Toast.makeText(this, R.string.rpc_failed, Toast.LENGTH_SHORT).show();
             } else {
-                rpc("get_messages", null);
+                syncSessionAfterChange();
+                if (composer != null) composer.setText(data.optString("text", ""));
             }
             return;
         }
         if ("new_session".equals(command)) {
-            currentSessionPath = "";
-            currentSessionName = "";
-            applySessionTitle();
-            adapter.clear();
-            stickToBottom = true;
-            refreshEmptyState();
-            refreshSlashCommands();
+            if (data != null && data.optBoolean("cancelled", false)) {
+                Toast.makeText(this, R.string.rpc_failed, Toast.LENGTH_SHORT).show();
+            } else {
+                syncSessionAfterChange();
+            }
             return;
         }
         if ("get_available_models".equals(command) && data != null) {
@@ -1069,6 +1100,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             return;
         }
         if ("get_available_thinking_levels".equals(command) && data != null) {
+            thinkingModelRevision = AgentState.get().modelRevision();
             JSONArray levels = data.optJSONArray("levels");
             thinkingLevels.clear();
             if (levels != null) {
@@ -1078,39 +1110,46 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         if ("get_state".equals(command) && data != null) {
             applyGetStateModel(data);
+            // BridgeService 只交付最新、且未跨模型/会话/运行状态变更的 get_state。
             String path = data.optString("sessionFile", data.optString("sessionPath", ""));
-            if (!path.isEmpty()) currentSessionPath = path;
-            if (data.has("sessionName")) currentSessionName = data.optString("sessionName", "");
+            if (!path.equals(currentSessionPath)) historyNeedsSync = true;
+            currentSessionPath = path;
+            currentSessionName = data.optString("sessionName", "");
             applySessionTitle();
+            boolean busy = data.optBoolean("isStreaming", false) || data.optBoolean("isCompacting", false);
+            if (busy) {
+                setStreaming(true);
+            } else {
+                if (streaming) settleStreaming(false);
+                if (historyNeedsSync) {
+                    historyNeedsSync = false;
+                    historyRequest = rpc("get_messages", null);
+                }
+            }
             rpc("get_available_models", null);
             rpc("get_available_thinking_levels", null);
         }
     }
 
-    /** set_model 成功：立刻刷新芯片，再 get_state 对齐思考档等。 */
+    /** set_model 成功：服务已经更新身份并负责 get_state，本页只展示确认值。 */
     private void applySetModelSuccess(@Nullable JSONObject data) {
+        applyGetStateModel(null);
         ModelRpc.Applied applied = ModelRpc.fromModelObject(data);
-        if (applied != null) {
-            if (!applied.provider.isEmpty()) currentProvider = applied.provider;
-            if (!applied.modelId.isEmpty()) currentModelId = applied.modelId;
-            AgentState.get().setModel(currentProvider, currentModelId, applied.label, this);
-            String thinking = AgentState.get().thinking();
-            modelStatus = applied.label + (thinking.isEmpty() ? "" : " · " + thinking);
-            setConnectionVisual("online", modelStatus);
-            Toast.makeText(this, applied.label, Toast.LENGTH_SHORT).show();
-        }
-        rpc("get_state", null);
+        if (resumed && applied != null) Toast.makeText(this, applied.label, Toast.LENGTH_SHORT).show();
     }
 
     private void applyGetStateModel(@Nullable JSONObject data) {
-        // BridgeService 已写入 AgentState；此处同步本地字段 + 状态芯片
         AgentState st = AgentState.get();
-        if (!st.provider().isEmpty()) currentProvider = st.provider();
-        if (!st.modelId().isEmpty()) currentModelId = st.modelId();
-        if (!st.thinking().isEmpty()) currentThinking = st.thinking();
+        currentProvider = st.provider();
+        currentModelId = st.modelId();
+        currentThinking = st.thinking();
+        if (thinkingModelRevision != st.modelRevision()) {
+            thinkingLevels.clear();
+            thinkingModelRevision = st.modelRevision();
+        }
         String name = !st.modelLabel().isEmpty() ? st.modelLabel() : getString(R.string.status_online);
         modelStatus = name + (currentThinking.isEmpty() ? "" : " · " + currentThinking);
-        setConnectionVisual("online", modelStatus);
+        if (!streaming) setConnectionVisual("online", modelStatus);
     }
 
     @Override
@@ -1126,9 +1165,25 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             // BridgeService 负责作答；不必再往聊天流塞调试 INFO
             return;
         }
+        if ("thinking_level_changed".equals(type)) {
+            applyGetStateModel(null);
+            return;
+        }
         android.util.Log.i(TAG, "event " + type);
         JSONObject agg = ev.optJSONObject("assistantMessageEvent");
         switch (type) {
+            case "agent_start":
+                main.removeCallbacks(settleAfterAgentEnd);
+                setStreaming(true);
+                return;
+            case "message_start": {
+                JSONObject msg = ev.optJSONObject("message");
+                if (msg != null && "assistant".equals(msg.optString("role"))) {
+                    blocks.clear();
+                    assistantRow = -1;
+                }
+                return;
+            }
             case "message_update": {
                 if (agg == null) return;
                 // 有流式增量就续命看门狗，避免长回复被误判超时
@@ -1148,23 +1203,20 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                             blocks.put(idx, sb);
                         }
                         sb.append(agg.optString("delta", ""));
-                        adapter.upsertTail(new ChatMessage(ChatMessage.Role.AGENT, joinBlocks(), true));
+                        updateAssistant(new ChatMessage(ChatMessage.Role.AGENT, joinBlocks(), true));
                         break;
                     }
                     case "text_end":
                         blocks.put(idx, new StringBuilder(agg.optString("content", "")));
-                        adapter.upsertTail(new ChatMessage(ChatMessage.Role.AGENT, joinBlocks(), true));
+                        updateAssistant(new ChatMessage(ChatMessage.Role.AGENT, joinBlocks(), true));
                         break;
                     case "thinking_start":
                     case "thinking_delta":
                         setConnectionVisual("online", getString(R.string.status_thinking));
                         break;
-                    case "toolcall_start": {
-                        String name = agg.optString("toolName", "tool");
-                        adapter.add(new ChatMessage(ChatMessage.Role.TOOL, "⟶ " + name + " …"));
-                        toolRows.put(agg.optString("id", "c" + idx), adapter.size() - 1);
+                    case "toolcall_start":
+                        // 卡片由 tool_execution_start 创建，避免同一工具重复两个气泡。
                         break;
-                    }
                     default:
                         break;
                 }
@@ -1179,10 +1231,11 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                         if ("error".equals(msg.optString("stopReason"))) {
                             adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "⚠ " + text));
                         } else {
-                            adapter.upsertTail(new ChatMessage(ChatMessage.Role.AGENT, text));
+                            updateAssistant(new ChatMessage(ChatMessage.Role.AGENT, text));
                         }
                     }
                 }
+                assistantRow = -1;
                 return;
             }
             case "agent_end": {
@@ -1211,6 +1264,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 return;
             }
             case "agent_settled":
+                historyNeedsSync = true;
                 settleStreaming(true);
                 return;
             case "auto_retry_end":
@@ -1293,7 +1347,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             b.setOnClickListener(v -> {
                 hideExtensionActions();
                 if ("confirm".equals(kind)) sink.confirmed("确定".equals(opt));
-                else if ("取消".equals(opt)) sink.cancelled();
+                else if (!"select".equals(kind) && "取消".equals(opt)) sink.cancelled();
                 else if (wantsText) sink.value(actionsInput.getText().toString());
                 else sink.value(opt);
             });
@@ -1328,7 +1382,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private void switchToSession(String path) {
-        currentSessionPath = path;
         JSONObject params = new JSONObject();
         try {
             params.put("sessionPath", path);
@@ -1348,8 +1401,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                         throw new IllegalStateException("set_session_name params", e);
                     }
                     rpc("set_session_name", params);
-                    currentSessionName = name;
-                    applySessionTitle();
+                    // 成功响应后拉权威名字，失败不污染当前标题。
                 });
     }
 
@@ -1372,18 +1424,22 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         if (messages != null) {
             for (int i = 0; i < messages.length(); i++) {
                 JSONObject m = messages.optJSONObject(i);
-                if (m == null) continue;
-                String text = textOfMessage(m);
+                if (m == null || HistoryPresentation.hidden(m)) continue;
+                String text = HistoryPresentation.displayText(m, textOfMessage(m));
                 if (text.isEmpty()) continue;
+                long timestamp = m.optLong("timestamp", 0);
                 switch (m.optString("role", "")) {
                     case "user":
-                        history.add(new ChatMessage(ChatMessage.Role.USER, text));
+                        history.add(new ChatMessage(ChatMessage.Role.USER, text, timestamp));
                         break;
                     case "assistant":
-                        history.add(new ChatMessage(ChatMessage.Role.AGENT, text));
+                        history.add(new ChatMessage(ChatMessage.Role.AGENT, text, timestamp));
+                        break;
+                    case "toolResult":
+                        history.add(new ChatMessage(ChatMessage.Role.TOOL, text, timestamp));
                         break;
                     default:
-                        history.add(new ChatMessage(ChatMessage.Role.TOOL, text));
+                        history.add(new ChatMessage(ChatMessage.Role.SYSTEM, text, timestamp));
                         break;
                 }
             }
@@ -1406,24 +1462,41 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private void startNewSession() {
-        currentSessionPath = "";
-        currentSessionName = "";
-        applySessionTitle();
         rpc("new_session", null);
-        adapter.clear();
-        AgentState.get().clearChat();
+    }
+
+    private void syncSessionAfterChange() {
+        blocks.clear();
+        toolRows.clear();
+        assistantRow = -1;
+        historyRequest = "";
+        historyNeedsSync = true;
         stickToBottom = true;
-        refreshEmptyState();
+        rpc("get_state", null);
+        refreshSlashCommands();
+    }
+
+    private void updateAssistant(ChatMessage message) {
+        if (assistantRow >= 0 && assistantRow < adapter.size()) {
+            adapter.replaceAt(assistantRow, message);
+            snapshotChat();
+            maybeScrollToBottom(false);
+        } else {
+            assistantRow = adapter.size();
+            adapter.add(message);
+        }
     }
 
     private void showModelPicker() {
+        if (!requireFreshModelState()) return;
         if (modelLabels.isEmpty()) {
             Toast.makeText(this, R.string.models_not_ready, Toast.LENGTH_SHORT).show();
             rpc("get_available_models", null);
             return;
         }
-        Pickers.showModel(this, modelLabels, modelRefs, currentProvider, currentModelId,
+        Pickers.showModel(this, modelLabels, modelRefs, AgentState.get().provider(), AgentState.get().modelId(),
                 (provider, modelId) -> {
+                    if (!requireFreshModelState()) return;
                     JSONObject params = ModelRpc.setModelParams(provider, modelId);
                     if (params == null) {
                         Toast.makeText(this, R.string.model_ref_invalid, Toast.LENGTH_SHORT).show();
@@ -1431,18 +1504,27 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                     }
                     android.util.Log.i(TAG, "set_model " + params.optString("provider")
                             + "/" + params.optString("modelId"));
-                    // 成功后在 onResponse 刷新芯片；失败走 failPrompt 可见错误
+                    // 服务按确认响应刷新；失败只显示配置错误，不干扰 prompt
                     rpc("set_model", params);
                 });
     }
 
     private void showThinkingPicker() {
+        if (!requireFreshModelState()) return;
+        if (thinkingModelRevision != AgentState.get().modelRevision()) thinkingLevels.clear();
         if (thinkingLevels.isEmpty()) {
             Toast.makeText(this, R.string.thinking_not_ready, Toast.LENGTH_SHORT).show();
             rpc("get_available_thinking_levels", null);
             return;
         }
-        Pickers.showThinking(this, thinkingLevels, currentThinking, level -> {
+        long openedRevision = AgentState.get().modelRevision();
+        Pickers.showThinking(this, thinkingLevels, AgentState.get().thinking(), level -> {
+            if (!requireFreshModelState()) return;
+            if (openedRevision != AgentState.get().modelRevision()) {
+                rpc("get_available_thinking_levels", null);
+                Toast.makeText(this, R.string.thinking_not_ready, Toast.LENGTH_SHORT).show();
+                return;
+            }
             JSONObject params = new JSONObject();
             try {
                 params.put("level", level);
@@ -1450,12 +1532,18 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 throw new IllegalStateException("set_thinking_level params", e);
             }
             rpc("set_thinking_level", params);
-            currentThinking = level;
-            AgentState.get().setThinking(level, MainActivity.this);
-            setConnectionVisual("online",
-                    (currentModelId.isEmpty() ? getString(R.string.status_online) : currentModelId)
-                            + " · " + level);
         });
+    }
+
+    private boolean requireFreshModelState() {
+        if (!isConnected()) {
+            Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+            return false;
+        }
+        if (AgentState.get().isFresh()) return true;
+        rpc("get_state", null);
+        Toast.makeText(this, "正在同步模型与思考状态…", Toast.LENGTH_SHORT).show();
+        return false;
     }
 
     private String joinBlocks() {
@@ -1469,6 +1557,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     static String textOfMessage(JSONObject msg) {
+        Object rawContent = msg.opt("content");
+        if (rawContent instanceof String) return (String) rawContent;
         JSONArray content = msg.optJSONArray("content");
         String s = textOfContent(content);
         if (!s.isEmpty()) return s;
@@ -1505,8 +1595,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 if (sb.length() > 0) sb.append("\n");
                 sb.append(part.optString("text"));
             } else if ("toolCall".equals(part.optString("type"))) {
-                JSONObject tc = part.optJSONObject("toolCall");
-                if (tc != null) sb.append("\n⟶ ").append(tc.optString("name"));
+                sb.append("\n⟶ ").append(part.optString("name", "tool"));
             }
         }
         return sb.toString();

@@ -11,12 +11,12 @@
  *  - 单个 Pi 子进程，客户端共享；最后一个客户端断开后按 --idle-exit 秒空闲退出（默认 600s），
  *    便于 runit/前台两种运行方式。
  *  - 能力白名单：pc julia mayka? 不。默认只允许 read-only + prompt/abort 等交互命令，
- *    `bash` 命令默认关闭（--allow-bash 显式开），因为它等于把 shell 交给同一台设备上的任意 App。
+ *    `bash` 命令默认关闭（--allow-bash 显式开）；这不限制 prompt 调用 agent 工具。
  *
  * 线协议（client → server）：
  *    {"id":"1","rpc":"get_state","params":{}}
  *    {"id":"2","rpc":"prompt","params":{"message":"hi"}}
- *    {"type":"ping"}                        // 不看 token 也能心跳
+ *    {"type":"ping"}                        // 仅鉴权后心跳
  * server → client：
  *    {"v":1,"kind":"status","state":"online"|"starting"|"offline","error"?,"pid"?}
  *    {"v":1,"kind":"response","id":"1","ok":true,"command":"get_state","data":{...}}
@@ -26,6 +26,7 @@
  *    {"v":1,"kind":"log","line":"..."}      // Pi 的 stderr 摘录，--verbose-log 时下发
  */
 import { spawn } from "node:child_process";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { WebSocketServer } from "ws";
 import fs from "node:fs";
 import os from "node:os";
@@ -54,15 +55,17 @@ const TOKEN_FILE = arg(
 const IDLE_EXIT = Number(arg("idle-exit", 600));
 const ALLOW_BASH = flags("allow-bash");
 const VERBOSE = flags("verbose-log");
+// Pi 默认持久保存会话。旧 --session 开关仍可用（现在是兼容 no-op）；
+// 只有显式 --no-session 才启用临时会话，也允许通过 --pi-arg 传入。
 const PI_ARGS = (arg("pi-arg", "") ? String(arg("pi-arg", "")).split(",") : []).concat(
-  flags("session") ? [] : ["--no-session"]
+  flags("no-session") ? ["--no-session"] : []
 );
 
-/** 交互命令白名单：能读状态、能提问、能中断、能改模型/会话，但不能拿到 shell。 */
+/** RPC 命令白名单；禁用直接 bash 不会限制 prompt 驱动的 agent 工具。 */
 const ALLOWED = new Set([
   "prompt", "steer", "follow_up", "abort", "clear_queue",
   "new_session", "switch_session", "fork", "clone",
-  "get_state", "get_messages", "get_last_assistant_text", "get_tree", "get_entries",
+  "get_state", "get_session_name", "get_messages", "get_last_assistant_text", "get_tree", "get_entries",
   "get_session_stats", "get_fork_messages",
   "get_commands", // 斜杠命令发现：扩展 / prompt 模板 / skills
   "set_model", "cycle_model", "get_available_models",
@@ -78,7 +81,7 @@ if (ALLOW_BASH) {
   ALLOWED.add("abort_bash");
 }
 
-/** 当前会话显示名：Pi 的 RPC 没有稳定的 get_session_name，由连接器本地跟踪。 */
+/** 当前会话显示名；get_session_name 通过官方 get_state 获取，不返回乐观缓存。 */
 let currentSessionName = "";
 
 function findPi() {
@@ -92,12 +95,22 @@ function findPi() {
 }
 
 const token = (() => {
+  let value;
   try {
-    return fs.readFileSync(TOKEN_FILE, "utf8").trim();
+    value = fs.readFileSync(TOKEN_FILE, "utf8").trim();
   } catch {
-    return null;
+    throw new Error("无法读取 token 文件；拒绝启动未鉴权的连接器");
   }
+  if (!value) throw new Error("token 文件为空；拒绝启动未鉴权的连接器");
+  return value;
 })();
+// 固定长度摘要做常量时间比较；不记录 token 内容。
+const tokenDigest = createHash("sha256").update(token).digest();
+function authenticates(value) {
+  return typeof value === "string" && timingSafeEqual(
+    tokenDigest, createHash("sha256").update(value).digest()
+  );
+}
 
 const wss = new WebSocketServer({ host: HOST, port: PORT, maxPayload: 8 * 1024 * 1024 });
 /** @type {{ws: import('ws').WebSocket, authed: boolean}[]} */
@@ -107,6 +120,7 @@ let stdoutBuf = "";
 let stderrTail = [];
 let idleTimer = null;
 let seq = 0;
+let rpcSeq = 0;
 
 const log = (...a) => console.error(`[bridge ${new Date().toISOString()}]`, ...a);
 
@@ -142,16 +156,20 @@ function ensurePi() {
   broadcast({ v: 1, kind: "status", state: "starting" });
   // spawn 而不是 exec：`pi` 的 wrapper 是 shell 脚本，spawn + shell:false 能拿到直接的 PID，
   // 便于 stop() 时整棵进程树收尾，也不会被 shell 再包一层。
-  child = spawn(PI_BIN, ["--mode", "rpc", ...PI_ARGS], {
+  const pi = spawn(PI_BIN, ["--mode", "rpc", ...PI_ARGS], {
     cwd: CWD && fs.existsSync(CWD) ? CWD : DEFAULT_CWD,
     stdio: ["pipe", "pipe", "pipe"],
     env: process.env,
   });
-  log(`spawn ${PI_BIN} --mode rpc pid=${child.pid}`);
-  broadcast({ v: 1, kind: "status", state: "starting", pid: child.pid });
+  child = pi;
+  stdoutBuf = "";
+  stderrTail = [];
+  log(`spawn ${PI_BIN} --mode rpc pid=${pi.pid}`);
+  broadcast({ v: 1, kind: "status", state: "starting", pid: pi.pid });
 
-  child.stdout.setEncoding("utf8");
-  child.stdout.on("data", (chunk) => {
+  pi.stdout.setEncoding("utf8");
+  pi.stdout.on("data", (chunk) => {
+    if (child !== pi) return;
     stdoutBuf += chunk;
     // JSONL framing：只按 LF 切；Node 的 readline 还会按 U+2028/2029 切，可能切断 JSON 字符串
     let nl;
@@ -163,84 +181,86 @@ function ensurePi() {
       try {
         rec = JSON.parse(line);
       } catch (e) {
-        log("stdout 非 JSON 行:", line.slice(0, 200));
+        log("stdout 非 JSON 行（内容不记录）");
         continue;
       }
       routeRecord(rec);
     }
   });
 
-  child.stderr.setEncoding("utf8");
-  child.stderr.on("data", (chunk) => {
+  pi.stderr.setEncoding("utf8");
+  pi.stderr.on("data", (chunk) => {
+    if (child !== pi) return;
     stderrTail.push(chunk);
     if (stderrTail.length > 20) stderrTail.shift();
     if (VERBOSE) broadcast({ v: 1, kind: "log", line: chunk });
   });
 
-  child.on("exit", (code, signal) => {
-    log(`pi 退出 code=${code} signal=${signal}`);
-    broadcast({
-      v: 1,
-      kind: "status",
-      state: "offline",
-      error: `pi exited code=${code} signal=${signal}`,
-      stderr: stderrTail.join("").slice(-2000),
-    });
+  const failed = (error) => {
+    if (child !== pi) return;
+    log(error);
+    for (const entry of pendingReqs.values()) {
+      respond(entry.ws, entry.clientId, false, entry.command, null, error);
+    }
+    pendingReqs.clear();
+    stdoutBuf = "";
+    currentSessionName = "";
+    uiRequests.clear();
+    const stderr = stderrTail.join("").slice(-2000);
+    stderrTail = [];
     child = null;
+    broadcast({ v: 1, kind: "status", state: "offline", error, stderr });
+  };
+  pi.on("exit", (code, signal) => failed(`pi exited code=${code} signal=${signal}`));
+  pi.on("error", (e) => failed(`spawn failed: ${e.message}`));
+  // EPIPE / 异步写错误不是 write() 的同步异常，必须监听 stream error。
+  pi.stdin.on("error", (e) => {
+    failed(`pi stdin failed: ${e.message}`);
+    pi.kill("SIGTERM");
   });
-  child.on("error", (e) => {
-    log("spawn 失败:", e.message);
-    broadcast({ v: 1, kind: "status", state: "offline", error: e.message });
-    child = null;
-  });
-  return child;
+  return pi;
 }
 
 /** Pi stdout 的每一条记录：响应按 id 回填，其余作为事件广播。 */
 function routeRecord(rec) {
-  if (rec && rec.type === "session_info_changed" && typeof rec.name === "string") {
-    currentSessionName = rec.name;
+  if (!rec || typeof rec !== "object" || Array.isArray(rec)) return;
+  if (rec.type === "session_info_changed") {
+    currentSessionName = typeof rec.name === "string" ? rec.name : "";
   }
-  if (rec && rec.type === "extension_ui_request" && DIALOG_METHODS.has(rec.method) && rec.id) {
-    uiRequests.set(rec.id, { method: rec.method, ts: Date.now() });
+  if (rec.type === "extension_ui_request" && DIALOG_METHODS.has(rec.method) && typeof rec.id === "string") {
+    uiRequests.set(rec.id, { method: rec.method });
   }
-  if (rec && rec.type === "response") {
-    // 优先按 id 精确匹配，避免并发 get_state/set_model 时 FIFO 错位导致「切换模型不生效」
-    let id = typeof rec.id === "string" ? rec.id : null;
-    let entry = id ? pendingReqs.get(id) : null;
-    if (!entry) {
-      const pending = [...pendingReqs.entries()].find(([, v]) => v.command === rec.command);
-      if (pending) {
-        id = pending[0];
-        entry = pending[1];
-      }
-    }
-    if (entry && id) {
-      pendingReqs.delete(id);
-      if (rec.id && rec.id !== id) pendingReqs.delete(rec.id);
-      // 从 get_state 同步会话名，供本地 get_session_name 使用
-      if (entry.command === "get_state" && rec.success && rec.data && typeof rec.data.sessionName === "string") {
-        currentSessionName = rec.data.sessionName;
-      }
-      safeSend(
-        entry.ws,
-        JSON.stringify({
-          v: 1,
-          kind: "response",
-          id,
-          ok: !!rec.success,
-          command: rec.command || entry.command,
-          data: rec.data,
-          error: rec.error,
-        })
-      );
+  if (rec.type === "bash_execution_update") {
+    // 官方 RPC 的唯一带命令 ID 的事件；同样还原客户端 ID，只送到发起方。
+    const entry = typeof rec.id === "string" ? pendingReqs.get(rec.id) : null;
+    if (entry?.command === "bash") dispatch({ ...rec, id: entry.clientId }, entry.ws);
+    return;
+  }
+  if (rec.type === "response") {
+    // 所有 stdin 命令都有桥生成的唯一 ID；未知/旧响应绝不能按 command 猜归属或广播。
+    const entry = typeof rec.id === "string" ? pendingReqs.get(rec.id) : null;
+    if (!entry) return;
+    pendingReqs.delete(rec.id);
+    if (rec.command !== entry.piCommand) {
+      respond(entry.ws, entry.clientId, false, entry.command, null, "Pi 响应命令不匹配");
       return;
     }
+    if (rec.success && entry.piCommand === "get_state") {
+      currentSessionName = typeof rec.data?.sessionName === "string" ? rec.data.sessionName : "";
+    }
+    if (rec.success && !rec.data?.cancelled &&
+        ["new_session", "switch_session", "fork", "clone"].includes(entry.command)) {
+      currentSessionName = "";
+    }
+    const data = rec.success && entry.command === "get_session_name"
+      ? { name: currentSessionName } : rec.data;
+    respond(entry.ws, entry.clientId, !!rec.success, entry.command, data, rec.error);
+    return;
   }
   dispatch(rec);
 }
 
-/** id -> {ws, command, ts}；Pi 的 response 会带上同样的 id。 */
+/** 唯一内部 ID -> {ws, clientId, command, piCommand}；不以客户端 ID 为 Map key。 */
 const pendingReqs = new Map();
 
 /**
@@ -251,17 +271,11 @@ const pendingReqs = new Map();
  * 代价要说清楚：真正还在思考/等待人类点击的场景点上钮之前，如果最后一个客户端断开，也会被取消。
  */
 const DIALOG_METHODS = new Set(["select", "confirm", "input", "editor"]);
-const uiRequests = new Map();   // id -> {method, ts}
-const UI_GRACE_MS = 10 * 60 * 1000;
+const uiRequests = new Map();   // Pi UI id -> {method}，不是普通 RPC pending
 
 function releaseStuckDialogs(why) {
-  const now = Date.now();
   let released = 0;
-  for (const [id, info] of [...uiRequests]) {
-    if (now - info.ts > UI_GRACE_MS) {
-      uiRequests.delete(id);
-      continue;
-    }
+  for (const [id] of [...uiRequests]) {
     if (child && child.exitCode === null) {
       try {
         child.stdin.write(JSON.stringify({ type: "extension_ui_response", id, cancelled: true }) + "\n");
@@ -438,10 +452,22 @@ function assertUnderSessionsDir(sessionPath) {
   if (!resolved.endsWith(".jsonl")) {
     throw new Error("不是会话文件（.jsonl）");
   }
+  // 词法路径检查不足：中间目录可能是指向会话目录外的 symlink。
+  const realRoot = fs.realpathSync(root);
+  const realTarget = fs.realpathSync(resolved);
+  if (!realTarget.startsWith(realRoot + path.sep) || !fs.lstatSync(resolved).isFile()) {
+    throw new Error("不是会话目录内的普通文件");
+  }
   return resolved;
 }
 
 function writeCommand(id, ws, command, params) {
+  if (!params || typeof params !== "object" || Array.isArray(params) ||
+      Object.hasOwn(params, "type") ||
+      (command !== "extension_ui_response" && Object.hasOwn(params, "id"))) {
+    respond(ws, id, false, command, null, "params 格式无效或含保留字段 type/id");
+    return;
+  }
   // 连接器本地命令：不进 Pi 的 stdin，直接由本进程回答
   if (command === "list_sessions") {
     const t0 = Date.now();
@@ -468,23 +494,6 @@ function writeCommand(id, ws, command, params) {
     }
     return;
   }
-  // Pi 不支持 get_session_name；本地返回跟踪到的名字，避免客户端收到 Unknown command
-  if (command === "get_session_name") {
-    respond(ws, id, true, "get_session_name", { name: currentSessionName || "" }, null);
-    return;
-  }
-  if (command === "set_session_name") {
-    const n = params && typeof params.name === "string" ? params.name.trim() : "";
-    if (n) currentSessionName = n;
-    // 仍转发给 Pi（若支持）；名字已本地记下，即使 Pi 忽略也不影响 UI
-  }
-  if (command === "new_session" || command === "switch_session") {
-    // switch 后客户端会再拉 get_session_name / get_state；先清空避免显示旧名
-    if (command === "new_session") currentSessionName = "";
-    else if (!(params && typeof params.name === "string" && params.name.trim())) {
-      currentSessionName = "";
-    }
-  }
   if (!ALLOWED.has(command)) {
     safeSend(
       ws,
@@ -492,17 +501,44 @@ function writeCommand(id, ws, command, params) {
     );
     return;
   }
-  const rec = { id, type: command, ...(params || {}) };
-  pendingReqs.set(id, { ws, command, ts: Date.now() });
+  // UI 回答使用 Pi 提供的 UI ID，不生成内部 ID，也不会产生普通 command response。
+  if (command === "extension_ui_response") {
+    const request = typeof params.id === "string" ? uiRequests.get(params.id) : null;
+    const validAnswer = params.cancelled === true || (request?.method === "confirm"
+      ? typeof params.confirmed === "boolean" : typeof params.value === "string");
+    if (!request || !validAnswer || !child || child.stdin.destroyed || child.stdin.writableEnded) {
+      respond(ws, id, false, command, null, "UI 请求已失效或回答格式无效");
+      return;
+    }
+    const answer = params.cancelled === true ? { cancelled: true }
+      : request.method === "confirm" ? { confirmed: params.confirmed } : { value: params.value };
+    try {
+      child.stdin.write(JSON.stringify({ type: command, id: params.id, ...answer }) + "\n");
+      uiRequests.delete(params.id);
+    } catch (e) {
+      respond(ws, id, false, command, null, e.message);
+    }
+    return;
+  }
+  const pi = ensurePi();
+  if (!pi || pi.stdin.destroyed || pi.stdin.writableEnded) {
+    respond(ws, id, false, command, null, "Pi 正在退出，请稍后重试");
+    return;
+  }
+  const internalId = `bridge-${++rpcSeq}`;
+  // get_session_name 是兼容别名；名称的权威来源是官方 get_state，不是本地乐观写入。
+  const piCommand = command === "get_session_name" ? "get_state" : command;
+  const rec = { ...params, id: internalId, type: piCommand };
+  pendingReqs.set(internalId, { ws, clientId: id, command, piCommand });
   if (command === "set_model") {
     log(`rpc set_model ${id} provider=${params && params.provider} modelId=${params && params.modelId}`);
   } else {
     log(`rpc ${command} ${id}${command === "prompt" ? ` len=${String((params || {}).message || "").length}` : ""}`);
   }
   try {
-    child.stdin.write(JSON.stringify(rec) + "\n");
+    pi.stdin.write(JSON.stringify(rec) + "\n");
   } catch (e) {
-    pendingReqs.delete(id);
+    pendingReqs.delete(internalId);
     safeSend(ws, JSON.stringify({ v: 1, kind: "response", id, ok: false, command, error: e.message }));
   }
 }
@@ -512,18 +548,19 @@ function respond(ws, id, ok, command, data, error) {
 }
 
 function stopPi(why) {
-  if (!child) return;
+  const pi = child;
+  if (!pi) return;
   log(`关闭 pi: ${why}`);
   try {
-    child.stdin.end();
+    pi.stdin.end();
   } catch {}
   // 文档要求：关闭 stdin 请求有序退出；给 5s 再兜底 SIGTERM
   const t = setTimeout(() => {
     try {
-      process.kill(child.pid, "SIGTERM");
+      pi.kill("SIGTERM");
     } catch {}
   }, 5000);
-  child.once("exit", () => clearTimeout(t));
+  pi.once("exit", () => clearTimeout(t));
 }
 
 function scheduleIdleExit() {
@@ -538,9 +575,9 @@ function scheduleIdleExit() {
 }
 
 wss.on("connection", (ws, req) => {
-  const c = { ws, authed: !token };
+  const c = { ws, authed: false };
   clients.push(c);
-  log(`client ${req.socket.remoteAddress}:${req.socket.remotePort} ${c.authed ? "(无 token 配置)" : "(待鉴权)"}`);
+  log(`client ${req.socket.remoteAddress}:${req.socket.remotePort} (待鉴权)`);
 
   ws.on("message", (data) => {
     let msg;
@@ -549,10 +586,11 @@ wss.on("connection", (ws, req) => {
     } catch {
       return;
     }
+    if (!msg || typeof msg !== "object" || Array.isArray(msg)) return;
     if (!c.authed) {
-      if (msg.auth === token) {
+      if (authenticates(msg.auth)) {
         c.authed = true;
-        safeSend(ws, JSON.stringify({ v: 1, kind: "status", state: token ? "online" : piState() }));
+        safeSend(ws, JSON.stringify({ v: 1, kind: "status", state: "online" }));
         log("client 鉴权通过");
       } else {
         safeSend(ws, JSON.stringify({ v: 1, kind: "status", state: "offline", error: "bad token" }));
@@ -568,17 +606,23 @@ wss.on("connection", (ws, req) => {
       stopPi("client 请求");
       return;
     }
-    if (msg.rpc) {
-      ensurePi();
-      writeCommand(msg.id || String(++seq), ws, msg.rpc, msg.params || {});
+    if (typeof msg.rpc === "string") {
+      if (msg.id !== undefined && (typeof msg.id !== "string" || !msg.id)) {
+        respond(ws, null, false, msg.rpc, null, "id 必须是非空字符串");
+        return;
+      }
+      writeCommand(msg.id || String(++seq), ws, msg.rpc, msg.params === undefined ? {} : msg.params);
     }
   });
 
   ws.on("close", () => {
     const i = clients.indexOf(c);
     if (i >= 0) clients.splice(i, 1);
-    // 最后一个客户端离开：把它可能没来得及回答的对话框取消掉
-    if (!clients.length) releaseStuckDialogs("所有客户端已断开");
+    for (const [id, entry] of pendingReqs) {
+      if (entry.ws === ws) pendingReqs.delete(id);
+    }
+    // 未鉴权连接不能阻止取消无人能回答的对话框。
+    if (!clients.some((client) => client.authed)) releaseStuckDialogs("所有已鉴权客户端已断开");
     scheduleIdleExit();
   });
   ws.on("error", () => {});
@@ -596,8 +640,6 @@ process.on("SIGINT", () => {
   wss.close(() => process.exit(0));
 });
 
-if (!token) {
-  log("! 未读到 token 文件，任何本机 App 都能连进来。建议建一份 600 权限的 token：");
-  log(`  umask 077; head -c 24 /dev/urandom | base64 > ${TOKEN_FILE}`);
-}
-log(`连接器 listening ws://${HOST}:${PORT}/ws  pi=${PI_BIN}  cwd=${CWD}  bash=${ALLOW_BASH ? "on" : "off"}`);
+wss.on("listening", () => {
+  log(`连接器 listening ws://${HOST}:${PORT}/ws  pi=${PI_BIN}  cwd=${CWD}  bash=${ALLOW_BASH ? "on" : "off"}`);
+});

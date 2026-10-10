@@ -25,6 +25,7 @@ import java.util.Map;
 import dev.pi.android.R;
 import dev.pi.android.ui.ExtensionUi;
 import dev.pi.android.ui.SettingsActivity;
+import dev.pi.android.util.RecentModels;
 
 /**
  * 桥连接的所有者：**不在 Activity 里**。
@@ -105,6 +106,7 @@ public class BridgeService extends Service {
     private Ask pendingAsk;
 
     private BridgeConnection bridge;
+    private final ModelRpc.SyncGuard modelSync = new ModelRpc.SyncGuard();
     private ExtensionUi extUi;
     /** 扩展 UI / 通知用的主 host（最近 attach 且优先可见的）。 */
     private UiHost host;
@@ -128,7 +130,11 @@ public class BridgeService extends Service {
             public void onStatus(String state, @Nullable String error) {
                 dbg("status " + state);
                 AgentState.get().setStatus(state);
-                if ("online".equals(state)) bridge.rpc("get_state", null);
+                if (!"online".equals(state)) modelSync.reset();
+                // starting 也可发送：桥的 online 仅表示鉴权，不保证 Pi 已启动。
+                if (("online".equals(state) || "starting".equals(state)) && bridge.isConnected()) {
+                    rpc("get_state", null);
+                }
                 notifyOngoing(state);
                 for (UiHost h : hosts) {
                     try {
@@ -141,15 +147,36 @@ public class BridgeService extends Service {
             @Override
             public void onResponse(String id, boolean ok, String command, @Nullable JSONObject data, @Nullable String error) {
                 dbg("resp " + command + " ok=" + ok);
-                // 无论当前 UiHost 是谁，都更新共享快照（主题重建时 Settings/Main 都会丢实例字段）
-                if (ok && "get_state".equals(command)) {
-                    AgentState.get().applyGetState(data, BridgeService.this);
+                AgentState st = AgentState.get();
+                if ("get_state".equals(command)) {
+                    if (!bridge.isConnected() || !modelSync.acceptState(id)) return;
+                    if (ok && data != null) {
+                        st.applyGetState(data, BridgeService.this);
+                    } else {
+                        st.invalidateFresh();
+                    }
+                } else if ("get_available_thinking_levels".equals(command)) {
+                    if (!modelSync.acceptThinking(id, st.modelRevision()) || !st.isFresh()) return;
+                } else if (ok && "set_model".equals(command)) {
+                    ModelRpc.Applied applied = ModelRpc.fromModelObject(data);
+                    if (applied != null) {
+                        st.setModel(applied.provider, applied.modelId, applied.label, BridgeService.this);
+                        RecentModels.touch(BridgeService.this, applied.provider, applied.modelId);
+                    }
                 }
+                // 模型/档位状态由服务持有，不依赖 Activity 在响应到达时是否存在。
                 for (UiHost h : hosts) {
                     try {
                         h.onResponse(id, ok, command, data, error);
                     } catch (Exception ignored) {
                     }
+                }
+                if ("set_model".equals(command) || "set_thinking_level".equals(command)
+                        || "cycle_model".equals(command) || "cycle_thinking_level".equals(command)) {
+                    // 成功也需读取实际 thinking（Pi 会钳制）；失败则恢复最后的权威快照。
+                    rpc("get_state", null);
+                } else if (ok && data != null && "get_state".equals(command)) {
+                    rpc("get_available_thinking_levels", null);
                 }
             }
 
@@ -164,6 +191,10 @@ public class BridgeService extends Service {
                     return;
                 }
                 dbg("event " + ev.optString("type"));
+                if ("thinking_level_changed".equals(ev.optString("type"))) {
+                    AgentState.get().setThinking(ev.optString("level", ""), BridgeService.this);
+                    rpc("get_state", null);
+                }
                 // 扇出到所有 host：Settings 抢 primary 时 Main 仍需收到 message_update / agent_end
                 for (UiHost h : hosts) {
                     try {
@@ -287,6 +318,7 @@ public class BridgeService extends Service {
         } else {
             // 主题重建后 Activity 重新 bind：同步推送 online，避免卡在「连接中」
             h.onStatus("online", null);
+            rpc("get_state", null);
         }
     }
 
@@ -312,7 +344,23 @@ public class BridgeService extends Service {
     }
 
     public String rpc(String command, @Nullable JSONObject params) {
-        return bridge.rpc(command, params);
+        if ("prompt".equals(command) || "new_session".equals(command)
+                || "switch_session".equals(command) || "fork".equals(command)
+                || "clone".equals(command) || "abort".equals(command)) {
+            // 变更前的状态回复不能把新 prompt 置回 idle 或覆盖新会话。
+            modelSync.reset();
+        }
+        if ("set_model".equals(command) || "set_thinking_level".equals(command)
+                || "cycle_model".equals(command) || "cycle_thinking_level".equals(command)) {
+            modelSync.reset();
+            AgentState.get().invalidateFresh();
+        }
+        String id = bridge.rpc(command, params);
+        if ("get_state".equals(command)) modelSync.stateRequested(id);
+        else if ("get_available_thinking_levels".equals(command)) {
+            modelSync.thinkingRequested(id, AgentState.get().modelRevision());
+        }
+        return id;
     }
 
     public boolean isConnected() {
@@ -325,6 +373,8 @@ public class BridgeService extends Service {
     }
 
     private void connectWithSaved() {
+        modelSync.reset();
+        AgentState.get().setStatus("connecting");
         bridge.configure(SettingsActivity.host(this), SettingsActivity.port(this), SettingsActivity.token(this));
         bridge.connect();
     }

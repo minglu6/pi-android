@@ -8,6 +8,8 @@ import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * set_model / get_available_models 的参数与解析约定。
@@ -51,8 +53,8 @@ public final class ModelRpc {
         for (int i = 0; i < models.length(); i++) {
             JSONObject m = models.optJSONObject(i);
             if (m == null) continue;
-            String provider = m.optString("provider", m.optString("providerName", "")).trim();
-            String modelId = m.optString("id", m.optString("modelId", "")).trim();
+            String provider = stringField(m, "provider", stringField(m, "providerName", ""));
+            String modelId = stringField(m, "id", stringField(m, "modelId", ""));
             if (provider.isEmpty() || modelId.isEmpty()) continue;
             String label = provider + " / " + modelId;
             boolean dup = false;
@@ -87,10 +89,11 @@ public final class ModelRpc {
     @Nullable
     public static Applied fromModelObject(@Nullable JSONObject model) {
         if (model == null) return null;
-        String provider = model.optString("provider", "").trim();
-        String modelId = model.optString("id", model.optString("modelId", "")).trim();
-        String name = model.optString("name", "").trim();
-        if (provider.isEmpty() && modelId.isEmpty() && name.isEmpty()) return null;
+        String provider = stringField(model, "provider", "");
+        String modelId = stringField(model, "id", stringField(model, "modelId", ""));
+        String name = stringField(model, "name", "");
+        // 展示 name 不是身份；不接受残缺对象，更不能补上旧模型的 provider/id。
+        if (provider.isEmpty() || modelId.isEmpty()) return null;
         String label;
         if (!name.isEmpty()) {
             label = name.contains(" / ") || provider.isEmpty() ? name : provider + " / " + name;
@@ -100,6 +103,42 @@ public final class ModelRpc {
             label = modelId;
         }
         return new Applied(provider, modelId, label);
+    }
+
+    private static String stringField(JSONObject obj, String key, String fallback) {
+        // Android org.json 与 JVM org.json 对 JSONObject.NULL 的 optString 行为不同。
+        return obj.isNull(key) ? fallback : obj.optString(key, fallback).trim();
+    }
+
+    /**
+     * 服务端状态请求的响应范围。get_state 异步返回，旧请求不能覆盖较新的刷新；
+     * thinking 列表属于发请求时的模型版本，切模型/重连后必须丢弃旧列表。
+     */
+    public static final class SyncGuard {
+        private String latestStateId;
+        private final Map<String, Long> thinkingRequests = new HashMap<>();
+
+        public void reset() {
+            latestStateId = null;
+            thinkingRequests.clear();
+        }
+
+        public void stateRequested(String id) { latestStateId = id; }
+
+        public boolean acceptState(String id) {
+            if (latestStateId == null || !latestStateId.equals(id)) return false;
+            latestStateId = null;
+            return true;
+        }
+
+        public void thinkingRequested(String id, long modelRevision) {
+            thinkingRequests.put(id, modelRevision);
+        }
+
+        public boolean acceptThinking(String id, long modelRevision) {
+            Long requested = thinkingRequests.remove(id);
+            return requested != null && requested == modelRevision;
+        }
     }
 
     /** get_state 的 data.model。 */

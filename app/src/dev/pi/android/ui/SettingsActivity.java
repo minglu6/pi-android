@@ -63,6 +63,8 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
     private final List<CharSequence> thinkingLevels = new ArrayList<>();
     private String currentModelLabel = "";
     private String currentThinking = "";
+    private long thinkingRevision = -1;
+    private boolean visible;
 
     private final AgentState.Listener agentListener = this::applyAgentStateToUi;
 
@@ -192,6 +194,7 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
     @Override
     protected void onResume() {
         super.onResume();
+        visible = true;
         applyAgentStateToUi();
         if (serviceBound && service != null) {
             service.setHost(this);
@@ -201,6 +204,7 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
 
     @Override
     protected void onPause() {
+        visible = false;
         super.onPause();
         saveConnectorFields();
     }
@@ -245,15 +249,13 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
 
     private void applyAgentStateToUi() {
         AgentState st = AgentState.get();
-        String label = st.modelLabel();
-        String thinking = st.thinking();
-        if (label != null && !label.isEmpty()) {
-            currentModelLabel = label;
-            if (modelValue != null) modelValue.setText(label);
-        }
-        if (thinking != null && !thinking.isEmpty()) {
-            currentThinking = thinking;
-            if (thinkingValue != null) thinkingValue.setText(thinking);
+        currentModelLabel = st.modelLabel();
+        currentThinking = st.thinking();
+        if (modelValue != null) modelValue.setText(currentModelLabel.isEmpty() ? "—" : currentModelLabel);
+        if (thinkingValue != null) thinkingValue.setText(currentThinking.isEmpty() ? "—" : currentThinking);
+        if (thinkingRevision != st.modelRevision()) {
+            thinkingLevels.clear();
+            thinkingRevision = st.modelRevision();
         }
     }
 
@@ -312,14 +314,11 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
             Toast.makeText(this, R.string.models_not_ready, Toast.LENGTH_SHORT).show();
             return;
         }
+        if (!requireFreshModelState()) return;
         String curProv = AgentState.get().provider();
         String curId = AgentState.get().modelId();
-        if ((curProv == null || curProv.isEmpty()) && currentModelLabel != null && currentModelLabel.contains(" / ")) {
-            String[] parts = currentModelLabel.split(" / ", 2);
-            curProv = parts[0];
-            curId = parts[1];
-        }
         Pickers.showModel(this, modelLabels, modelRefs, curProv, curId, (provider, modelId) -> {
+            if (!requireFreshModelState()) return;
             JSONObject params = ModelRpc.setModelParams(provider, modelId);
             if (params == null) {
                 Toast.makeText(this, R.string.model_ref_invalid, Toast.LENGTH_SHORT).show();
@@ -334,23 +333,40 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
             Toast.makeText(this, R.string.settings_need_connector, Toast.LENGTH_SHORT).show();
             return;
         }
+        if (!requireFreshModelState()) return;
         if (thinkingLevels.isEmpty()) {
             service.rpc("get_available_thinking_levels", null);
             Toast.makeText(this, R.string.thinking_not_ready, Toast.LENGTH_SHORT).show();
             return;
         }
+        long openedRevision = AgentState.get().modelRevision();
         Pickers.showThinking(this, thinkingLevels, currentThinking, level -> {
+            if (!requireFreshModelState()) return;
+            if (openedRevision != AgentState.get().modelRevision()) {
+                service.rpc("get_available_thinking_levels", null);
+                Toast.makeText(this, R.string.thinking_not_ready, Toast.LENGTH_SHORT).show();
+                return;
+            }
             JSONObject params = new JSONObject();
             try {
                 params.put("level", level);
             } catch (Exception e) {
                 throw new IllegalStateException("set_thinking_level params", e);
             }
+            // 请求值不是实际值：服务在响应后 get_state，按服务端钳制结果刷新。
             service.rpc("set_thinking_level", params);
-            AgentState.get().setThinking(level, SettingsActivity.this);
-            currentThinking = level;
-            if (thinkingValue != null) thinkingValue.setText(currentThinking);
         });
+    }
+
+    private boolean requireFreshModelState() {
+        if (service == null || !service.isConnected()) {
+            Toast.makeText(this, R.string.settings_need_connector, Toast.LENGTH_SHORT).show();
+            return false;
+        }
+        if (AgentState.get().isFresh()) return true;
+        if (service != null) service.rpc("get_state", null);
+        Toast.makeText(this, "正在同步模型与思考状态…", Toast.LENGTH_SHORT).show();
+        return false;
     }
 
     private static int requirePort(String s) {
@@ -369,30 +385,36 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
 
     @Override public void onStatus(String state, @Nullable String error) {
         if ("online".equals(state)) refreshFromService();
+        else {
+            modelLabels.clear();
+            modelRefs.clear();
+            thinkingLevels.clear();
+        }
     }
 
-    @Override public void onEvent(JSONObject ev) { /* ignore on settings */ }
+    @Override public void onEvent(JSONObject ev) {
+        if ("thinking_level_changed".equals(ev.optString("type"))) applyAgentStateToUi();
+    }
 
     @Override
     public void onResponse(String id, boolean ok, String command, @Nullable JSONObject data, @Nullable String error) {
         if (!ok) {
-            if ("set_model".equals(command)) {
+            if (visible && ("set_model".equals(command) || "set_thinking_level".equals(command)
+                    || "get_state".equals(command) || "get_available_models".equals(command)
+                    || "get_available_thinking_levels".equals(command))) {
                 String detail = error != null && !error.isEmpty() ? error : getString(R.string.rpc_failed);
-                Toast.makeText(this, getString(R.string.set_model_failed, detail), Toast.LENGTH_LONG).show();
-                if (service != null) service.rpc("get_state", null);
+                String message = "set_model".equals(command)
+                        ? getString(R.string.set_model_failed, detail) : detail;
+                Toast.makeText(this, message, Toast.LENGTH_LONG).show();
             }
             return;
         }
-        if ("set_model".equals(command)) {
-            ModelRpc.Applied applied = ModelRpc.fromModelObject(data);
-            if (applied != null) {
-                AgentState.get().setModel(applied.provider, applied.modelId, applied.label, this);
-                currentModelLabel = applied.label;
-                if (modelValue != null) modelValue.setText(currentModelLabel);
-                Toast.makeText(this, applied.label, Toast.LENGTH_SHORT).show();
-            }
+        if ("set_model".equals(command) || "set_thinking_level".equals(command)) {
+            // BridgeService 持有确认状态并负责 get_state；此处不持久化请求值。
             applyAgentStateToUi();
-            if (service != null) service.rpc("get_state", null);
+            if (visible && "set_model".equals(command) && !currentModelLabel.isEmpty()) {
+                Toast.makeText(this, currentModelLabel, Toast.LENGTH_SHORT).show();
+            }
             return;
         }
         if (data == null) return;
@@ -405,6 +427,7 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
             return;
         }
         if ("get_available_thinking_levels".equals(command)) {
+            thinkingRevision = AgentState.get().modelRevision();
             thinkingLevels.clear();
             JSONArray levels = data.optJSONArray("levels");
             if (levels == null) levels = data.optJSONArray("thinkingLevels");
@@ -425,7 +448,7 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
 
     @Override public void onExtTitle(String title) { /* ignore */ }
 
-    @Override public boolean isVisible() { return true; }
+    @Override public boolean isVisible() { return visible; }
 
     @Override
     public boolean showChoice(String id, String kind, String title, String hint, List<String> options,
