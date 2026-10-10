@@ -12,7 +12,6 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.Nullable;
-import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.app.AppCompatDelegate;
 import androidx.core.graphics.Insets;
@@ -219,25 +218,11 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
     }
 
     private void showThemePicker() {
-        final String[] modes = {"system", "light", "dark"};
-        final CharSequence[] labels = {
-                getString(R.string.settings_theme_system),
-                getString(R.string.settings_theme_light),
-                getString(R.string.settings_theme_dark)
-        };
-        int checked = 0;
-        String cur = themeMode(this);
-        for (int i = 0; i < modes.length; i++) if (modes[i].equals(cur)) checked = i;
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.settings_theme)
-                .setSingleChoiceItems(labels, checked, (d, which) -> {
-                    prefs(this).edit().putString(K_THEME, modes[which]).apply();
-                    applySavedTheme(this);
-                    refreshThemeLabel();
-                    d.dismiss();
-                })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
+        Pickers.showTheme(this, themeMode(this), mode -> {
+            prefs(this).edit().putString(K_THEME, mode).apply();
+            applySavedTheme(this);
+            refreshThemeLabel();
+        });
     }
 
     private void showModelPicker() {
@@ -247,27 +232,28 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
         }
         if (modelLabels.isEmpty()) {
             service.rpc("get_available_models", null);
-            Toast.makeText(this, R.string.settings_value_unknown, Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, R.string.models_not_ready, Toast.LENGTH_SHORT).show();
             return;
         }
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.action_model)
-                .setSingleChoiceItems(modelLabels.toArray(new CharSequence[0]), -1, (dialog, which) -> {
-                    String[] ref = modelRefs.get(which);
-                    JSONObject params = new JSONObject();
-                    try {
-                        params.put("provider", ref[0]);
-                        params.put("modelId", ref[1]);
-                    } catch (Exception e) {
-                        throw new IllegalStateException("set_model params", e);
-                    }
-                    service.rpc("set_model", params);
-                    currentModelLabel = String.valueOf(modelLabels.get(which));
-                    if (modelValue != null) modelValue.setText(currentModelLabel);
-                    dialog.dismiss();
-                })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
+        String curProv = "";
+        String curId = "";
+        if (currentModelLabel != null && currentModelLabel.contains(" / ")) {
+            String[] parts = currentModelLabel.split(" / ", 2);
+            curProv = parts[0];
+            curId = parts[1];
+        }
+        Pickers.showModel(this, modelLabels, modelRefs, curProv, curId, (provider, modelId) -> {
+            JSONObject params = new JSONObject();
+            try {
+                params.put("provider", provider);
+                params.put("modelId", modelId);
+            } catch (Exception e) {
+                throw new IllegalStateException("set_model params", e);
+            }
+            service.rpc("set_model", params);
+            currentModelLabel = provider + " / " + modelId;
+            if (modelValue != null) modelValue.setText(currentModelLabel);
+        });
     }
 
     private void showThinkingPicker() {
@@ -277,25 +263,20 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
         }
         if (thinkingLevels.isEmpty()) {
             service.rpc("get_available_thinking_levels", null);
-            Toast.makeText(this, R.string.settings_value_unknown, Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, R.string.thinking_not_ready, Toast.LENGTH_SHORT).show();
             return;
         }
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.action_thinking)
-                .setSingleChoiceItems(thinkingLevels.toArray(new CharSequence[0]), -1, (dialog, which) -> {
-                    JSONObject params = new JSONObject();
-                    try {
-                        params.put("level", thinkingLevels.get(which).toString());
-                    } catch (Exception e) {
-                        throw new IllegalStateException("set_thinking_level params", e);
-                    }
-                    service.rpc("set_thinking_level", params);
-                    currentThinking = thinkingLevels.get(which).toString();
-                    if (thinkingValue != null) thinkingValue.setText(currentThinking);
-                    dialog.dismiss();
-                })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
+        Pickers.showThinking(this, thinkingLevels, currentThinking, level -> {
+            JSONObject params = new JSONObject();
+            try {
+                params.put("level", level);
+            } catch (Exception e) {
+                throw new IllegalStateException("set_thinking_level params", e);
+            }
+            service.rpc("set_thinking_level", params);
+            currentThinking = level;
+            if (thinkingValue != null) thinkingValue.setText(currentThinking);
+        });
     }
 
     private static int requirePort(String s) {

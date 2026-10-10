@@ -126,6 +126,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private String uiTarget;
     private String pendingUiTarget;
     private String modelStatus = "";
+    private String currentProvider = "";
+    private String currentModelId = "";
+    private String currentThinking = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -915,22 +918,18 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 }
             }
             if (labels.isEmpty()) {
-                Toast.makeText(this, "当前会话没有可 fork 的消息", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, R.string.fork_empty, Toast.LENGTH_SHORT).show();
                 return;
             }
-            new androidx.appcompat.app.AlertDialog.Builder(this)
-                    .setTitle(R.string.action_fork)
-                    .setItems(labels.toArray(new CharSequence[0]), (dialog, which) -> {
-                        JSONObject params = new JSONObject();
-                        try {
-                            params.put("entryId", ids.get(which));
-                        } catch (Exception e) {
-                            throw new IllegalStateException("fork params", e);
-                        }
-                        rpc("fork", params);
-                    })
-                    .setNegativeButton(android.R.string.cancel, null)
-                    .show();
+            Pickers.showFork(this, labels, ids, entryId -> {
+                JSONObject params = new JSONObject();
+                try {
+                    params.put("entryId", entryId);
+                } catch (Exception e) {
+                    throw new IllegalStateException("fork params", e);
+                }
+                rpc("fork", params);
+            });
             return;
         }
         if ("fork".equals(command) && data != null) {
@@ -981,7 +980,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         if ("get_state".equals(command) && data != null) {
             JSONObject model = data.optJSONObject("model");
             String name = model != null ? model.optString("name", model.optString("id")) : null;
+            if (model != null) {
+                currentProvider = model.optString("provider", currentProvider);
+                currentModelId = model.optString("id", model.optString("modelId", currentModelId));
+            }
             String thinking = data.optString("thinkingLevel", null);
+            if (thinking != null) currentThinking = thinking;
             modelStatus = (name != null ? name : getString(R.string.status_online))
                     + (thinking != null && !thinking.isEmpty() ? " · " + thinking : "");
             setConnectionVisual("online", modelStatus);
@@ -1207,17 +1211,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private void promptRenameSession(String prefill) {
-        final EditText input = new EditText(this);
-        input.setText(prefill == null ? "" : prefill);
-        input.setHint(R.string.session_rename_hint);
-        int pad = (int) (20 * getResources().getDisplayMetrics().density);
-        input.setPadding(pad, pad / 2, pad, pad / 2);
-        input.setTextColor(ContextCompat.getColor(this, R.color.text_primary));
-        new androidx.appcompat.app.AlertDialog.Builder(this)
-                .setTitle(R.string.session_rename_title)
-                .setView(input)
-                .setPositiveButton(android.R.string.ok, (d, w) -> {
-                    String name = input.getText().toString().trim();
+        MaterialDialogs.promptText(this, R.string.session_rename_title, R.string.session_rename_hint,
+                prefill, name -> {
                     JSONObject params = new JSONObject();
                     try {
                         params.put("name", name);
@@ -1227,15 +1222,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                     rpc("set_session_name", params);
                     currentSessionName = name;
                     applySessionTitle();
-                })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
+                });
     }
 
     private void confirmDeleteSession(String path) {
-        new androidx.appcompat.app.AlertDialog.Builder(this)
-                .setMessage(R.string.session_delete_confirm)
-                .setPositiveButton(R.string.session_delete, (d, w) -> {
+        MaterialDialogs.confirm(this, R.string.session_delete, R.string.session_delete_confirm,
+                R.string.session_delete, () -> {
                     JSONObject params = new JSONObject();
                     try {
                         params.put("sessionPath", path);
@@ -1243,9 +1235,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                         throw new IllegalStateException("delete_session params", e);
                     }
                     rpc("delete_session", params);
-                })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
+                });
     }
 
     private void renderHistory(JSONObject data) {
@@ -1284,7 +1274,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     private void showForkPicker() {
         rpc("get_fork_messages", null);
-        Toast.makeText(this, "正在取可 fork 的消息…", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, R.string.fork_loading, Toast.LENGTH_SHORT).show();
     }
 
     private void startNewSession() {
@@ -1299,51 +1289,46 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     private void showModelPicker() {
         if (modelLabels.isEmpty()) {
-            Toast.makeText(this, "模型列表还没取到", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, R.string.models_not_ready, Toast.LENGTH_SHORT).show();
             rpc("get_available_models", null);
             return;
         }
-        new androidx.appcompat.app.AlertDialog.Builder(this)
-                .setTitle(R.string.action_model)
-                .setSingleChoiceItems(modelLabels.toArray(new CharSequence[0]), -1, (dialog, which) -> {
-                    String[] ref = modelRefs.get(which);
+        Pickers.showModel(this, modelLabels, modelRefs, currentProvider, currentModelId,
+                (provider, modelId) -> {
                     JSONObject params = new JSONObject();
                     try {
-                        params.put("provider", ref[0]);
-                        params.put("modelId", ref[1]);
+                        params.put("provider", provider);
+                        params.put("modelId", modelId);
                     } catch (Exception e) {
                         throw new IllegalStateException("set_model params", e);
                     }
                     rpc("set_model", params);
-                    Toast.makeText(this, ref[0] + " / " + ref[1], Toast.LENGTH_SHORT).show();
-                    dialog.dismiss();
-                })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
+                    currentProvider = provider;
+                    currentModelId = modelId;
+                    Toast.makeText(this, provider + " / " + modelId, Toast.LENGTH_SHORT).show();
+                    rpc("get_state", null);
+                });
     }
 
     private void showThinkingPicker() {
         if (thinkingLevels.isEmpty()) {
-            Toast.makeText(this, "思考档位还没取到", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, R.string.thinking_not_ready, Toast.LENGTH_SHORT).show();
             rpc("get_available_thinking_levels", null);
             return;
         }
-        new androidx.appcompat.app.AlertDialog.Builder(this)
-                .setTitle(R.string.action_thinking)
-                .setSingleChoiceItems(thinkingLevels.toArray(new CharSequence[0]), -1, (dialog, which) -> {
-                    String level = String.valueOf(thinkingLevels.get(which));
-                    JSONObject params = new JSONObject();
-                    try {
-                        params.put("level", level);
-                    } catch (Exception e) {
-                        throw new IllegalStateException("set_thinking_level params", e);
-                    }
-                    rpc("set_thinking_level", params);
-                    setConnectionVisual("online", "thinking level: " + level);
-                    dialog.dismiss();
-                })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
+        Pickers.showThinking(this, thinkingLevels, currentThinking, level -> {
+            JSONObject params = new JSONObject();
+            try {
+                params.put("level", level);
+            } catch (Exception e) {
+                throw new IllegalStateException("set_thinking_level params", e);
+            }
+            rpc("set_thinking_level", params);
+            currentThinking = level;
+            setConnectionVisual("online",
+                    (currentModelId.isEmpty() ? getString(R.string.status_online) : currentModelId)
+                            + " · " + level);
+        });
     }
 
     private String joinBlocks() {
