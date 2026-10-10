@@ -464,14 +464,14 @@
                 android:paddingEnd="10dp"
                 android:paddingBottom="2dp" />
 
-            <!-- attach · cwd · Plan/Steer/Queue · stop · send — model moved to top bar -->
+            <!-- attach · cwd · Plan/Steer/Queue · stop · send(trailing right edge) -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="36dp"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingStart="2dp"
-                android:paddingEnd="4dp">
+                android:paddingEnd="2dp">
 
                 <ImageButton
                     android:id="@+id/btn_attach"
@@ -484,28 +484,34 @@
                     android:src="@drawable/ic_attach"
                     android:tint="@color/text_secondary" />
 
-                <TextView
-                    android:id="@+id/cwd_chip"
-                    style="@style/MonoMetaText.Line"
+                <!-- Always-expanding slot so send stays on the right edge even when cwd is GONE. -->
+                <FrameLayout
                     android:layout_width="0dp"
-                    android:layout_height="26dp"
+                    android:layout_height="match_parent"
                     android:layout_marginStart="2dp"
                     android:layout_marginEnd="4dp"
-                    android:layout_weight="1"
-                    android:background="@drawable/bg_status_chip"
-                    android:clickable="true"
-                    android:ellipsize="middle"
-                    android:focusable="true"
-                    android:gravity="center_vertical"
-                    android:maxLines="1"
-                    android:minWidth="36dp"
-                    android:paddingStart="6dp"
-                    android:paddingEnd="6dp"
-                    android:singleLine="true"
-                    android:text="@string/cwd_chip_placeholder"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="11sp"
-                    android:visibility="gone" />
+                    android:layout_weight="1">
+
+                    <TextView
+                        android:id="@+id/cwd_chip"
+                        style="@style/MonoMetaText.Line"
+                        android:layout_width="match_parent"
+                        android:layout_height="26dp"
+                        android:layout_gravity="center_vertical"
+                        android:background="@drawable/bg_status_chip"
+                        android:clickable="true"
+                        android:ellipsize="middle"
+                        android:focusable="true"
+                        android:gravity="center_vertical"
+                        android:maxLines="1"
+                        android:paddingStart="6dp"
+                        android:paddingEnd="6dp"
+                        android:singleLine="true"
+                        android:text="@string/cwd_chip_placeholder"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="11sp"
+                        android:visibility="gone" />
+                </FrameLayout>
 
                 <LinearLayout
                     android:id="@+id/steer_toggle"
@@ -558,6 +564,7 @@
                     android:id="@+id/btn_stop"
                     android:layout_width="32dp"
                     android:layout_height="32dp"
+                    android:layout_marginEnd="2dp"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/action_stop"
                     android:padding="6dp"
