@@ -1,5 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Adaptive icon 前景：官方三色 logo，四周留出安全区（约 18% inset）。 -->
-<inset xmlns:android="http://schemas.android.com/apk/res/android"
-    android:drawable="@drawable/ic_pi_logo"
-    android:inset="18%" />
+<!--
+  Adaptive icon 前景（108×108 dp viewport）。
+  官方 logo 内容约落在 165–635（800 坐标系）；映射到中心 66dp 安全区并留边，
+  避免圆形/圆角裁切。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- scale ≈ 0.106, translate ≈ 28.4 → 内容落在约 28–80（宽 52，安全区内） -->
+    <group
+        android:pivotX="0"
+        android:pivotY="0"
+        android:scaleX="0.106"
+        android:scaleY="0.106"
+        android:translateX="28.4"
+        android:translateY="28.4">
+        <path
+            android:fillColor="#F09082"
+            android:pathData="M165.29,165.29H517.36V400H400V282.65H165.29Z" />
+        <path
+            android:fillColor="#4D9ABF"
+            android:pathData="M165.29,282.65H282.65V400H400V517.36H282.65V634.72H165.29Z" />
+        <path
+            android:fillColor="#F1BE58"
+            android:pathData="M517.36,400H634.72V634.72H517.36Z" />
+    </group>
+</vector>

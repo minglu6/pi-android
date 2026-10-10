@@ -111,9 +111,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private final java.util.List<CharSequence> modelLabels = new java.util.ArrayList<>();
     private final java.util.List<String[]> modelRefs = new java.util.ArrayList<>();
     private final java.util.List<CharSequence> thinkingLevels = new java.util.ArrayList<>();
-    private final java.util.List<CharSequence> sessionLabels = new java.util.ArrayList<>();
-    private final java.util.List<String> sessionPaths = new java.util.ArrayList<>();
-    private final java.util.List<String> sessionNames = new java.util.ArrayList<>();
+    private SessionsSheet sessionsSheet;
 
     private LinearLayout actions;
     private TextView actionsTitle;
@@ -736,17 +734,21 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         if (!ok) {
             android.util.Log.w(TAG, "rpc fail " + command + ": " + error);
             if (isOptionalRpc(command)) return;
-            // 未知/失败命令：Toast + 横幅，不写进聊天气泡
+            if ("list_sessions".equals(command)) {
+                ensureSessionsSheet().showError(error);
+                return;
+            }
+            // 未知/失败命令：Toast，不写进聊天气泡
             Toast.makeText(this, R.string.rpc_failed, Toast.LENGTH_SHORT).show();
             return;
         }
         if ("list_sessions".equals(command)) {
             if (data != null && data.has("error") && !data.isNull("error")
                     && !data.optString("error").isEmpty()) {
-                Toast.makeText(this, getString(R.string.session_list_error, data.optString("error")),
-                        Toast.LENGTH_LONG).show();
+                ensureSessionsSheet().showError(data.optString("error"));
+            } else {
+                ensureSessionsSheet().showData(data);
             }
-            renderSessions(data);
             return;
         }
         if ("delete_session".equals(command)) {
@@ -754,6 +756,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             if (data != null && data.optString("path").equals(currentSessionPath)) {
                 currentSessionPath = "";
                 startNewSession();
+                if (sessionsSheet != null) sessionsSheet.dismiss();
             } else {
                 loadSessions();
             }
@@ -992,13 +995,31 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private void loadSessions() {
+        ensureSessionsSheet().showLoading();
         JSONObject params = new JSONObject();
         try {
-            params.put("limit", 40);
+            params.put("limit", 80);
         } catch (Exception e) {
             throw new IllegalStateException("list_sessions params", e);
         }
         rpc("list_sessions", params);
+    }
+
+    private SessionsSheet ensureSessionsSheet() {
+        if (sessionsSheet == null) {
+            sessionsSheet = new SessionsSheet(this, new SessionsSheet.Host() {
+                @Override public String currentSessionPath() { return currentSessionPath; }
+                @Override public void openSession(String path) { switchToSession(path); }
+                @Override public void newSession() { startNewSession(); }
+                @Override public void renameSession(String path, @Nullable String knownName) {
+                    promptRenameSession(knownName);
+                }
+                @Override public void deleteSession(String path) { confirmDeleteSession(path); }
+                @Override public boolean supportsRename() { return true; }
+                @Override public boolean supportsDelete() { return true; }
+            });
+        }
+        return sessionsSheet;
     }
 
     private void showExtensionActions(String kind, String title, String hint,
@@ -1060,73 +1081,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         setConnectionVisual("online", sb.length() > 60 ? sb.substring(0, 60) + "…" : sb.toString());
     }
 
-    private void renderSessions(JSONObject data) {
-        JSONArray arr = data != null ? data.optJSONArray("sessions") : null;
-        sessionLabels.clear();
-        sessionPaths.clear();
-        sessionNames.clear();
-        if (arr != null) {
-            for (int i = 0; i < arr.length(); i++) {
-                JSONObject item = arr.optJSONObject(i);
-                if (item == null) continue;
-                String path = item.optString("path", "");
-                if (path.isEmpty()) continue;
-                String name = item.optString("name", "").trim();
-                String preview = item.optString("preview", "");
-                if (preview.isEmpty()) preview = "(无预览)";
-                preview = preview.replaceAll("\\s+", " ").trim();
-                if (preview.length() > 48) preview = preview.substring(0, 48) + "…";
-                long mtime = item.optLong("mtimeMs", 0L);
-                boolean current = path.equals(currentSessionPath);
-                String head = name.isEmpty() ? preview : name;
-                String line = (current ? getString(R.string.session_current_prefix) : "")
-                        + relTime(mtime) + " · " + head
-                        + (name.isEmpty() ? "" : "\n    " + preview);
-                sessionLabels.add(line);
-                sessionPaths.add(path);
-                sessionNames.add(name);
-            }
-        }
-        if (sessionLabels.isEmpty()) {
-            Toast.makeText(this, R.string.session_none, Toast.LENGTH_SHORT).show();
-            return;
-        }
-        new androidx.appcompat.app.AlertDialog.Builder(this)
-                .setTitle(R.string.action_sessions)
-                .setItems(sessionLabels.toArray(new CharSequence[0]), (dialog, which) ->
-                        showSessionActions(which))
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
-    }
-
-    private void showSessionActions(int index) {
-        final String path = sessionPaths.get(index);
-        final String knownName = sessionNames.get(index);
-        boolean current = path.equals(currentSessionPath);
-        CharSequence[] actions = current
-                ? new CharSequence[]{
-                    getString(R.string.session_open),
-                    getString(R.string.session_rename),
-                    getString(R.string.session_delete)}
-                : new CharSequence[]{
-                    getString(R.string.session_open),
-                    getString(R.string.session_delete)};
-        new androidx.appcompat.app.AlertDialog.Builder(this)
-                .setTitle(sessionLabels.get(index))
-                .setItems(actions, (d, which) -> {
-                    String action = String.valueOf(actions[which]);
-                    if (action.equals(getString(R.string.session_open))) {
-                        switchToSession(path);
-                    } else if (action.equals(getString(R.string.session_rename))) {
-                        promptRenameSession(knownName);
-                    } else if (action.equals(getString(R.string.session_delete))) {
-                        confirmDeleteSession(path);
-                    }
-                })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
-    }
-
     private void switchToSession(String path) {
         currentSessionPath = path;
         JSONObject params = new JSONObject();
@@ -1178,19 +1132,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 })
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
-    }
-
-    private String relTime(long ms) {
-        if (ms <= 0) return "?";
-        long diff = System.currentTimeMillis() - ms;
-        long min = diff / 60000L;
-        if (min < 1) return "刚刚";
-        if (min < 60) return min + " 分钟前";
-        long h = min / 60L;
-        if (h < 24) return h + " 小时前";
-        long d = h / 24L;
-        if (d < 30) return d + " 天前";
-        return android.text.format.DateFormat.format("yyyy-MM-dd", ms).toString();
     }
 
     private void renderHistory(JSONObject data) {

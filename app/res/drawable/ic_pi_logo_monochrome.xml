@@ -1,18 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 单色版 Pi logo：给 adaptive-icon 的 monochrome 层用。
-     Themed / Material You 图标要求整图同一 fill；着色由系统 tint。 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="800"
-    android:viewportHeight="800">
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="470"
+    android:viewportHeight="470">
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M165.29,165.29H517.36V400H400V282.65H165.29Z" />
+        android:pathData="M0,0H352.07V234.71H234.71V117.36H0Z" />
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M165.29,282.65H282.65V400H400V517.36H282.65V634.72H165.29Z" />
+        android:pathData="M0,117.36H117.36V234.71H234.71V352.07H117.36V469.43H0Z" />
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M517.36,400H634.72V634.72H517.36Z" />
+        android:pathData="M352.07,234.71H469.43V469.43H352.07Z" />
 </vector>

@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Pi 官方 logo（https://pi.dev/logo.svg），原样转为 Android vector drawable。
-     视口与配色保持上游一致，便于日后一键替换（见 artwork/README）。 -->
+<!-- Pi 官方 logo（https://pi.dev/logo.svg）。视口收紧到内容包围盒，工具栏更均衡。 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="800dp"
-    android:height="800dp"
-    android:viewportWidth="800"
-    android:viewportHeight="800">
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="470"
+    android:viewportHeight="470">
+    <!-- 原 path 平移 -165.29 -->
     <path
         android:fillColor="#F09082"
-        android:pathData="M165.29,165.29H517.36V400H400V282.65H165.29Z" />
+        android:pathData="M0,0H352.07V234.71H234.71V117.36H0Z" />
     <path
         android:fillColor="#4D9ABF"
-        android:pathData="M165.29,282.65H282.65V400H400V517.36H282.65V634.72H165.29Z" />
+        android:pathData="M0,117.36H117.36V234.71H234.71V352.07H117.36V469.43H0Z" />
     <path
         android:fillColor="#F1BE58"
-        android:pathData="M517.36,400H634.72V634.72H517.36Z" />
+        android:pathData="M352.07,234.71H469.43V469.43H352.07Z" />
 </vector>

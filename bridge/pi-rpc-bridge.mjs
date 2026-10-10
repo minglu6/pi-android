@@ -391,12 +391,29 @@ function userTextOfLine(line) {
 }
 
 function textOfContentLike(content) {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  for (const part of content) {
-    if (part && typeof part === "object" && part.type === "text" && typeof part.text === "string") return part.text;
+  let raw = "";
+  if (typeof content === "string") raw = content;
+  else if (Array.isArray(content)) {
+    for (const part of content) {
+      if (part && typeof part === "object" && part.type === "text" && typeof part.text === "string") {
+        raw = part.text;
+        break;
+      }
+    }
   }
-  return "";
+  return cleanPreviewText(raw);
+}
+
+/** 去掉 pi-timestamp / HTML 注释等元数据，避免会话列表标题泄漏 `<!--pi-timestamp:…-->`。 */
+function cleanPreviewText(text) {
+  if (typeof text !== "string" || !text) return "";
+  let s = text
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<\/?[a-zA-Z][^>]*>/g, " ")
+    .replace(/\bpi-timestamp\s*:\s*[^\s<]+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return s;
 }
 
 function assertUnderSessionsDir(sessionPath) {
