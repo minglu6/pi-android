@@ -16,7 +16,6 @@
     <string name="sessions_title">会话</string>
     <string name="sessions_new">新建对话</string>
     <string name="sessions_search_hint">搜索会话</string>
-    <string name="sessions_search_shortcut">Ctrl K</string>
     <string name="sessions_empty_title">还没有会话</string>
     <string name="sessions_empty_body">点右上角「新建对话」开始聊天。</string>
     <string name="sessions_search_empty_title">没有匹配的会话</string>

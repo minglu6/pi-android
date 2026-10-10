@@ -13,8 +13,9 @@ import android.provider.OpenableColumns;
 import android.util.Base64;
 import android.util.AtomicFile;
 
+import android.media.ExifInterface;
+
 import androidx.annotation.Nullable;
-import androidx.exifinterface.media.ExifInterface;
 
 import org.json.JSONArray;
 import org.json.JSONObject;

@@ -248,6 +248,21 @@
             android:textSize="14sp"
             android:textStyle="bold" />
 
+        <TextView
+            android:id="@+id/actions_body"
+            style="@style/MonoMetaText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_tool_output"
+            android:maxLines="8"
+            android:padding="10dp"
+            android:scrollHorizontally="false"
+            android:textColor="@color/text_secondary"
+            android:textIsSelectable="true"
+            android:textSize="12.5sp"
+            android:visibility="gone" />
+
         <EditText
             android:id="@+id/actions_input"
             android:layout_width="match_parent"
@@ -257,24 +272,19 @@
             android:hint=""
             android:maxLines="6"
             android:padding="12dp"
+            android:scrollHorizontally="false"
             android:textColor="@color/text_primary"
             android:textColorHint="@color/text_muted"
             android:textSize="15sp"
             android:visibility="gone" />
 
-        <HorizontalScrollView
+        <LinearLayout
+            android:id="@+id/actions_buttons"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
-            android:scrollbars="none">
-
-            <LinearLayout
-                android:id="@+id/actions_buttons"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:gravity="end"
-                android:orientation="horizontal" />
-        </HorizontalScrollView>
+            android:gravity="end"
+            android:orientation="horizontal" />
     </LinearLayout>
 
     <TextView

@@ -14,7 +14,6 @@ import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.HorizontalScrollView;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -284,7 +283,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
         TextView toolDiff;
         TextView toolStatus;
         TextView toolChevron;
-        HorizontalScrollView toolOutputScroll;
+        View toolOutputScroll;
         TextView toolCommand;
         TextView toolOutput;
         LinearLayout toolFooter;

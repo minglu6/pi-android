@@ -151,6 +151,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private LinearLayout actions;
     private TextView actionsTitle;
     private EditText actionsInput;
+    private TextView actionsBody;
     private LinearLayout actionsButtons;
     private final java.util.LinkedHashMap<String, String> extStatuses = new java.util.LinkedHashMap<>();
     private String uiTarget;
@@ -205,6 +206,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         suggestRow = findViewById(R.id.suggest_row);
         actions = findViewById(R.id.actions);
         actionsTitle = findViewById(R.id.actions_title);
+        actionsBody = findViewById(R.id.actions_body);
         actionsInput = findViewById(R.id.actions_input);
         actionsButtons = findViewById(R.id.actions_buttons);
 
@@ -1755,6 +1757,11 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         actions.setVisibility(View.VISIBLE);
         actionsTitle.setText(title.isEmpty() ? getString(R.string.app_name) : title);
         boolean wantsText = "input".equals(kind) || "editor".equals(kind);
+        boolean showBody = !wantsText && hint != null && !hint.trim().isEmpty();
+        if (actionsBody != null) {
+            actionsBody.setVisibility(showBody ? View.VISIBLE : View.GONE);
+            if (showBody) actionsBody.setText(hint.trim());
+        }
         actionsInput.setVisibility(wantsText ? View.VISIBLE : View.GONE);
         if (wantsText) {
             actionsInput.setText(prefill == null ? "" : prefill);
@@ -1785,6 +1792,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         actions.setVisibility(View.GONE);
         actionsButtons.removeAllViews();
         actionsInput.setVisibility(View.GONE);
+        if (actionsBody != null) {
+            actionsBody.setVisibility(View.GONE);
+            actionsBody.setText("");
+        }
     }
 
     private static String notifyPrefix(String type) {
