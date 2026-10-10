@@ -27,6 +27,8 @@
     <color name="text_muted">#6B7394</color>
     <color name="text_faint">#949BB8</color>
     <color name="divider">#C4C8DA</color>
+    <!-- Soft session-row outline (lighter than divider; cards also have vertical gap). -->
+    <color name="session_card_stroke">#D8DCE8</color>
     <color name="status_online">#587539</color>
     <color name="status_connecting">#B15C00</color>
     <color name="status_offline">#F52A65</color>
