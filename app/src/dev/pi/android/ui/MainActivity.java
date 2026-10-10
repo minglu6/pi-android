@@ -247,14 +247,16 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         });
         adapter.setAgentActionListener(new MessageAdapter.AgentActionListener() {
             @Override public void onRetry(@NonNull ChatMessage message) {
-                retryLastUserPrompt();
+                retryWithPrompt(findPrecedingUserText(message), false);
+            }
+            @Override public void onRetryOtherModel(@NonNull ChatMessage message) {
+                retryWithPrompt(findPrecedingUserText(message), true);
             }
             @Override public void onFork(@NonNull ChatMessage message) {
-                if (!isConnected()) {
-                    Toast.makeText(MainActivity.this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                showForkPicker();
+                forkFromMessage(message);
+            }
+            @Override public void onEditResend(@NonNull ChatMessage userMessage) {
+                editResendUser(userMessage);
             }
         });
         list.setAdapter(adapter);
@@ -372,7 +374,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
         handleIntentExtras(getIntent());
         restoreFromAgentState();
-        if (!"online".equals(AgentState.get().status())) {
+        String st0 = AgentState.get().status();
+        if (!"online".equals(st0) && !"starting".equals(st0)) {
             setConnectionVisual("connecting", getString(R.string.status_connecting));
         }
         refreshEmptyState();
@@ -389,7 +392,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         if (!st.modelLabel().isEmpty() || !st.thinking().isEmpty()) {
             String name = st.modelLabel().isEmpty() ? getString(R.string.status_online) : st.modelLabel();
             modelStatus = name + (st.thinking().isEmpty() ? "" : " · " + st.thinking());
-            if ("online".equals(st.status()) || (service != null && service.isConnected())) {
+            if ("online".equals(st.status()) || "starting".equals(st.status())
+                    || (service != null && service.isConnected())) {
                 setConnectionVisual("online", modelStatus);
             }
         }
@@ -956,6 +960,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         menu.getMenu().add(0, 2, 1, R.string.menu_new_session);
         menu.getMenu().add(0, 3, 2, R.string.menu_reload);
         menu.getMenu().add(0, 4, 3, R.string.menu_fork);
+        menu.getMenu().add(0, 5, 4, R.string.menu_find);
+        menu.getMenu().add(0, 6, 5, R.string.menu_export);
         menu.setOnMenuItemClickListener(this::onOverflowItem);
         menu.show();
     }
@@ -982,6 +988,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                     return true;
                 }
                 showForkPicker();
+                return true;
+            case 5:
+                showFindSheet();
+                return true;
+            case 6:
+                exportSessionMarkdown();
                 return true;
             default:
                 return false;
@@ -1259,25 +1271,151 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     /** 重试：把最近一条用户正文填回输入框，便于再发。 */
     private void retryLastUserPrompt() {
-        if (adapter == null) return;
-        String last = "";
+        retryWithPrompt(findPrecedingUserText(null), false);
+    }
+
+    @Nullable
+    private String findPrecedingUserText(@Nullable ChatMessage fromAgent) {
+        if (adapter == null) return null;
         java.util.List<ChatMessage> snap = adapter.snapshot();
-        for (int i = snap.size() - 1; i >= 0; i--) {
-            ChatMessage m = snap.get(i);
-            if (m.role == ChatMessage.Role.USER && m.text != null && !m.text.isEmpty()) {
-                last = m.text;
-                break;
+        int end = snap.size() - 1;
+        if (fromAgent != null) {
+            for (int i = snap.size() - 1; i >= 0; i--) {
+                if (snap.get(i) == fromAgent || (snap.get(i).role == ChatMessage.Role.AGENT
+                        && fromAgent.text != null && fromAgent.text.equals(snap.get(i).text))) {
+                    end = i;
+                    break;
+                }
             }
         }
-        if (last.isEmpty()) {
+        for (int i = end; i >= 0; i--) {
+            ChatMessage m = snap.get(i);
+            if (m.role == ChatMessage.Role.USER && m.text != null && !m.text.isEmpty()) {
+                return m.text;
+            }
+        }
+        return null;
+    }
+
+    private void retryWithPrompt(@Nullable String text, boolean pickModelFirst) {
+        if (text == null || text.isEmpty()) {
             Toast.makeText(this, R.string.fork_empty, Toast.LENGTH_SHORT).show();
             return;
         }
+        if (!isConnected()) {
+            Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (pickModelFirst) {
+            pendingRetryText = text;
+            showModelPicker();
+            return;
+        }
+        // No dedicated retry RPC in connector whitelist — re-prompt with the same text.
+        dispatchPrompt(text, null, null);
+    }
+
+    private String pendingRetryText = "";
+
+    private void editResendUser(@NonNull ChatMessage userMessage) {
+        String text = userMessage.text == null ? "" : userMessage.text;
         if (composer != null) {
-            composer.setText(last);
-            composer.setSelection(last.length());
+            composer.setText(text);
+            composer.setSelection(text.length());
+            composer.requestFocus();
         }
         updateSendEnabled();
+    }
+
+    private void forkFromMessage(@NonNull ChatMessage message) {
+        if (!isConnected()) {
+            Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        // Prefer entryId on the message or preceding user; else open fork picker via RPC.
+        String entryId = message.entryId;
+        if (entryId == null || entryId.isEmpty()) {
+            java.util.List<ChatMessage> snap = adapter.snapshot();
+            for (int i = snap.size() - 1; i >= 0; i--) {
+                if (snap.get(i).role == ChatMessage.Role.USER
+                        && snap.get(i).entryId != null && !snap.get(i).entryId.isEmpty()) {
+                    // Use nearest user entry before/at this point when forking from a reply.
+                    entryId = snap.get(i).entryId;
+                    // Keep scanning upward until we pass the agent message
+                    for (int j = i; j < snap.size(); j++) {
+                        if (snap.get(j) == message) break;
+                    }
+                    break;
+                }
+            }
+            // Better: walk back from message index
+            int at = -1;
+            for (int i = 0; i < snap.size(); i++) {
+                if (snap.get(i) == message) { at = i; break; }
+            }
+            if (at >= 0) {
+                for (int i = at; i >= 0; i--) {
+                    if (snap.get(i).role == ChatMessage.Role.USER
+                            && snap.get(i).entryId != null && !snap.get(i).entryId.isEmpty()) {
+                        entryId = snap.get(i).entryId;
+                        break;
+                    }
+                    if (snap.get(i).entryId != null && !snap.get(i).entryId.isEmpty()) {
+                        entryId = snap.get(i).entryId;
+                        break;
+                    }
+                }
+            }
+        }
+        if (entryId != null && !entryId.isEmpty()) {
+            JSONObject params = new JSONObject();
+            try {
+                params.put("entryId", entryId);
+            } catch (Exception e) {
+                throw new IllegalStateException("fork params", e);
+            }
+            rpc("fork", params);
+            return;
+        }
+        showForkPicker();
+    }
+
+    private void showFindSheet() {
+        if (adapter == null) return;
+        new FindSheet(this, new FindSheet.Host() {
+            @NonNull @Override public java.util.List<ChatMessage> messages() {
+                return adapter.snapshot();
+            }
+            @Override public void jumpTo(int adapterIndex) {
+                if (list != null && adapterIndex >= 0 && adapterIndex < adapter.size()) {
+                    list.scrollToPosition(adapterIndex);
+                }
+            }
+        }).show();
+    }
+
+    private void exportSessionMarkdown() {
+        if (adapter == null) return;
+        String md = dev.pi.android.util.ExportMarkdown.from(
+                adapter.snapshot(),
+                currentSessionName == null || currentSessionName.isEmpty()
+                        ? getString(R.string.app_name) : currentSessionName);
+        android.content.ClipboardManager cm = (android.content.ClipboardManager)
+                getSystemService(CLIPBOARD_SERVICE);
+        if (cm != null) {
+            cm.setPrimaryClip(android.content.ClipData.newPlainText(
+                    getString(R.string.export_markdown), md));
+        }
+        // Also offer share; export_html exists on connector but MD is client-side.
+        try {
+            Intent share = new Intent(Intent.ACTION_SEND);
+            share.setType("text/markdown");
+            share.putExtra(Intent.EXTRA_TEXT, md);
+            share.putExtra(Intent.EXTRA_TITLE, getString(R.string.export_markdown));
+            startActivity(Intent.createChooser(share, getString(R.string.export_share)));
+        } catch (Exception e) {
+            Toast.makeText(this, R.string.export_done, Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void submit() {
@@ -1377,17 +1515,22 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private void setConnectionVisual(String state, String label) {
-        if ("online".equals(state)) label = AgentState.get().isFresh()
-                ? HistoryPresentation.statusLabel(modelStatus, label)
-                : getString(R.string.generation_model_sync);
+        // starting ≡ running: keep 运行中 (or model · 运行中); only online shows sync spinner copy.
+        if ("online".equals(state) || "starting".equals(state)) {
+            if (AgentState.get().isFresh()) {
+                label = HistoryPresentation.statusLabel(modelStatus, label);
+            } else if ("online".equals(state)) {
+                label = getString(R.string.generation_model_sync);
+            }
+        }
         if (statusText != null) statusText.setText(label);
         if (statusDot == null) return;
         int color;
         switch (state) {
             case "online":
+            case "starting": // connector/Pi up — show as running (运行中), not "starting"
                 color = R.color.status_online;
                 break;
-            case "starting":
             case "connecting":
                 color = R.color.status_connecting;
                 break;
@@ -2236,7 +2379,11 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             rpc("get_available_models", null);
             return;
         }
-        Pickers.showModel(this, modelLabels, modelRefs, AgentState.get().provider(), AgentState.get().modelId(),
+        if (thinkingLevels.isEmpty()) rpc("get_available_thinking_levels", null);
+        final String retryAfter = pendingRetryText;
+        pendingRetryText = "";
+        Pickers.showModelThinking(this, modelLabels, modelRefs, thinkingLevels,
+                AgentState.get().provider(), AgentState.get().modelId(), AgentState.get().thinking(),
                 (provider, modelId) -> {
                     if (!requireFreshModelState()) return;
                     JSONObject params = ModelRpc.setModelParams(provider, modelId);
@@ -2246,9 +2393,25 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                     }
                     android.util.Log.i(TAG, "set_model " + params.optString("provider")
                             + "/" + params.optString("modelId"));
-                    // 服务按确认响应刷新；失败只显示配置错误，不干扰 prompt
                     rpc("set_model", params);
-                });
+                    if (retryAfter != null && !retryAfter.isEmpty()) {
+                        // After model switch, re-prompt (no dedicated retry RPC).
+                        main.postDelayed(() -> {
+                            if (isConnected()) dispatchPrompt(retryAfter, null, null);
+                        }, 400);
+                    }
+                },
+                level -> {
+                    if (!requireFreshModelState()) return;
+                    JSONObject params = new JSONObject();
+                    try {
+                        params.put("level", level);
+                    } catch (Exception e) {
+                        throw new IllegalStateException("set_thinking_level params", e);
+                    }
+                    rpc("set_thinking_level", params);
+                },
+                () -> Toast.makeText(this, R.string.picker_default_saved, Toast.LENGTH_SHORT).show());
     }
 
     private void showThinkingPicker() {

@@ -194,7 +194,8 @@ public final class TranscriptReducer {
             assistantRow = size;
             if (assistantTime <= 0) assistantTime = System.currentTimeMillis();
         }
-        edits.add(new Edit(assistantRow, new ChatMessage(ChatMessage.Role.AGENT, text, assistantTime, streaming), append));
+        edits.add(new Edit(assistantRow,
+                new ChatMessage(ChatMessage.Role.AGENT, text, assistantTime, streaming, ""), append));
     }
 
     private void error(List<Edit> edits, int size, JSONObject message) {
@@ -221,7 +222,9 @@ public final class TranscriptReducer {
             String seen = streamed.toString();
             if (seen.equals(joinedText()) || seen.equals(lastRunText)) continue;
             long ts = message.optLong("timestamp", System.currentTimeMillis());
-            edits.add(new Edit(base + appended, new ChatMessage(ChatMessage.Role.AGENT, text, ts, false), true));
+            String entryId = message.optString("entryId", "");
+            edits.add(new Edit(base + appended,
+                    new ChatMessage(ChatMessage.Role.AGENT, text, ts, false, entryId), true));
             appended++;
         }
     }
@@ -383,13 +386,17 @@ public final class TranscriptReducer {
                 ChatMessage user = ChatMessage.fromUserContent(message);
                 String text = HistoryPresentation.displayText(message, user.text);
                 if (text.isEmpty() && user.attachments.isEmpty()) continue;
-                ChatMessage shown = new ChatMessage(ChatMessage.Role.USER, text, timestamp);
+                String entryId = message.optString("entryId", "");
+                ChatMessage shown = new ChatMessage(ChatMessage.Role.USER, text, timestamp, false, entryId);
                 shown.attachments.addAll(user.attachments);
                 result.add(shown);
             } else {
                 String text = HistoryPresentation.displayText(message, textOfMessage(message));
+                String entryId = message.optString("entryId", "");
                 if ("assistant".equals(role) && "error".equals(message.optString("stopReason"))) {
-                    if (!text.isEmpty() && message.has("errorMessage")) result.add(new ChatMessage(ChatMessage.Role.AGENT, text, timestamp));
+                    if (!text.isEmpty() && message.has("errorMessage")) {
+                        result.add(new ChatMessage(ChatMessage.Role.AGENT, text, timestamp, false, entryId));
+                    }
                     String error = message.optString("errorMessage", text);
                     if (!error.isEmpty()) result.add(new ChatMessage(ChatMessage.Role.SYSTEM, "⚠ " + error, timestamp));
                     continue;
@@ -397,7 +404,7 @@ public final class TranscriptReducer {
                 if (text.isEmpty()) continue;
                 ChatMessage.Role displayRole = "assistant".equals(role) ? ChatMessage.Role.AGENT
                         : ChatMessage.Role.SYSTEM;
-                result.add(new ChatMessage(displayRole, text, timestamp));
+                result.add(new ChatMessage(displayRole, text, timestamp, false, entryId));
             }
         }
         return result;
