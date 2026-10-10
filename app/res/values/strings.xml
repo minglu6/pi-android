@@ -2,7 +2,8 @@
 <resources>
     <string name="app_name">Pi</string>
     <string name="app_subtitle">Unofficial</string>
-    <string name="hint_message">给 Pi 发消息…</string>
+    <string name="hint_message">问 Pi 任何问题…</string>
+    <string name="hint_message_streaming">引导当前运行…</string>
     <string name="hint_disconnected">连接器未连接</string>
     <string name="action_send">发送</string>
     <string name="action_stop">停止</string>
@@ -14,7 +15,8 @@
     <string name="sessions">会话</string>
     <string name="sessions_title">会话</string>
     <string name="sessions_new">新建对话</string>
-    <string name="sessions_search_hint">搜索会话…</string>
+    <string name="sessions_search_hint">搜索会话</string>
+    <string name="sessions_search_shortcut">Ctrl K</string>
     <string name="sessions_empty_title">还没有会话</string>
     <string name="sessions_empty_body">点右上角「新建对话」开始聊天。</string>
     <string name="sessions_search_empty_title">没有匹配的会话</string>
@@ -136,4 +138,21 @@
     <string name="attach_kind_file">文件</string>
     <string name="attach_view_prompt">请查看这些附件。</string>
     <string name="prompt_failed_restore">发送失败，内容和附件已还原</string>
+    <string name="action_more">更多</string>
+    <string name="action_copy">复制</string>
+    <string name="action_retry">重试</string>
+    <string name="composer_steer">引导</string>
+    <string name="composer_queue">排队</string>
+    <string name="user_you">你</string>
+    <string name="menu_settings">设置</string>
+    <string name="menu_new_session">新建会话</string>
+    <string name="menu_reload">重新连接</string>
+    <string name="menu_fork">从消息 Fork…</string>
+    <string name="settings_term_font">终端 / 代码字体</string>
+    <string name="settings_term_font_nerd">MesloLGLDZ Nerd Font</string>
+    <string name="settings_term_font_system">系统等宽</string>
+    <string name="settings_term_size">代码字号</string>
+    <string name="settings_term_size_fmt">%1$.0f sp</string>
+    <string name="settings_term_font_desc_nerd">Meslo LG Large · 点状 0 · Nerd 图标</string>
+    <string name="settings_term_font_desc_system">无 Nerd 图标</string>
 </resources>

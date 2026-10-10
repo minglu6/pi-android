@@ -43,6 +43,7 @@ import java.util.concurrent.TimeUnit;
 
 import dev.pi.android.R;
 import dev.pi.android.model.ChatMessage;
+import dev.pi.android.util.AppFonts;
 import dev.pi.android.util.MarkdownLite;
 
 /**
@@ -280,6 +281,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
         TextView toolGlyph;
         TextView toolName;
         TextView toolSubject;
+        TextView toolDiff;
         TextView toolStatus;
         TextView toolChevron;
         HorizontalScrollView toolOutputScroll;
@@ -289,18 +291,33 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
         TextView toolToggle;
         TextView toolCopy;
 
+        // 用户 / 助手可选行头与动作
+        TextView userHeader;
+        View agentActions;
+        TextView agentActionCopy;
+        TextView agentActionMore;
+
         VH(@NonNull View itemView, int type) {
             super(itemView);
             this.ctx = itemView.getContext();
             this.type = type;
             this.text = itemView.findViewById(R.id.text);
-            if (type == TYPE_USER) attachmentItems = itemView.findViewById(R.id.attachment_chat_items);
+            if (type == TYPE_USER) {
+                attachmentItems = itemView.findViewById(R.id.attachment_chat_items);
+                userHeader = itemView.findViewById(R.id.user_header);
+            }
+            if (type == TYPE_AGENT) {
+                agentActions = itemView.findViewById(R.id.agent_actions);
+                agentActionCopy = itemView.findViewById(R.id.agent_action_copy);
+                agentActionMore = itemView.findViewById(R.id.agent_action_more);
+            }
             if (type == TYPE_TOOL) {
                 toolStateBar = itemView.findViewById(R.id.tool_state_bar);
                 toolHeader = itemView.findViewById(R.id.tool_header);
                 toolGlyph = itemView.findViewById(R.id.tool_glyph);
                 toolName = itemView.findViewById(R.id.tool_name);
                 toolSubject = itemView.findViewById(R.id.tool_subject);
+                toolDiff = itemView.findViewById(R.id.tool_diff);
                 toolStatus = itemView.findViewById(R.id.tool_status);
                 toolChevron = itemView.findViewById(R.id.tool_chevron);
                 toolOutputScroll = itemView.findViewById(R.id.tool_output_scroll);
@@ -309,6 +326,14 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                 toolFooter = itemView.findViewById(R.id.tool_footer);
                 toolToggle = itemView.findViewById(R.id.tool_toggle);
                 toolCopy = itemView.findViewById(R.id.tool_copy);
+                android.graphics.Typeface mono = AppFonts.mono(ctx, false);
+                if (toolGlyph != null) toolGlyph.setTypeface(mono);
+                if (toolCommand != null) toolCommand.setTypeface(mono);
+                if (toolOutput != null) toolOutput.setTypeface(mono);
+                if (toolName != null) toolName.setTypeface(mono);
+                if (toolSubject != null) toolSubject.setTypeface(mono);
+                if (toolStatus != null) toolStatus.setTypeface(mono);
+                if (toolDiff != null) toolDiff.setVisibility(View.GONE);
             }
         }
 
@@ -317,6 +342,13 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
             int codeFg = ContextCompat.getColor(ctx, R.color.pi_amber);
             switch (type) {
                 case TYPE_USER:
+                    if (userHeader != null) {
+                        String when = formatTime(msg.timestampMs);
+                        userHeader.setText(when.isEmpty()
+                                ? ctx.getString(R.string.user_you)
+                                : ctx.getString(R.string.user_you) + " · " + when);
+                        userHeader.setVisibility(View.VISIBLE);
+                    }
                     text.setText(msg.text);
                     text.setVisibility(msg.text.isEmpty() ? View.GONE : View.VISIBLE);
                     bindAttachments(msg);
@@ -329,14 +361,16 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                     break;
                 case TYPE_AGENT:
                 default: {
-                    CharSequence body = MarkdownLite.render(msg.text, codeBg, codeFg);
+                    CharSequence body = MarkdownLite.render(ctx, msg.text, codeBg, codeFg);
                     if (msg.streaming) {
                         android.text.SpannableStringBuilder sb =
                                 new android.text.SpannableStringBuilder(body);
                         sb.append(ctx.getString(R.string.streaming_marker));
                         text.setText(sb);
+                        if (agentActions != null) agentActions.setVisibility(View.GONE);
                     } else {
                         text.setText(body);
+                        bindAgentActions(msg.text);
                     }
                     break;
                 }
@@ -348,6 +382,38 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                 }
                 return true;
             });
+        }
+
+        private void bindAgentActions(String body) {
+            if (agentActions == null) return;
+            final String copyText = body == null ? "" : body;
+            if (copyText.isEmpty()) {
+                agentActions.setVisibility(View.GONE);
+                return;
+            }
+            agentActions.setVisibility(View.VISIBLE);
+            if (agentActionCopy != null) {
+                agentActionCopy.setOnClickListener(v -> {
+                    ClipboardManager cm =
+                            (ClipboardManager) ctx.getSystemService(Context.CLIPBOARD_SERVICE);
+                    if (cm != null) {
+                        cm.setPrimaryClip(ClipData.newPlainText(
+                                ctx.getString(R.string.action_copy), copyText));
+                    }
+                    Toast.makeText(ctx, R.string.tool_copied, Toast.LENGTH_SHORT).show();
+                });
+            }
+            if (agentActionMore != null) {
+                agentActionMore.setOnClickListener(v -> {
+                    ClipboardManager cm =
+                            (ClipboardManager) ctx.getSystemService(Context.CLIPBOARD_SERVICE);
+                    if (cm != null) {
+                        cm.setPrimaryClip(ClipData.newPlainText(
+                                ctx.getString(R.string.action_copy), copyText));
+                    }
+                    Toast.makeText(ctx, R.string.tool_copied, Toast.LENGTH_SHORT).show();
+                });
+            }
         }
 
         void cancelThumbnails() {
@@ -519,6 +585,8 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
             }
 
             final boolean expanded = Boolean.TRUE.equals(toolExpanded.get(key));
+
+            if (toolDiff != null) toolDiff.setVisibility(View.GONE);
 
             int stateColor = stateColor(state);
             toolStateBar.setBackgroundColor(stateColor);

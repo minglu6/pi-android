@@ -10,12 +10,14 @@ import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.KeyEvent;
 import android.view.InputDevice;
+import android.view.MenuItem;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.BaseInputConnection;
 import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
+import android.widget.PopupMenu;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -46,6 +48,7 @@ import dev.pi.android.bridge.BridgeService;
 import dev.pi.android.bridge.ModelRpc;
 import dev.pi.android.model.ChatMessage;
 import dev.pi.android.model.SlashCommand;
+import dev.pi.android.util.AppFonts;
 import dev.pi.android.util.SlashCommandStore;
 
 /**
@@ -93,6 +96,16 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private TextView statusText;
     private TextView generationStatus;
     private View statusDot;
+    private TextView sessionTitle;
+    private TextView sessionMeta;
+    private TextView modelChip;
+    private TextView footerStats;
+    private View steerToggle;
+    private TextView steerModeSteer;
+    private TextView steerModeQueue;
+    /** true = steer，false = follow_up / queue */
+    private boolean steerMode = true;
+    private long lastSessionStatsAt;
     private View emptyState;
     private TextView emptyTitle;
     private TextView emptyBody;
@@ -159,6 +172,20 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         statusText = findViewById(R.id.status_text);
         statusDot = findViewById(R.id.status_dot);
         generationStatus = findViewById(R.id.generation_status);
+        sessionTitle = findViewById(R.id.session_title);
+        sessionMeta = findViewById(R.id.session_meta);
+        modelChip = findViewById(R.id.model_chip);
+        footerStats = findViewById(R.id.footer_stats);
+        steerToggle = findViewById(R.id.steer_toggle);
+        steerModeSteer = findViewById(R.id.steer_mode_steer);
+        steerModeQueue = findViewById(R.id.steer_mode_queue);
+        if (sessionMeta != null) sessionMeta.setTypeface(AppFonts.mono(this, false));
+        if (modelChip != null) modelChip.setTypeface(AppFonts.mono(this, false));
+        if (footerStats != null) {
+            footerStats.setTypeface(AppFonts.mono(this, false));
+            footerStats.setVisibility(View.GONE);
+        }
+        if (statusText != null) statusText.setTypeface(AppFonts.mono(this, false));
         composer = findViewById(R.id.composer);
         send = findViewById(R.id.send);
         attach = findViewById(R.id.btn_attach);
@@ -223,11 +250,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
             loadSessions();
         });
-        findViewById(R.id.btn_settings).setOnClickListener(v ->
-                startActivity(new Intent(this, SettingsActivity.class)));
-        View statusChip = findViewById(R.id.status_chip);
-        if (statusChip != null) {
-            statusChip.setOnClickListener(v -> {
+        View overflow = findViewById(R.id.btn_overflow);
+        if (overflow != null) overflow.setOnClickListener(this::showOverflowMenu);
+        if (modelChip != null) {
+            modelChip.setOnClickListener(v -> {
                 if (!isConnected()) {
                     Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
                     return;
@@ -235,6 +261,22 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 showModelPicker();
             });
         }
+        if (steerModeSteer != null) {
+            steerModeSteer.setOnClickListener(v -> {
+                steerMode = true;
+                updateSteerUi();
+            });
+        }
+        if (steerModeQueue != null) {
+            steerModeQueue.setOnClickListener(v -> {
+                steerMode = false;
+                updateSteerUi();
+            });
+        }
+        updateSteerUi();
+        // status_chip 仍在布局中但已隐藏；保留空安全引用以免旧逻辑 NPE
+        View statusChip = findViewById(R.id.status_chip);
+        if (statusChip != null) statusChip.setVisibility(View.GONE);
         emptyAction.setOnClickListener(v ->
                 startActivity(new Intent(this, SettingsActivity.class)));
         if (scrollBottom != null) scrollBottom.setVisibility(View.GONE);
@@ -305,6 +347,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
         }
         if (!st.chatSessionPath().isEmpty()) currentSessionPath = st.chatSessionPath();
+        refreshSessionChrome();
     }
 
     private void restoreChatSnapshot() {
@@ -521,10 +564,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     @Override
     public void onExtTitle(String title) {
         main.post(() -> {
-            TextView brand = findViewById(R.id.brand_title);
-            if (brand == null) return;
-            String name = getString(R.string.app_name);
-            brand.setText(title == null || title.isEmpty() ? name : name + " · " + title);
+            if (sessionTitle == null) return;
+            if (title == null || title.isEmpty()) applySessionTitle();
+            else sessionTitle.setText(title);
         });
     }
 
@@ -542,12 +584,11 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             generationStatus.setVisibility(on ? View.VISIBLE : View.GONE);
             if (on && (changed || generationStatus.length() == 0)) generationStatus.setText(R.string.generation_active);
         }
+        if (steerToggle != null) steerToggle.setVisibility(on ? View.VISIBLE : View.GONE);
         if (!on) flushTranscriptPaint();
         main.removeCallbacks(thinkingTimeout);
         if (on) main.postDelayed(thinkingTimeout, THINKING_TIMEOUT_MS);
-        if (send == null) return;
-        send.setImageResource(on ? R.drawable.ic_stop : R.drawable.ic_send);
-        send.setContentDescription(getString(on ? R.string.action_stop : R.string.action_send));
+        refreshModelChip();
         updateSendEnabled();
     }
 
@@ -591,14 +632,32 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         boolean hasAttach = attachmentsCtl != null && attachmentsCtl.hasAttachments();
         boolean busyAttach = attachmentsCtl != null
                 && (attachmentsCtl.isPreparing() || attachmentsCtl.isUploading());
+        String draft = composer.getText().toString().trim();
+        boolean hasText = draft.length() > 0 || hasAttach;
         composer.setEnabled(connected || streaming);
-        composer.setHint(getString(connected || streaming ? R.string.hint_message : R.string.hint_disconnected));
+        if (streaming) {
+            composer.setHint(getString(R.string.hint_message_streaming));
+        } else {
+            composer.setHint(getString(connected ? R.string.hint_message : R.string.hint_disconnected));
+        }
         if (attach != null) {
             attach.setEnabled(connected && !streaming && !busyAttach);
             attach.setAlpha(connected && !streaming && !busyAttach ? 1f : 0.4f);
         }
-        boolean canSend = streaming || (connected && !busyAttach
-                && (composer.getText().toString().trim().length() > 0 || hasAttach));
+        // 流式中：有正文 → 发送 steer/follow_up；空正文 → 中止
+        if (streaming) {
+            if (hasText) {
+                send.setImageResource(R.drawable.ic_send);
+                send.setContentDescription(getString(R.string.action_send));
+            } else {
+                send.setImageResource(R.drawable.ic_stop);
+                send.setContentDescription(getString(R.string.action_stop));
+            }
+        } else {
+            send.setImageResource(R.drawable.ic_send);
+            send.setContentDescription(getString(R.string.action_send));
+        }
+        boolean canSend = streaming || (connected && !busyAttach && hasText);
         send.setEnabled(canSend);
         send.setAlpha(canSend ? 1f : 0.45f);
     }
@@ -747,14 +806,142 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private void applySessionTitle() {
-        TextView brand = findViewById(R.id.brand_title);
-        if (brand == null) return;
-        String name = getString(R.string.app_name);
+        if (sessionTitle == null) return;
         if (currentSessionName != null && !currentSessionName.isEmpty()) {
-            brand.setText(name + " · " + currentSessionName);
+            sessionTitle.setText(currentSessionName);
         } else {
-            brand.setText(name);
+            sessionTitle.setText(R.string.app_name);
         }
+    }
+
+    private void refreshSessionMeta() {
+        if (sessionMeta == null) return;
+        if (!modelStatus.isEmpty()) {
+            sessionMeta.setText(modelStatus);
+        } else if (isConnected()) {
+            sessionMeta.setText(R.string.status_online);
+        } else {
+            sessionMeta.setText(R.string.status_connecting);
+        }
+    }
+
+    private void refreshModelChip() {
+        if (modelChip == null) return;
+        AgentState st = AgentState.get();
+        String name = !st.modelLabel().isEmpty() ? st.modelLabel()
+                : (!modelStatus.isEmpty() ? modelStatus.split(" · ")[0] : getString(R.string.action_model));
+        String think = !st.thinking().isEmpty() ? st.thinking() : currentThinking;
+        modelChip.setText(think.isEmpty() ? name : name + " " + think);
+    }
+
+    private void refreshSessionChrome() {
+        applySessionTitle();
+        refreshSessionMeta();
+        refreshModelChip();
+    }
+
+    private void updateSteerUi() {
+        if (steerModeSteer == null || steerModeQueue == null) return;
+        if (steerMode) {
+            steerModeSteer.setBackgroundResource(R.drawable.bg_segmented_on);
+            steerModeSteer.setTextColor(ContextCompat.getColor(this, R.color.md_theme_onPrimary));
+            steerModeQueue.setBackground(null);
+            steerModeQueue.setTextColor(ContextCompat.getColor(this, R.color.text_muted));
+        } else {
+            steerModeQueue.setBackgroundResource(R.drawable.bg_segmented_on);
+            steerModeQueue.setTextColor(ContextCompat.getColor(this, R.color.md_theme_onPrimary));
+            steerModeSteer.setBackground(null);
+            steerModeSteer.setTextColor(ContextCompat.getColor(this, R.color.text_muted));
+        }
+    }
+
+    private void showOverflowMenu(View anchor) {
+        PopupMenu menu = new PopupMenu(this, anchor);
+        menu.getMenu().add(0, 1, 0, R.string.menu_settings);
+        menu.getMenu().add(0, 2, 1, R.string.menu_new_session);
+        menu.getMenu().add(0, 3, 2, R.string.menu_reload);
+        menu.getMenu().add(0, 4, 3, R.string.menu_fork);
+        menu.setOnMenuItemClickListener(this::onOverflowItem);
+        menu.show();
+    }
+
+    private boolean onOverflowItem(MenuItem item) {
+        switch (item.getItemId()) {
+            case 1:
+                startActivity(new Intent(this, SettingsActivity.class));
+                return true;
+            case 2:
+                if (!isConnected()) {
+                    Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+                    return true;
+                }
+                startNewSession();
+                return true;
+            case 3:
+                setConnectionVisual("connecting", getString(R.string.status_reconnecting));
+                reconnect();
+                return true;
+            case 4:
+                if (!isConnected()) {
+                    Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+                    return true;
+                }
+                showForkPicker();
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private void applySessionStats(@Nullable JSONObject data) {
+        if (footerStats == null) return;
+        if (data == null) {
+            footerStats.setVisibility(View.GONE);
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        boolean hasTokens = data.has("contextTokens") && !data.isNull("contextTokens");
+        boolean hasWindow = data.has("contextWindow") && !data.isNull("contextWindow");
+        if (hasTokens && hasWindow) {
+            sb.append(data.opt("contextTokens")).append('/').append(data.opt("contextWindow"));
+        } else if (hasTokens) {
+            sb.append(data.opt("contextTokens"));
+        } else if (hasWindow) {
+            sb.append(data.opt("contextWindow"));
+        }
+        if (data.has("cacheRate") && !data.isNull("cacheRate")) {
+            if (sb.length() > 0) sb.append(" · ");
+            Object rate = data.opt("cacheRate");
+            if (rate instanceof Number) {
+                double v = ((Number) rate).doubleValue();
+                if (v <= 1.0) sb.append(String.format(java.util.Locale.US, "%.0f%%", v * 100));
+                else sb.append(String.format(java.util.Locale.US, "%.0f%%", v));
+            } else {
+                sb.append(rate);
+            }
+        }
+        if (data.has("cost") && !data.isNull("cost")) {
+            if (sb.length() > 0) sb.append(" · ");
+            Object cost = data.opt("cost");
+            if (cost instanceof Number) {
+                sb.append(String.format(java.util.Locale.US, "$%.4f", ((Number) cost).doubleValue()));
+            } else {
+                sb.append(cost);
+            }
+        }
+        if (sb.length() == 0) {
+            footerStats.setVisibility(View.GONE);
+        } else {
+            footerStats.setText(sb.toString());
+            footerStats.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void maybeRequestSessionStats() {
+        long now = System.currentTimeMillis();
+        if (now - lastSessionStatsAt < 12_000L) return;
+        lastSessionStatsAt = now;
+        rpc("get_session_stats", null);
     }
 
     private void setupSlashCommands() {
@@ -863,11 +1050,39 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     private void onSendOrStop() {
         if (streaming) {
+            String text = composer.getText().toString().trim();
+            if (!text.isEmpty()) {
+                dispatchSteerOrFollowUp(text);
+                return;
+            }
             rpc("clear_queue", null);
             rpc("abort", null);
             return;
         }
         submit();
+    }
+
+    /** 流式中有正文：按 Steer/Queue 开关发 steer 或 follow_up。 */
+    private void dispatchSteerOrFollowUp(String text) {
+        if (!isConnected()) {
+            Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        hideSlashSuggestions();
+        composer.setText("");
+        adapter.add(new ChatMessage(ChatMessage.Role.USER, text));
+        JSONObject params = new JSONObject();
+        try {
+            params.put("message", text);
+        } catch (Exception e) {
+            throw new IllegalStateException("steer/follow_up params", e);
+        }
+        String cmd = steerMode ? "steer" : "follow_up";
+        pendingPromptRpcId = rpc(cmd, params);
+        pendingComposerText = text;
+        stickToBottom = true;
+        maybeScrollToBottom(true);
+        updateSendEnabled();
     }
 
     private void submit() {
@@ -1344,6 +1559,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
             return;
         }
+        if ("get_session_stats".equals(command)) {
+            applySessionStats(data);
+            return;
+        }
         if ("get_state".equals(command) && data != null) {
             applyGetStateModel(data);
             // BridgeService 只交付最新、且未跨模型/会话/运行状态变更的 get_state。
@@ -1354,7 +1573,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
             currentSessionPath = path;
             currentSessionName = data.optString("sessionName", "");
-            applySessionTitle();
+            refreshSessionChrome();
             boolean busy = data.optBoolean("isStreaming", false) || data.optBoolean("isCompacting", false);
             if (busy) {
                 setStreaming(true);
@@ -1375,6 +1594,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
             rpc("get_available_models", null);
             rpc("get_available_thinking_levels", null);
+            maybeRequestSessionStats();
         }
     }
 
@@ -1396,6 +1616,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         String name = !st.modelLabel().isEmpty() ? st.modelLabel() : getString(R.string.status_online);
         modelStatus = name + (currentThinking.isEmpty() ? "" : " · " + currentThinking);
+        refreshSessionChrome();
         if (!streaming) setConnectionVisual("online", modelStatus);
     }
 
@@ -1478,7 +1699,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 return;
             case "session_info_changed":
                 currentSessionName = ev.optString("name", currentSessionName);
-                applySessionTitle();
+                refreshSessionChrome();
                 return;
             default:
                 break;

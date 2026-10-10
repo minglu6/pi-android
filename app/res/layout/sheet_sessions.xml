@@ -56,21 +56,40 @@
                 android:backgroundTint="@color/pi_blue" />
         </LinearLayout>
 
-        <EditText
-            android:id="@+id/sessions_search"
+        <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="44dp"
-            android:layout_marginTop="8dp"
-            android:background="@drawable/bg_search_field"
-            android:hint="@string/sessions_search_hint"
-            android:imeOptions="actionSearch"
-            android:inputType="text"
-            android:maxLines="1"
-            android:paddingStart="14dp"
-            android:paddingEnd="14dp"
-            android:textColor="@color/text_primary"
-            android:textColorHint="@color/text_muted"
-            android:textSize="15sp" />
+            android:layout_marginTop="8dp">
+
+            <EditText
+                android:id="@+id/sessions_search"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@drawable/bg_search_field"
+                android:hint="@string/sessions_search_hint"
+                android:imeOptions="actionSearch"
+                android:inputType="text"
+                android:maxLines="1"
+                android:paddingStart="14dp"
+                android:paddingEnd="64dp"
+                android:textColor="@color/text_primary"
+                android:textColorHint="@color/text_muted"
+                android:textSize="15sp" />
+
+            <TextView
+                style="@style/MonoMetaText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="end|center_vertical"
+                android:layout_marginEnd="12dp"
+                android:background="@drawable/bg_status_chip"
+                android:paddingStart="8dp"
+                android:paddingTop="2dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="2dp"
+                android:text="@string/sessions_search_shortcut"
+                android:textColor="@color/text_faint" />
+        </FrameLayout>
     </LinearLayout>
 
     <FrameLayout
