@@ -578,6 +578,56 @@ function listProjectFiles(query, limit) {
   return out.slice(0, limit);
 }
 
+/**
+ * Pocket「检测更新」: run documented `pi update` (self + extensions).
+ * Fixed argv only — never shell, never sudo/root, never interactive elevate.
+ */
+function checkPiVersion() {
+  const r = spawnSync(PI_BIN, ["--version"], {
+    encoding: "utf8",
+    timeout: 15_000,
+    maxBuffer: 256 * 1024,
+    env: process.env,
+    shell: false,
+  });
+  if (r.error) throw new Error(r.error.message);
+  const out = `${r.stdout || ""}${r.stderr || ""}`.trim();
+  const version = (out.split(/\r?\n/).find(Boolean) || "").trim();
+  return {
+    version,
+    argv: `${PI_BIN} --version`,
+    status: r.status == null ? 1 : r.status,
+    stdout: (r.stdout || "").toString(),
+    stderr: (r.stderr || "").toString(),
+  };
+}
+
+function runPiUpdate(params) {
+  const mode = String((params && params.mode) || "all");
+  const args = ["update"];
+  if (mode === "self") args.push("--self");
+  else if (mode === "extensions") args.push("--extensions");
+  else if (mode !== "all") throw new Error("无效的 update mode");
+  const r = spawnSync(PI_BIN, args, {
+    encoding: "utf8",
+    timeout: 300_000,
+    maxBuffer: 4 * 1024 * 1024,
+    env: process.env,
+    cwd: os.homedir(),
+    shell: false,
+  });
+  if (r.error) throw new Error(r.error.message);
+  return {
+    mode,
+    argv: [PI_BIN, ...args].join(" "),
+    command: "pi update",
+    status: r.status == null ? 1 : r.status,
+    stdout: (r.stdout || "").toString(),
+    stderr: (r.stderr || "").toString(),
+    signal: r.signal || null,
+  };
+}
+
 /** Fixed-argv git helpers for Files / Changes / branch chip. */
 function runGitLocal(command, params) {
   const cwd = resolveProjectCwd();
@@ -947,6 +997,23 @@ function writeCommand(id, ws, command, params) {
       respond(ws, id, true, command, data, null);
     } catch (e) {
       respond(ws, id, false, command, null, e.message);
+    }
+    return;
+  }
+  // Pocket: 检测更新 — documented `pi update` (agent + extensions). Fixed argv, no shell, no sudo.
+  if (command === "check_pi_version") {
+    try {
+      respond(ws, id, true, "check_pi_version", checkPiVersion(), null);
+    } catch (e) {
+      respond(ws, id, false, "check_pi_version", null, e.message);
+    }
+    return;
+  }
+  if (command === "run_pi_update") {
+    try {
+      respond(ws, id, true, "run_pi_update", runPiUpdate(params || {}), null);
+    } catch (e) {
+      respond(ws, id, false, "run_pi_update", null, e.message);
     }
     return;
   }
