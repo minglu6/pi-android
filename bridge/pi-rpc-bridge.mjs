@@ -47,8 +47,23 @@ const flags = (name) => argv.includes(`--${name}`);
 const HOST = arg("host", "127.0.0.1");
 const PORT = Number(arg("port", 8945));
 const PI_BIN = arg("pi-bin", process.env.PI_BIN || findPi());
-const CWD = arg("cwd", process.env.HOME);
-const DEFAULT_CWD = process.env.HOME;
+const DEFAULT_CWD = process.env.HOME || ".";
+/** Persist last App/bridge working directory across connector restarts. */
+const CWD_FILE = path.join(os.homedir(), ".pi/agent/pi-android.cwd");
+function loadPersistedCwd() {
+  try {
+    const t = fs.readFileSync(CWD_FILE, "utf8").trim();
+    if (t && fs.existsSync(t) && fs.statSync(t).isDirectory()) return path.resolve(t);
+  } catch { /* ignore */ }
+  return null;
+}
+// No Pi RPC for set_cwd — bridge owns session cwd (spawn + project file/git helpers).
+const argCwd = arg("cwd", "");
+let sessionCwd = path.resolve(
+  (argCwd && fs.existsSync(argCwd) ? argCwd : null)
+  || loadPersistedCwd()
+  || DEFAULT_CWD
+);
 const TOKEN_FILE = arg(
   "token-file",
   path.join(process.env.HOME || ".", ".pi/agent/pi-android.token")
@@ -161,7 +176,7 @@ function ensurePi() {
   // spawn 而不是 exec：`pi` 的 wrapper 是 shell 脚本，spawn + shell:false 能拿到直接的 PID，
   // 便于 stop() 时整棵进程树收尾，也不会被 shell 再包一层。
   const pi = spawn(PI_BIN, ["--mode", "rpc", ...PI_ARGS], {
-    cwd: CWD && fs.existsSync(CWD) ? CWD : DEFAULT_CWD,
+    cwd: resolveProjectCwd(),
     stdio: ["pipe", "pipe", "pipe"],
     env: process.env,
   });
@@ -262,8 +277,13 @@ function routeRecord(rec) {
       entry.onResponse(rec);
       return;
     }
-    const data = rec.success && entry.command === "get_session_name"
-      ? { name: currentSessionName } : rec.data;
+    let data = rec.data;
+    if (rec.success && entry.command === "get_session_name") {
+      data = { name: currentSessionName };
+    } else if (rec.success && entry.piCommand === "get_state" && entry.command === "get_state") {
+      // Inject bridge cwd — Pi get_state does not document a cwd field / set_cwd RPC.
+      data = { ...(rec.data && typeof rec.data === "object" ? rec.data : {}), cwd: resolveProjectCwd() };
+    }
     respond(entry.ws, entry.clientId, !!rec.success, entry.command, data, rec.error);
     return;
   }
@@ -308,8 +328,67 @@ const SKIP_DIR = new Set([
 ]);
 
 function resolveProjectCwd() {
-  const root = CWD && fs.existsSync(CWD) ? path.resolve(CWD) : path.resolve(DEFAULT_CWD || ".");
-  return root;
+  if (sessionCwd && fs.existsSync(sessionCwd) && fs.statSync(sessionCwd).isDirectory()) {
+    return sessionCwd;
+  }
+  return path.resolve(DEFAULT_CWD || ".");
+}
+
+function persistSessionCwd(dir) {
+  try {
+    fs.mkdirSync(path.dirname(CWD_FILE), { recursive: true });
+    fs.writeFileSync(CWD_FILE, dir + "\n", { mode: 0o600 });
+  } catch { /* best-effort */ }
+}
+
+/** Change bridge+Pi working directory; restarts the Pi child so tools use the new cwd. */
+function setSessionCwd(raw) {
+  const full = path.resolve(String(raw || "").trim() || ".");
+  if (!fs.existsSync(full) || !fs.statSync(full).isDirectory()) {
+    throw new Error("目录不存在");
+  }
+  sessionCwd = full;
+  persistSessionCwd(full);
+  // Drop in-flight RPCs; Pi process cwd is fixed at spawn time.
+  for (const [id, entry] of [...pendingReqs.entries()]) {
+    if (entry.timer) clearTimeout(entry.timer);
+    pendingReqs.delete(id);
+    try {
+      respond(entry.ws, entry.clientId, false, entry.command, null, "工作目录已切换，请重试");
+    } catch { /* ignore */ }
+  }
+  const pi = child;
+  child = null;
+  if (pi) {
+    try { pi.stdin.end(); } catch { /* ignore */ }
+    try { pi.kill("SIGTERM"); } catch { /* ignore */ }
+  }
+  ensurePi();
+  return full;
+}
+
+function listCwdEntries(dirPath) {
+  const root = dirPath ? path.resolve(dirPath) : resolveProjectCwd();
+  if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
+    throw new Error("目录不存在");
+  }
+  const entries = [];
+  const parent = path.dirname(root);
+  if (parent && parent !== root) {
+    entries.push({ name: "..", path: parent, kind: "dir" });
+  }
+  let names = [];
+  try { names = fs.readdirSync(root, { withFileTypes: true }); } catch (e) {
+    throw new Error(e.message);
+  }
+  const dirs = [];
+  for (const e of names) {
+    if (!e.isDirectory()) continue;
+    if (e.name.startsWith(".") && e.name !== ".github") continue;
+    dirs.push({ name: e.name, path: path.join(root, e.name), kind: "dir" });
+  }
+  dirs.sort((a, b) => a.name.localeCompare(b.name));
+  return { cwd: root, entries: entries.concat(dirs).slice(0, 200) };
 }
 
 /** Safe relative path under project cwd; rejects .. escape. */
@@ -642,6 +721,29 @@ function writeCommand(id, ws, command, params) {
       err ? { sessions: [], error: err } : { sessions: items, dir: SESSIONS_DIR }, err);
     return;
   }
+  // Pocket: working directory — no Pi set_cwd RPC; bridge-local + Pi respawn.
+  if (command === "get_cwd") {
+    respond(ws, id, true, "get_cwd", { cwd: resolveProjectCwd() }, null);
+    return;
+  }
+  if (command === "set_cwd") {
+    try {
+      const cwd = setSessionCwd((params || {}).path || (params || {}).cwd);
+      respond(ws, id, true, "set_cwd", { cwd }, null);
+    } catch (e) {
+      respond(ws, id, false, "set_cwd", null, e.message);
+    }
+    return;
+  }
+  if (command === "list_cwd_entries") {
+    try {
+      const data = listCwdEntries((params || {}).path);
+      respond(ws, id, true, "list_cwd_entries", data, null);
+    } catch (e) {
+      respond(ws, id, false, "list_cwd_entries", null, e.message);
+    }
+    return;
+  }
   // Pocket: @ file mentions — bridge-local walk of session cwd (not a Pi RPC).
   if (command === "list_project_files") {
     try {
@@ -913,5 +1015,5 @@ process.on("SIGINT", () => {
 });
 
 wss.on("listening", () => {
-  log(`连接器 listening ws://${HOST}:${PORT}/ws  pi=${PI_BIN}  cwd=${CWD}  bash=${ALLOW_BASH ? "on" : "off"}`);
+  log(`连接器 listening ws://${HOST}:${PORT}/ws  pi=${PI_BIN}  cwd=${resolveProjectCwd()}  bash=${ALLOW_BASH ? "on" : "off"}`);
 });

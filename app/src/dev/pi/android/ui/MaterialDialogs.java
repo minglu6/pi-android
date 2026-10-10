@@ -43,10 +43,24 @@ public final class MaterialDialogs {
 
     public static void promptText(@NonNull Context ctx, @StringRes int titleRes, @StringRes int hintRes,
                                   @Nullable String prefill, @NonNull TextListener ok) {
+        promptText(ctx, titleRes, hintRes, prefill,
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES, ok);
+    }
+
+    /** Absolute path entry — no auto-cap / suggestions. */
+    public static void promptPath(@NonNull Context ctx, @StringRes int titleRes, @StringRes int hintRes,
+                                  @Nullable String prefill, @NonNull TextListener ok) {
+        promptText(ctx, titleRes, hintRes, prefill,
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI
+                        | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS, ok);
+    }
+
+    public static void promptText(@NonNull Context ctx, @StringRes int titleRes, @StringRes int hintRes,
+                                  @Nullable String prefill, int inputType, @NonNull TextListener ok) {
         float density = ctx.getResources().getDisplayMetrics().density;
         int pad = Math.round(24 * density);
         EditText input = new EditText(ctx);
-        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        input.setInputType(inputType);
         input.setHint(hintRes);
         input.setText(prefill == null ? "" : prefill);
         input.setSelection(input.getText().length());

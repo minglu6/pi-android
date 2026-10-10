@@ -99,6 +99,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private TextView sessionTitle;
     private TextView sessionMeta;
     private TextView modelChip;
+    private TextView cwdChip;
+    /** Bridge supports get_cwd/set_cwd/list_cwd_entries (or get_state injects cwd). */
+    private boolean cwdSupported;
+    private String pendingCwdListRpc = "";
+    private String pendingCwdSetRpc = "";
+    private String cwdBrowsePath = "";
     private TextView footerStats;
     private TextView footerSep;
     private View contextBarWrap;
@@ -204,6 +210,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         sessionTitle = findViewById(R.id.session_title);
         sessionMeta = findViewById(R.id.session_meta);
         modelChip = findViewById(R.id.model_chip);
+        cwdChip = findViewById(R.id.cwd_chip);
         footerStats = findViewById(R.id.footer_stats);
         footerSep = findViewById(R.id.footer_sep);
         contextBarWrap = findViewById(R.id.context_bar_wrap);
@@ -216,6 +223,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         steerModeQueue = findViewById(R.id.steer_mode_queue);
         if (sessionMeta != null) sessionMeta.setTypeface(AppFonts.mono(this, false));
         if (modelChip != null) modelChip.setTypeface(AppFonts.mono(this, false));
+        if (cwdChip != null) {
+            cwdChip.setTypeface(AppFonts.mono(this, false));
+            cwdChip.setVisibility(View.GONE);
+        }
         if (footerStats != null) {
             footerStats.setTypeface(AppFonts.mono(this, false));
             footerStats.setVisibility(View.GONE);
@@ -256,8 +267,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         LinearLayoutManager lm = new LinearLayoutManager(this);
         lm.setStackFromEnd(false);
         list.setLayoutManager(lm);
-        // 空闲时轻量 fade；流式更新关闭动画以免闪烁。
-        list.setItemAnimator(new androidx.recyclerview.widget.DefaultItemAnimator());
+        // Insert/remove fade only — change cross-fade ghosts tool rows (bash 完成重影).
+        list.setItemAnimator(chatItemAnimator());
         adapter = new MessageAdapter(size -> {
             refreshEmptyState();
             maybeScrollToBottom(false);
@@ -334,6 +345,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 }
                 showModelPicker();
             });
+        }
+        if (cwdChip != null) {
+            cwdChip.setOnClickListener(v -> openCwdSheet(null));
         }
         if (steerModePlan != null) {
             steerModePlan.setOnClickListener(v -> {
@@ -697,6 +711,14 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 7);
     }
 
+    /** Insert/remove fade only — never change cross-fade (ghosts bash/tool summary text). */
+    private static androidx.recyclerview.widget.RecyclerView.ItemAnimator chatItemAnimator() {
+        androidx.recyclerview.widget.DefaultItemAnimator a =
+                new androidx.recyclerview.widget.DefaultItemAnimator();
+        a.setSupportsChangeAnimations(false);
+        return a;
+    }
+
     private void setStreaming(boolean on) {
         boolean changed = streaming != on;
         streaming = on;
@@ -708,7 +730,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         if (steerToggle != null) steerToggle.setVisibility(View.VISIBLE);
         if (btnStop != null) btnStop.setVisibility(on ? View.VISIBLE : View.GONE);
         if (list != null) {
-            list.setItemAnimator(on ? null : new androidx.recyclerview.widget.DefaultItemAnimator());
+            list.setItemAnimator(on ? null : chatItemAnimator());
         }
         if (!on) flushTranscriptPaint();
         main.removeCallbacks(thinkingTimeout);
@@ -953,7 +975,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private void refreshSessionMeta() {
         if (sessionMeta == null) return;
         StringBuilder meta = new StringBuilder();
-        if (!stateCwd.isEmpty()) {
+        // Cwd lives on the composer chip when supported — avoid duplicating in meta.
+        if (!stateCwd.isEmpty() && !cwdSupported) {
             meta.append(shortPath(stateCwd));
         }
         if (!stateBranch.isEmpty()) {
@@ -1049,8 +1072,30 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     private void refreshSessionChrome() {
         applySessionTitle();
+        refreshCwdChip();
         refreshSessionMeta();
         refreshModelChip();
+    }
+
+    private void refreshCwdChip() {
+        if (cwdChip == null) return;
+        if (!cwdSupported || stateCwd.isEmpty()) {
+            cwdChip.setVisibility(View.GONE);
+            return;
+        }
+        cwdChip.setVisibility(View.VISIBLE);
+        cwdChip.setText(stateCwd);
+        cwdChip.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+    }
+
+    private void setCwdSupported(boolean on) {
+        if (cwdSupported == on) {
+            refreshCwdChip();
+            return;
+        }
+        cwdSupported = on;
+        refreshCwdChip();
+        refreshSessionMeta();
     }
 
     private void updateSteerUi() {
@@ -1803,7 +1848,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 || "git_branches".equals(command)
                 || "git_checkout".equals(command)
                 || "git_diff".equals(command)
-                || "abort_bash".equals(command);
+                || "abort_bash".equals(command)
+                || "get_cwd".equals(command)
+                || "set_cwd".equals(command)
+                || "list_cwd_entries".equals(command);
     }
 
     private static String friendlyConnectionError(@Nullable Throwable t) {
@@ -2110,6 +2158,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         if (stateCwd.isEmpty() && git != null) {
             stateCwd = firstString(git, "cwd", "root", "workTree");
         }
+        // Bridge injects cwd into get_state; old connectors omit it → hide chip.
+        if (!stateCwd.isEmpty()) setCwdSupported(true);
         stateDiffBadge = buildDiffBadge(data);
         if (stateDiffBadge.isEmpty() && git != null) {
             stateDiffBadge = buildDiffBadge(git);
@@ -2727,17 +2777,30 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         if ("list_project_files".equals(command) || "git_status".equals(command)
                 || "git_branches".equals(command) || "git_checkout".equals(command)
-                || "git_diff".equals(command) || "read_project_file".equals(command)) {
+                || "git_diff".equals(command) || "read_project_file".equals(command)
+                || "list_cwd_entries".equals(command) || "set_cwd".equals(command)
+                || "get_cwd".equals(command)) {
             boolean userFacing = ("git_branches".equals(command) && id.equals(pendingBranchesRpc))
                     || ("git_status".equals(command) && id.equals(pendingChangesRpc))
                     || ("list_project_files".equals(command)
                         && (id.equals(pendingFilesRpc) || id.equals(pendingMentionRpc)))
                     || ("read_project_file".equals(command) && id.equals(pendingReadRpc))
                     || ("git_diff".equals(command) && id.equals(pendingDiffRpc))
-                    || ("git_checkout".equals(command) && id.equals(pendingCheckoutRpc));
+                    || ("git_checkout".equals(command) && id.equals(pendingCheckoutRpc))
+                    || ("list_cwd_entries".equals(command) && id.equals(pendingCwdListRpc))
+                    || ("set_cwd".equals(command) && id.equals(pendingCwdSetRpc));
             if (userFacing && resumed) {
                 if (isConnectorCommandRejected(error, command)) {
+                    if ("list_cwd_entries".equals(command) || "set_cwd".equals(command)
+                            || "get_cwd".equals(command)) {
+                        setCwdSupported(false);
+                    }
                     Toast.makeText(this, R.string.connector_update_required, Toast.LENGTH_LONG).show();
+                } else if ("list_cwd_entries".equals(command) || "set_cwd".equals(command)) {
+                    Toast.makeText(this,
+                            error != null && !error.isEmpty() ? error
+                                    : getString(R.string.cwd_unavailable),
+                            Toast.LENGTH_SHORT).show();
                 } else {
                     Toast.makeText(this,
                             "git_branches".equals(command) || "git_status".equals(command)
@@ -2745,6 +2808,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                                     ? R.string.git_unavailable : R.string.file_viewer_failed,
                             Toast.LENGTH_SHORT).show();
                 }
+            } else if (("list_cwd_entries".equals(command) || "set_cwd".equals(command)
+                    || "get_cwd".equals(command))
+                    && isConnectorCommandRejected(error, command)) {
+                setCwdSupported(false);
             }
             clearPendingPocketId(command, id);
             return true;
@@ -2876,6 +2943,52 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             showTextViewer(getString(R.string.diff_viewer_title) + " · " + path, diff);
             return true;
         }
+        if ("list_cwd_entries".equals(command) && id.equals(pendingCwdListRpc)) {
+            clearPendingPocketId(command, id);
+            setCwdSupported(true);
+            String browse = data != null ? data.optString("cwd", cwdBrowsePath) : cwdBrowsePath;
+            if (browse == null) browse = "";
+            cwdBrowsePath = browse;
+            List<dev.pi.android.model.PickerItem> entries =
+                    ProjectSheets.cwdEntriesFromResponse(this, data);
+            final String browseFinal = browse;
+            ProjectSheets.showCwdPicker(this, browse, entries,
+                    path -> openCwdSheet(path),
+                    this::requestSetCwd,
+                    () -> MaterialDialogs.promptPath(this, R.string.cwd_enter_path,
+                            R.string.cwd_enter_hint,
+                            browseFinal.isEmpty() ? stateCwd : browseFinal,
+                            path -> {
+                                if (path != null && !path.isEmpty()) requestSetCwd(path);
+                            }));
+            return true;
+        }
+        if ("set_cwd".equals(command) && id.equals(pendingCwdSetRpc)) {
+            clearPendingPocketId(command, id);
+            setCwdSupported(true);
+            String cwd = data != null ? firstString(data, "cwd", "path") : "";
+            if (!cwd.isEmpty()) {
+                stateCwd = cwd;
+                cwdBrowsePath = cwd;
+                refreshSessionChrome();
+                if (resumed) {
+                    Toast.makeText(this, getString(R.string.cwd_set_ok, cwd), Toast.LENGTH_SHORT).show();
+                }
+            }
+            // Pi respawned — refresh chrome + git from new cwd.
+            rpc("get_state", null);
+            refreshGitChrome();
+            return true;
+        }
+        if ("get_cwd".equals(command)) {
+            setCwdSupported(true);
+            String cwd = data != null ? firstString(data, "cwd", "path") : "";
+            if (!cwd.isEmpty()) {
+                stateCwd = cwd;
+                refreshSessionChrome();
+            }
+            return true;
+        }
         return false;
     }
 
@@ -2895,7 +3008,51 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         } else if ("read_project_file".equals(command)) {
             if (id.equals(pendingReadRpc)) pendingReadRpc = "";
             pendingReadPath = "";
+        } else if ("list_cwd_entries".equals(command)) {
+            if (id.equals(pendingCwdListRpc)) pendingCwdListRpc = "";
+        } else if ("set_cwd".equals(command)) {
+            if (id.equals(pendingCwdSetRpc)) pendingCwdSetRpc = "";
         }
+    }
+
+    /** Browse working directory; {@code path} null/empty lists current session cwd. */
+    private void openCwdSheet(@Nullable String path) {
+        if (!isConnected()) {
+            Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!cwdSupported && (stateCwd == null || stateCwd.isEmpty())) {
+            Toast.makeText(this, R.string.cwd_unavailable, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Toast.makeText(this, R.string.cwd_loading, Toast.LENGTH_SHORT).show();
+        JSONObject params = new JSONObject();
+        if (path != null && !path.isEmpty()) {
+            try {
+                params.put("path", path);
+            } catch (Exception e) {
+                throw new IllegalStateException("list_cwd_entries params", e);
+            }
+            cwdBrowsePath = path;
+        } else {
+            cwdBrowsePath = stateCwd;
+        }
+        pendingCwdListRpc = rpc("list_cwd_entries", params.length() == 0 ? null : params);
+    }
+
+    private void requestSetCwd(@NonNull String path) {
+        if (!isConnected()) {
+            Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (path == null || path.trim().isEmpty()) return;
+        JSONObject params = new JSONObject();
+        try {
+            params.put("path", path.trim());
+        } catch (Exception e) {
+            throw new IllegalStateException("set_cwd params", e);
+        }
+        pendingCwdSetRpc = rpc("set_cwd", params);
     }
 
     private void refreshGitChrome() {

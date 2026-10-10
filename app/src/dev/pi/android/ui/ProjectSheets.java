@@ -1,6 +1,7 @@
 package dev.pi.android.ui;
 
 import android.app.Activity;
+import android.content.Context;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
@@ -119,6 +120,63 @@ public final class ProjectSheets {
             if (path.isEmpty()) continue;
             String st = f.optString("status", "");
             out.add(PickerItem.row(path, st.isEmpty() ? null : st, path, false));
+        }
+        return out;
+    }
+
+    /**
+     * Working-directory browser from list_cwd_entries.
+     * First row is “输入路径…”; remaining rows are directories (incl. ..).
+     * Footer “使用此目录” applies {@code browseCwd}.
+     */
+    public static void showCwdPicker(@NonNull Activity activity, @NonNull String browseCwd,
+                                     @NonNull List<PickerItem> entries,
+                                     @NonNull FilePick browse, @NonNull FilePick usePath,
+                                     @NonNull Runnable typePath) {
+        List<PickerItem> items = new ArrayList<>();
+        items.add(PickerItem.row(activity.getString(R.string.cwd_enter_path),
+                activity.getString(R.string.cwd_enter_hint), "__type__", false));
+        if (!browseCwd.isEmpty()) {
+            items.add(PickerItem.header(browseCwd));
+        }
+        items.addAll(entries);
+        PickerSheet sheet = new PickerSheet(activity, R.string.cwd_title, true, item -> {
+            if (!(item.payload instanceof String)) return;
+            String path = (String) item.payload;
+            if ("__type__".equals(path)) {
+                typePath.run();
+                return;
+            }
+            browse.onPick(path);
+        });
+        if (!browseCwd.isEmpty()) {
+            sheet.enableFooter(activity.getString(R.string.cwd_use_here), () -> {
+                sheet.dismiss();
+                usePath.onPick(browseCwd);
+            });
+        }
+        sheet.setItems(items);
+        sheet.show();
+    }
+
+    public static List<PickerItem> cwdEntriesFromResponse(@NonNull Context ctx,
+                                                          @Nullable JSONObject data) {
+        List<PickerItem> out = new ArrayList<>();
+        if (data == null) return out;
+        JSONArray entries = data.optJSONArray("entries");
+        if (entries == null) return out;
+        String parentLabel = ctx.getString(R.string.cwd_parent);
+        for (int i = 0; i < entries.length(); i++) {
+            JSONObject e = entries.optJSONObject(i);
+            if (e == null) continue;
+            String name = e.optString("name", "");
+            String path = e.optString("path", "");
+            if (path.isEmpty()) continue;
+            if ("..".equals(name)) {
+                out.add(PickerItem.row(parentLabel, path, path, false));
+            } else {
+                out.add(PickerItem.row(name.isEmpty() ? path : name, path, path, false));
+            }
         }
         return out;
     }

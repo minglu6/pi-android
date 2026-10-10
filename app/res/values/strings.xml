@@ -233,4 +233,13 @@
     <string name="session_interrupt_continue">仍要继续</string>
     <string name="session_interrupt_new_toast">已中断当前生成并新建会话</string>
     <string name="session_interrupt_switch_toast">已中断当前生成并切换会话</string>
+    <string name="cwd_chip_placeholder">工作目录</string>
+    <string name="cwd_title">工作目录</string>
+    <string name="cwd_enter_path">输入路径…</string>
+    <string name="cwd_enter_hint">绝对路径，例如 /data/data/…/home/project</string>
+    <string name="cwd_set_ok">已切换到 %1$s</string>
+    <string name="cwd_unavailable">工作目录不可用</string>
+    <string name="cwd_parent">上级目录</string>
+    <string name="cwd_use_here">使用此目录</string>
+    <string name="cwd_loading">加载目录…</string>
 </resources>
