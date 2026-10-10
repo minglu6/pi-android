@@ -8,8 +8,7 @@ import android.os.IBinder;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.TextWatcher;
-import android.view.Menu;
-import android.view.MenuItem;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
@@ -21,7 +20,6 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.appcompat.widget.PopupMenu;
 import androidx.core.content.ContextCompat;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
@@ -35,13 +33,16 @@ import com.google.android.material.button.MaterialButton;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import dev.pi.android.R;
 import dev.pi.android.bridge.BridgeService;
 import dev.pi.android.model.ChatMessage;
+import dev.pi.android.model.SlashCommand;
 import dev.pi.android.util.Colls;
 
 /**
@@ -93,6 +94,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private View topBar;
     private View composerBar;
     private LinearLayout suggestRow;
+    private View slashPanel;
+    private SlashCommandAdapter slashAdapter;
     private BridgeService service;
     private boolean serviceBound;
     private boolean resumed;
@@ -124,6 +127,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        SettingsActivity.applySavedTheme(this);
         super.onCreate(savedInstanceState);
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         setContentView(R.layout.activity_main);
@@ -150,6 +154,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
         applyWindowInsets();
         setupSuggestChips();
+        setupSlashCommands();
 
         list = findViewById(R.id.messages);
         LinearLayoutManager lm = new LinearLayoutManager(this);
@@ -180,9 +185,21 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
             loadSessions();
         });
-        findViewById(R.id.btn_menu).setOnClickListener(this::showOverflowMenu);
+        findViewById(R.id.btn_settings).setOnClickListener(v ->
+                startActivity(new Intent(this, SettingsActivity.class)));
+        View statusChip = findViewById(R.id.status_chip);
+        if (statusChip != null) {
+            statusChip.setOnClickListener(v -> {
+                if (!isConnected()) {
+                    Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                showModelPicker();
+            });
+        }
         emptyAction.setOnClickListener(v ->
                 startActivity(new Intent(this, SettingsActivity.class)));
+        if (scrollBottom != null) scrollBottom.setVisibility(View.GONE);
         reconnectBtn.setOnClickListener(v -> {
             if (!SettingsActivity.hasToken(this)) {
                 startActivity(new Intent(this, SettingsActivity.class));
@@ -201,7 +218,16 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         send.setEnabled(false);
         send.setAlpha(0.45f);
         composer.setOnEditorActionListener((v, actionId, event) -> {
-            if (actionId == EditorInfo.IME_ACTION_SEND) {
+            if (actionId == EditorInfo.IME_ACTION_SEND
+                    || (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER
+                    && event.getAction() == KeyEvent.ACTION_DOWN)) {
+                if (slashPanelVisible() && slashAdapter != null && !slashAdapter.isEmpty()) {
+                    SlashCommand first = slashAdapter.first();
+                    if (first != null) {
+                        applySlashCommand(first);
+                        return true;
+                    }
+                }
                 onSendOrStop();
                 return true;
             }
@@ -211,6 +237,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
                 updateSendEnabled();
+                updateSlashSuggestions(s == null ? "" : s.toString());
             }
             @Override public void afterTextChanged(Editable s) {}
         });
@@ -462,6 +489,104 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
     }
 
+    private void setupSlashCommands() {
+        slashPanel = findViewById(R.id.slash_panel);
+        RecyclerView slashList = findViewById(R.id.slash_list);
+        if (slashList == null) return;
+        slashList.setLayoutManager(new LinearLayoutManager(this));
+        slashAdapter = new SlashCommandAdapter(this::applySlashCommand);
+        slashList.setAdapter(slashAdapter);
+        hideSlashSuggestions();
+    }
+
+    private boolean slashPanelVisible() {
+        return slashPanel != null && slashPanel.getVisibility() == View.VISIBLE;
+    }
+
+    private void updateSlashSuggestions(String text) {
+        String t = text == null ? "" : text;
+        // 仅当整段输入以 / 开头且尚未含空白（还在敲命令名）时展示
+        if (!t.startsWith("/") || t.contains(" ") || t.contains("\n")) {
+            hideSlashSuggestions();
+            return;
+        }
+        List<SlashCommand> matched = new ArrayList<>();
+        for (SlashCommand c : SlashCommand.catalog()) {
+            if (c.matches(t)) matched.add(c);
+        }
+        if (matched.isEmpty()) {
+            hideSlashSuggestions();
+            return;
+        }
+        if (slashAdapter != null) slashAdapter.replaceAll(matched);
+        if (slashPanel != null) slashPanel.setVisibility(View.VISIBLE);
+    }
+
+    private void hideSlashSuggestions() {
+        if (slashPanel != null) slashPanel.setVisibility(View.GONE);
+    }
+
+    private void applySlashCommand(SlashCommand cmd) {
+        hideSlashSuggestions();
+        if (composer != null) composer.setText("");
+        if (cmd.kind == SlashCommand.Kind.UI) {
+            switch (cmd.action) {
+                case "model":
+                    showModelPicker();
+                    break;
+                case "thinking":
+                    showThinkingPicker();
+                    break;
+                case "new":
+                case "clear":
+                    startNewSession();
+                    break;
+                case "sessions":
+                    if (!isConnected()) {
+                        Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+                    } else {
+                        loadSessions();
+                    }
+                    break;
+                case "settings":
+                    startActivity(new Intent(this, SettingsActivity.class));
+                    break;
+                case "reload":
+                    setConnectionVisual("connecting", getString(R.string.status_reconnecting));
+                    reconnect();
+                    break;
+                default:
+                    break;
+            }
+            return;
+        }
+        // RPC：走连接器白名单命令
+        if (!isConnected()) {
+            Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if ("abort".equals(cmd.action)) {
+            rpc("abort", null);
+            setStreaming(false);
+            return;
+        }
+        rpc(cmd.action, null);
+        Toast.makeText(this, cmd.name, Toast.LENGTH_SHORT).show();
+    }
+
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_ESCAPE || keyCode == KeyEvent.KEYCODE_BACK) {
+            if (slashPanelVisible()) {
+                hideSlashSuggestions();
+                if (keyCode == KeyEvent.KEYCODE_ESCAPE) return true;
+                // BACK：只收起提示，不退出 Activity（再按一次才退）
+                if (keyCode == KeyEvent.KEYCODE_BACK) return true;
+            }
+        }
+        return super.onKeyDown(keyCode, event);
+    }
+
     private void onSendOrStop() {
         if (streaming) {
             rpc("abort", null);
@@ -475,12 +600,20 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private void submit() {
         String text = composer.getText().toString().trim();
         if (text.isEmpty()) return;
+        // 完整匹配本地斜杠命令 → 执行动作，不作为普通消息发出
+        for (SlashCommand c : SlashCommand.catalog()) {
+            if (c.name.equalsIgnoreCase(text)) {
+                applySlashCommand(c);
+                return;
+            }
+        }
         if (!isConnected()) {
             Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
             refreshEmptyState();
             return;
         }
         composer.setText("");
+        hideSlashSuggestions();
         adapter.add(new ChatMessage(ChatMessage.Role.USER, text));
         blocks.clear();
         setStreaming(true);
@@ -556,71 +689,31 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
     }
 
-    // ---------- 菜单 ----------
-
-    private void showOverflowMenu(View anchor) {
-        PopupMenu popup = new PopupMenu(this, anchor);
-        popup.getMenu().add(Menu.NONE, 1, 100, R.string.action_new_session);
-        popup.getMenu().add(Menu.NONE, 2, 200, R.string.action_stop);
-        popup.getMenu().add(Menu.NONE, 3, 300, R.string.action_reload);
-        popup.getMenu().add(Menu.NONE, 5, 500, R.string.action_model);
-        popup.getMenu().add(Menu.NONE, 6, 600, R.string.action_thinking);
-        popup.getMenu().add(Menu.NONE, 7, 700, R.string.action_sessions);
-        popup.getMenu().add(Menu.NONE, 8, 800, R.string.action_fork);
-        popup.getMenu().add(Menu.NONE, 4, 400, R.string.settings);
-        popup.setOnMenuItemClickListener(this::onMenuItem);
-        popup.show();
-    }
-
-    private boolean onMenuItem(@NonNull MenuItem item) {
-        switch (item.getItemId()) {
-            case 1:
-                startNewSession();
-                return true;
-            case 2:
-                rpc("abort", null);
-                setStreaming(false);
-                return true;
-            case 5:
-                showModelPicker();
-                return true;
-            case 6:
-                showThinkingPicker();
-                return true;
-            case 7:
-                loadSessions();
-                return true;
-            case 8:
-                showForkPicker();
-                return true;
-            case 3:
-                setConnectionVisual("connecting", getString(R.string.status_reconnecting));
-                reconnect();
-                return true;
-            case 4:
-                startActivity(new Intent(this, SettingsActivity.class));
-                return true;
-            default:
-                return false;
-        }
-    }
-
     private void applyWindowInsets() {
         View root = findViewById(R.id.root);
         final float density = getResources().getDisplayMetrics().density;
         final int padH = Math.round(12 * density);
         final int padTop = Math.round(10 * density);
         final int padEnd = Math.round(10 * density);
-        ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {
-            Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+        ViewCompat.setOnApplyWindowInsetsListener(root, (v, windowInsets) -> {
+            Insets bars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars());
+            Insets ime = windowInsets.getInsets(WindowInsetsCompat.Type.ime());
+            Insets cutout = windowInsets.getInsets(WindowInsetsCompat.Type.displayCutout());
+            int top = Math.max(bars.top, cutout.top);
+            int bottom = Math.max(bars.bottom, ime.bottom);
             if (topBar != null) {
-                topBar.setPadding(0, bars.top, 0, 0);
+                topBar.setPadding(0, top, 0, 0);
             }
             if (composerBar != null) {
-                composerBar.setPadding(padH, padTop, padEnd, bars.bottom + padTop);
+                composerBar.setPadding(padH, padTop, padEnd, bottom + padTop);
             }
-            return insets;
+            if (ime.bottom > bars.bottom && stickToBottom) {
+                maybeScrollToBottom(true);
+            }
+            // 不 CONSUMED：让系统继续分发 IME，避免部分机型键盘顶不起布局
+            return windowInsets;
         });
+        ViewCompat.requestApplyInsets(root);
     }
 
     private void setupSuggestChips() {

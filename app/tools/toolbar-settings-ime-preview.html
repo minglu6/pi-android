@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Pi — toolbar / settings / slash preview</title>
+<style>
+  :root {
+    --bg:#F5F7FA; --elev:#fff; --composer:#EEF1F5; --stroke:#D5DBE3;
+    --text:#1A1F27; --sec:#5B6573; --muted:#8A93A1; --div:#DCE2EA;
+    --pi-blue:#4D9ABF; --pi-salmon:#F09082; --pi-amber:#F1BE58;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:28px 16px;background:#1a1a1a;color:#eee;font-family:"Segoe UI","PingFang SC","Noto Sans SC",sans-serif;
+    display:flex;flex-wrap:wrap;gap:24px;justify-content:center}
+  .col{display:flex;flex-direction:column;align-items:center;gap:8px}
+  .label{color:#aaa;font-size:12px;letter-spacing:.06em;text-transform:uppercase}
+  .phone{width:360px;height:700px;border-radius:28px;overflow:hidden;border:2px solid #333;background:var(--bg);
+    display:flex;flex-direction:column;box-shadow:0 18px 50px rgba(0,0,0,.45);color:var(--text)}
+  .sb{height:26px;padding:0 14px;display:flex;justify-content:space-between;align-items:center;font-size:11px;background:var(--elev);color:#333}
+  .top{background:var(--elev);border-bottom:1px solid var(--div);padding:8px 4px 8px 14px}
+  .row{display:flex;align-items:center;gap:8px;min-height:48px}
+  .logo{width:26px;height:26px;border-radius:4px;background:conic-gradient(var(--pi-salmon),var(--pi-blue),var(--pi-amber),var(--pi-salmon))}
+  .titles{flex:1;min-width:0}
+  .titles h1{margin:0;font-size:18px}
+  .chip{display:inline-flex;align-items:center;gap:6px;margin-top:2px;padding:2px 8px;border-radius:999px;background:#E8EEF4;font-size:12px;color:var(--sec)}
+  .dot{width:6px;height:6px;border-radius:50%;background:#2DA44E}
+  .ibtn{width:48px;height:48px;border:0;background:transparent;color:var(--sec);font-size:20px;display:grid;place-items:center}
+  .ibtn.ugly{width:40px;height:40px;border-radius:50%;background:#B0B8C4;color:#fff;font-size:16px;margin:4px}
+  .mid{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center}
+  .mid .logo-lg{width:56px;height:56px;border-radius:10px;background:conic-gradient(var(--pi-salmon),var(--pi-blue),var(--pi-amber),var(--pi-salmon))}
+  .mid h2{margin:16px 0 6px;font-size:20px}
+  .mid p{margin:0;color:var(--sec);font-size:14px}
+  .suggest{margin-top:18px;width:100%;display:flex;flex-direction:column;gap:8px}
+  .suggest button{border:1px solid var(--div);background:var(--composer);border-radius:16px;padding:12px;text-align:left;color:var(--sec)}
+  .slash{background:var(--elev);border-top:1px solid var(--div);padding:6px 0}
+  .slash .h{padding:0 16px 4px;color:var(--muted);font-size:12px}
+  .slash .item{display:flex;gap:12px;padding:10px 16px;font-size:14px}
+  .slash .cmd{width:100px;font-family:ui-monospace,monospace;color:var(--pi-blue);font-weight:700}
+  .slash .desc{color:var(--sec)}
+  .composer{display:flex;gap:8px;padding:10px;background:var(--elev);border-top:1px solid var(--div);align-items:center}
+  .composer input{flex:1;height:48px;border-radius:24px;border:1px solid var(--stroke);background:var(--composer);padding:0 16px;font-size:15px}
+  .send{width:48px;height:48px;border-radius:50%;border:0;background:var(--pi-blue);color:#fff}
+  .scroll{align-self:center;width:40px;height:40px;border-radius:50%;border:1px solid var(--div);background:var(--elev);display:grid;place-items:center;margin-bottom:8px;color:var(--sec)}
+  .settings-body{flex:1;overflow:auto;padding:8px 16px 24px}
+  .sec-h{padding:18px 4px 8px;font-size:13px;font-weight:700;color:var(--sec)}
+  .card{background:var(--elev);border:1px solid var(--div);border-radius:16px;overflow:hidden}
+  .pref{padding:14px 16px;border-bottom:1px solid var(--div)}
+  .pref:last-child{border-bottom:0}
+  .pref .t{font-size:15.5px}
+  .pref .s{margin-top:2px;font-size:13px;color:var(--muted)}
+  .field{margin:8px 16px 12px;padding:12px 14px;border-radius:12px;background:var(--composer);border:1px solid var(--stroke);font-size:14px;color:var(--text)}
+</style>
+</head>
+<body>
+  <div class="col">
+    <div class="label">Before — ugly system icons + black blob</div>
+    <div class="phone">
+      <div class="sb"><span>14:04</span><span>83%</span></div>
+      <div class="top"><div class="row">
+        <div class="logo"></div>
+        <div class="titles"><h1>Pi</h1><div class="chip"><div class="dot"></div>GPT-6.1 Sol · high</div></div>
+        <div class="ibtn ugly">◷</div>
+        <div class="ibtn ugly">∨</div>
+      </div></div>
+      <div class="mid">
+        <div class="logo-lg"></div>
+        <h2>今天想聊点什么？</h2>
+        <p>连上 Termux 里的连接器后即可开始。</p>
+        <div class="suggest"><button>解释这段代码</button><button>帮我订个计划</button><button>排查一个错误</button></div>
+      </div>
+      <div style="width:44px;height:44px;border-radius:50%;background:#111;margin:0 0 8px 18px"></div>
+      <div class="composer"><input placeholder="给 Pi 发消息…" disabled/><button class="send">➤</button></div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="label">After — clean icons + slash + IME-ready composer</div>
+    <div class="phone">
+      <div class="sb"><span>14:04</span><span>83%</span></div>
+      <div class="top"><div class="row">
+        <div class="logo"></div>
+        <div class="titles"><h1>Pi</h1><div class="chip"><div class="dot"></div>GPT-6.1 Sol · high</div></div>
+        <button class="ibtn" title="会话">◔</button>
+        <button class="ibtn" title="设置">⚙</button>
+      </div></div>
+      <div class="mid" style="justify-content:flex-end;padding-bottom:12px">
+        <div class="logo-lg"></div>
+        <h2>今天想聊点什么？</h2>
+        <p>连上 Termux 里的连接器后即可开始。</p>
+      </div>
+      <div class="slash">
+        <div class="h">命令</div>
+        <div class="item"><div class="cmd">/model</div><div class="desc">切换模型</div></div>
+        <div class="item"><div class="cmd">/new</div><div class="desc">新建对话</div></div>
+        <div class="item"><div class="cmd">/sessions</div><div class="desc">打开会话列表</div></div>
+        <div class="item"><div class="cmd">/settings</div><div class="desc">打开设置</div></div>
+      </div>
+      <div class="composer"><input value="/" /><button class="send">➤</button></div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="label">Settings screen</div>
+    <div class="phone">
+      <div class="sb"><span>14:04</span><span>83%</span></div>
+      <div class="top"><div class="row">
+        <button class="ibtn">←</button>
+        <h1 style="margin:0;font-size:20px;flex:1">设置</h1>
+      </div></div>
+      <div class="settings-body">
+        <div class="sec-h">连接器</div>
+        <div class="card">
+          <div class="pref"><div class="t">地址</div></div>
+          <div class="field">127.0.0.1</div>
+          <div class="pref"><div class="t">端口</div></div>
+          <div class="field">8945</div>
+          <div class="pref"><div class="t">Token</div></div>
+          <div class="field">••••••••</div>
+        </div>
+        <div class="sec-h">模型与思考</div>
+        <div class="card">
+          <div class="pref"><div class="t">切换模型</div><div class="s">GPT-6.1 Sol</div></div>
+          <div class="pref"><div class="t">思考档位</div><div class="s">high</div></div>
+        </div>
+        <div class="sec-h">外观</div>
+        <div class="card">
+          <div class="pref"><div class="t">主题</div><div class="s">跟随系统</div></div>
+        </div>
+        <div class="sec-h">关于</div>
+        <div class="card">
+          <div class="pref"><div class="t">Pi</div><div class="s">Unofficial Pi client</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

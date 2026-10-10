@@ -1,0 +1,76 @@
+package dev.pi.android.ui;
+
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.TextView;
+
+import androidx.annotation.NonNull;
+import androidx.recyclerview.widget.RecyclerView;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import dev.pi.android.R;
+import dev.pi.android.model.SlashCommand;
+
+public class SlashCommandAdapter extends RecyclerView.Adapter<SlashCommandAdapter.VH> {
+
+    public interface Listener {
+        void onPick(SlashCommand cmd);
+    }
+
+    private final List<SlashCommand> items = new ArrayList<>();
+    private final Listener listener;
+
+    public SlashCommandAdapter(Listener listener) {
+        this.listener = listener;
+    }
+
+    public void replaceAll(List<SlashCommand> next) {
+        items.clear();
+        if (next != null) items.addAll(next);
+        notifyDataSetChanged();
+    }
+
+    public SlashCommand first() {
+        return items.isEmpty() ? null : items.get(0);
+    }
+
+    public boolean isEmpty() {
+        return items.isEmpty();
+    }
+
+    @NonNull
+    @Override
+    public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+        View v = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_slash_command, parent, false);
+        return new VH(v);
+    }
+
+    @Override
+    public void onBindViewHolder(@NonNull VH holder, int position) {
+        SlashCommand cmd = items.get(position);
+        holder.cmd.setText(cmd.name);
+        holder.desc.setText(cmd.descRes);
+        holder.itemView.setOnClickListener(v -> {
+            if (listener != null) listener.onPick(cmd);
+        });
+    }
+
+    @Override
+    public int getItemCount() {
+        return items.size();
+    }
+
+    static class VH extends RecyclerView.ViewHolder {
+        final TextView cmd;
+        final TextView desc;
+
+        VH(@NonNull View itemView) {
+            super(itemView);
+            cmd = itemView.findViewById(R.id.slash_cmd);
+            desc = itemView.findViewById(R.id.slash_desc);
+        }
+    }
+}
