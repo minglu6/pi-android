@@ -106,7 +106,11 @@ public class BridgeService extends Service {
 
     private BridgeConnection bridge;
     private ExtensionUi extUi;
+    /** 扩展 UI / 通知用的主 host（最近 attach 且优先可见的）。 */
     private UiHost host;
+    /** 所有已 bind 的 Activity：settings 打开时不能丢掉 Main 的流式事件。 */
+    private final java.util.concurrent.CopyOnWriteArrayList<UiHost> hosts =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
     private int askSeq;
 
     @Override
@@ -126,7 +130,12 @@ public class BridgeService extends Service {
                 AgentState.get().setStatus(state);
                 if ("online".equals(state)) bridge.rpc("get_state", null);
                 notifyOngoing(state);
-                if (host != null) host.onStatus(state, error);
+                for (UiHost h : hosts) {
+                    try {
+                        h.onStatus(state, error);
+                    } catch (Exception ignored) {
+                    }
+                }
             }
 
             @Override
@@ -136,7 +145,12 @@ public class BridgeService extends Service {
                 if (ok && "get_state".equals(command)) {
                     AgentState.get().applyGetState(data, BridgeService.this);
                 }
-                if (host != null) host.onResponse(id, ok, command, data, error);
+                for (UiHost h : hosts) {
+                    try {
+                        h.onResponse(id, ok, command, data, error);
+                    } catch (Exception ignored) {
+                    }
+                }
             }
 
             @Override
@@ -150,13 +164,24 @@ public class BridgeService extends Service {
                     return;
                 }
                 dbg("event " + ev.optString("type"));
-                if (host != null) host.onEvent(ev);
+                // 扇出到所有 host：Settings 抢 primary 时 Main 仍需收到 message_update / agent_end
+                for (UiHost h : hosts) {
+                    try {
+                        h.onEvent(ev);
+                    } catch (Exception ignored) {
+                    }
+                }
             }
 
             @Override
             public void onFailure(@Nullable Throwable t) {
                 dbg("failure " + (t == null ? "?" : t.getMessage()));
-                if (host != null) host.onFailure(t);
+                for (UiHost h : hosts) {
+                    try {
+                        h.onFailure(t);
+                    } catch (Exception ignored) {
+                    }
+                }
             }
         });
 
@@ -173,7 +198,12 @@ public class BridgeService extends Service {
 
                     @Override
                     public void onTitle(String title) {
-                        if (host != null) host.onExtTitle(title);
+                        for (UiHost h : hosts) {
+                            try {
+                                h.onExtTitle(title);
+                            } catch (Exception ignored) {
+                            }
+                        }
                     }
 
                     @Override
@@ -185,19 +215,33 @@ public class BridgeService extends Service {
                             ev.put("notifyType", type);
                         } catch (Exception ignored) {
                         }
-                        if (host != null) host.onEvent(ev);
+                        for (UiHost h : hosts) {
+                            try {
+                                h.onEvent(ev);
+                            } catch (Exception ignored) {
+                            }
+                        }
                     }
                 },
                 (id, kind, title, hint, options, prefill, sink) -> {
-                    boolean inline = host != null && host.isVisible()
-                            && host.showChoice(id, kind, title, hint, options, prefill, sink);
-                    dbg("decide inline=" + inline + " host=" + (host != null)
-                            + " visible=" + (host != null && host.isVisible()));
+                    UiHost target = pickVisibleHost();
+                    boolean inline = target != null
+                            && target.showChoice(id, kind, title, hint, options, prefill, sink);
+                    dbg("decide inline=" + inline + " host=" + (target != null));
                     if (inline) return;
                     dbg("notify path for " + kind + " id=" + id);
                     askViaNotification(id, kind, title, hint, options, prefill, sink);
                 });
         extUi.setTrace(msg -> dbg("extui: " + msg));
+    }
+
+    /** 优先前台可见的 host（聊天页），避免 Settings 抢 primary 后扩展提问进通知。 */
+    @Nullable
+    private UiHost pickVisibleHost() {
+        for (UiHost h : hosts) {
+            if (h != null && h.isVisible()) return h;
+        }
+        return host;
     }
 
     @Override
@@ -231,25 +275,35 @@ public class BridgeService extends Service {
 
     // ---------- 给 Activity 用的 API ----------
 
+    /** 注册 Activity 为事件接收方，并设为扩展 UI 的主 host。 */
     public void setHost(@Nullable UiHost h) {
+        if (h == null) return;
+        if (!hosts.contains(h)) hosts.add(h);
         this.host = h;
-        dbg("setHost " + (h != null));
-        if (h != null) {
-            publishStatuses();
-            if (!bridge.isConnected()) {
-                connectWithSaved();
-            } else {
-                // 主题重建后 Activity 重新 bind：同步推送 online，避免卡在「连接中」
-                h.onStatus("online", null);
-            }
+        dbg("setHost hosts=" + hosts.size());
+        publishStatuses();
+        if (!bridge.isConnected()) {
+            connectWithSaved();
+        } else {
+            // 主题重建后 Activity 重新 bind：同步推送 online，避免卡在「连接中」
+            h.onStatus("online", null);
         }
     }
 
-    /** 仅当 h 仍是当前 host 时清空，避免主题重建时旧 Activity onDestroy 误清新 host。 */
+    /** 注销 Activity；避免主题重建时旧实例误清新 host，且保留其它仍 bind 的接收方。 */
     public void clearHostIf(@Nullable UiHost h) {
-        if (h != null && this.host == h) {
+        if (h == null) return;
+        hosts.remove(h);
+        if (this.host == h) {
             this.host = null;
-            dbg("clearHostIf cleared");
+            for (int i = hosts.size() - 1; i >= 0; i--) {
+                UiHost cand = hosts.get(i);
+                if (cand != null) {
+                    this.host = cand;
+                    break;
+                }
+            }
+            dbg("clearHostIf primary-> " + (this.host != null));
         }
     }
 
@@ -277,17 +331,24 @@ public class BridgeService extends Service {
 
     /** Activity 回到前台：把还在等的提问从通知拽回来，改成内联渲染 */
     public boolean takePendingAsk() {
-        dbg("takePendingAsk pending=" + (pendingAsk != null) + " host=" + (host != null));
-        if (pendingAsk == null || host == null) return false;
+        UiHost target = pickVisibleHost();
+        dbg("takePendingAsk pending=" + (pendingAsk != null) + " host=" + (target != null));
+        if (pendingAsk == null || target == null) return false;
         cancelAsk(pendingAsk.notifyId);
         Ask ask = pendingAsk;
         pendingAsk = null;
         asks.remove(ask.reqId); // 改走内联 sink，通知按钮路径作废
-        return host.showChoice(ask.reqId, ask.kind, ask.title, ask.hint, ask.options, ask.prefill, ask.sink);
+        return target.showChoice(ask.reqId, ask.kind, ask.title, ask.hint, ask.options, ask.prefill, ask.sink);
     }
 
     private void publishStatuses() {
-        if (host != null) host.onExtStatus(new LinkedHashMap<>(extStatuses));
+        Map<String, String> snap = new LinkedHashMap<>(extStatuses);
+        for (UiHost h : hosts) {
+            try {
+                h.onExtStatus(snap);
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     // ---------- 通知 ----------

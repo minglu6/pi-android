@@ -111,6 +111,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     /** toolCallId -> 气泡在列表里的位置 */
     private final Map<String, Integer> toolRows = new HashMap<>();
     private boolean streaming;
+    /** 思考中看门狗：无 agent_settled / agent_end 时不能永久卡在 stop 态。 */
+    private static final long THINKING_TIMEOUT_MS = 90_000L;
+    private final Runnable thinkingTimeout = this::onThinkingTimeout;
+    private final Runnable settleAfterAgentEnd = () -> {
+        if (streaming) settleStreaming(false);
+    };
     private String pendingPrompt;
     private String lastConfig;
     private String currentSessionPath = "";
@@ -436,6 +442,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     @Override
     protected void onDestroy() {
+        main.removeCallbacks(thinkingTimeout);
+        main.removeCallbacks(settleAfterAgentEnd);
         snapshotChat();
         if (serviceBound) {
             if (service != null) service.clearHostIf(this);
@@ -483,10 +491,46 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     private void setStreaming(boolean on) {
         streaming = on;
+        main.removeCallbacks(thinkingTimeout);
+        if (on) main.postDelayed(thinkingTimeout, THINKING_TIMEOUT_MS);
         if (send == null) return;
         send.setImageResource(on ? R.drawable.ic_stop : R.drawable.ic_send);
         send.setContentDescription(getString(on ? R.string.action_stop : R.string.action_send));
         updateSendEnabled();
+    }
+
+    private void settleStreaming(boolean refreshState) {
+        main.removeCallbacks(settleAfterAgentEnd);
+        setStreaming(false);
+        restoreStatusChip();
+        if (refreshState) rpc("get_state", null);
+    }
+
+    private void restoreStatusChip() {
+        if (!modelStatus.isEmpty()) {
+            setConnectionVisual("online", modelStatus);
+        } else {
+            setConnectionVisual("online", getString(R.string.status_idle));
+        }
+    }
+
+    private void failPrompt(@Nullable String detail) {
+        settleStreaming(false);
+        String msg = (detail == null || detail.trim().isEmpty())
+                ? getString(R.string.prompt_failed)
+                : detail.trim();
+        if (adapter != null) {
+            adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "⚠ " + msg));
+        } else {
+            Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void onThinkingTimeout() {
+        if (!streaming) return;
+        android.util.Log.w(TAG, "thinking timeout");
+        rpc("abort", null);
+        failPrompt(getString(R.string.prompt_timeout));
     }
 
     private void updateSendEnabled() {
@@ -649,8 +693,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private void onSendOrStop() {
         if (streaming) {
             rpc("abort", null);
-            setStreaming(false);
-            setConnectionVisual("online", getString(R.string.status_idle));
+            settleStreaming(false);
             return;
         }
         submit();
@@ -894,8 +937,37 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 ensureSessionsSheet().showError(error);
                 return;
             }
-            // 未知/失败命令：Toast，不写进聊天气泡
+            if ("prompt".equals(command) || "steer".equals(command) || "follow_up".equals(command)) {
+                // 静默 Toast 会把 UI 留在「思考中」+ stop；必须回 idle 并露出错误
+                failPrompt(error != null && !error.isEmpty() ? error : getString(R.string.prompt_failed));
+                return;
+            }
+            if ("set_model".equals(command)) {
+                String detail = error != null && !error.isEmpty() ? error : getString(R.string.rpc_failed);
+                failPrompt(getString(R.string.set_model_failed, detail));
+                rpc("get_state", null);
+                return;
+            }
             Toast.makeText(this, R.string.rpc_failed, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if ("prompt".equals(command)) {
+            // disposition=handled：扩展立刻吃掉，不会有 agent_settled
+            String disp = data != null ? data.optString("disposition", "started") : "started";
+            if ("handled".equals(disp)) settleStreaming(false);
+            return;
+        }
+        if ("set_model".equals(command)) {
+            if (data != null) {
+                String prov = data.optString("provider", "");
+                String mid = data.optString("id", data.optString("modelId", ""));
+                if (!prov.isEmpty() && !mid.isEmpty()) {
+                    AgentState.get().setModel(prov, mid, this);
+                    currentProvider = prov;
+                    currentModelId = mid;
+                }
+            }
+            rpc("get_state", null);
             return;
         }
         if ("list_sessions".equals(command)) {
@@ -999,15 +1071,18 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         if ("get_available_models".equals(command) && data != null) {
             JSONArray models = data.optJSONArray("models");
+            if (models == null) models = data.optJSONArray("availableModels");
             modelLabels.clear();
             modelRefs.clear();
             if (models != null) {
                 for (int i = 0; i < models.length(); i++) {
                     JSONObject m = models.optJSONObject(i);
                     if (m == null) continue;
-                    String prov = m.optString("provider");
-                    String modelId = m.optString("id");
-                    String label = (prov + " / " + modelId);
+                    // 与 Pi Model 对象对齐：provider + id（绝不用 name 当 modelId）
+                    String prov = m.optString("provider", m.optString("providerName", ""));
+                    String modelId = m.optString("id", m.optString("modelId", ""));
+                    if (prov.isEmpty() || modelId.isEmpty()) continue;
+                    String label = prov + " / " + modelId;
                     if (!Colls.has(modelLabels, label)) {
                         modelLabels.add(label);
                         modelRefs.add(new String[]{prov, modelId});
@@ -1062,6 +1137,11 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         switch (type) {
             case "message_update": {
                 if (agg == null) return;
+                // 有流式增量就续命看门狗，避免长回复被误判超时
+                if (streaming) {
+                    main.removeCallbacks(thinkingTimeout);
+                    main.postDelayed(thinkingTimeout, THINKING_TIMEOUT_MS);
+                }
                 int idx = agg.optInt("contentIndex", 0);
                 switch (agg.optString("type")) {
                     case "text_start":
@@ -1102,8 +1182,21 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                     String text = textOfMessage(msg);
                     if (!text.isEmpty()) {
                         blocks.clear();
-                        adapter.upsertTail(new ChatMessage(ChatMessage.Role.AGENT, text));
+                        if ("error".equals(msg.optString("stopReason"))) {
+                            adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "⚠ " + text));
+                        } else {
+                            adapter.upsertTail(new ChatMessage(ChatMessage.Role.AGENT, text));
+                        }
                     }
+                }
+                return;
+            }
+            case "agent_end": {
+                // 旧版 Pi 只有 agent_end；新版会再发 agent_settled。willRetry 时先别 idle。
+                showErrorsFromAgentEnd(ev);
+                if (!ev.optBoolean("willRetry", false)) {
+                    main.removeCallbacks(settleAfterAgentEnd);
+                    main.postDelayed(settleAfterAgentEnd, 1500);
                 }
                 return;
             }
@@ -1124,18 +1217,13 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 return;
             }
             case "agent_settled":
-                setStreaming(false);
-                if (modelStatus.isEmpty()) {
-                    setConnectionVisual("online", getString(R.string.status_idle));
-                } else {
-                    setConnectionVisual("online", modelStatus);
-                }
-                rpc("get_state", null);
+                settleStreaming(true);
                 return;
             case "auto_retry_end":
                 if (!ev.optBoolean("success", true)) {
-                    android.util.Log.w(TAG, "auto_retry failed: " + ev.optString("finalError"));
-                    Toast.makeText(this, R.string.rpc_failed, Toast.LENGTH_SHORT).show();
+                    String finalErr = ev.optString("finalError", "");
+                    android.util.Log.w(TAG, "auto_retry failed: " + finalErr);
+                    failPrompt(finalErr.isEmpty() ? getString(R.string.prompt_failed) : finalErr);
                 }
                 return;
             case "session_info_changed":
@@ -1342,19 +1430,23 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         Pickers.showModel(this, modelLabels, modelRefs, currentProvider, currentModelId,
                 (provider, modelId) -> {
+                    if (provider == null || provider.trim().isEmpty()
+                            || modelId == null || modelId.trim().isEmpty()) {
+                        Toast.makeText(this, R.string.model_ref_invalid, Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    // Pi RPC: {"type":"set_model","provider":"...","modelId":"..."} —— 必须是 id，不是展示名
                     JSONObject params = new JSONObject();
                     try {
-                        params.put("provider", provider);
-                        params.put("modelId", modelId);
+                        params.put("provider", provider.trim());
+                        params.put("modelId", modelId.trim());
                     } catch (Exception e) {
                         throw new IllegalStateException("set_model params", e);
                     }
+                    android.util.Log.i(TAG, "set_model " + provider + "/" + modelId);
                     rpc("set_model", params);
-                    currentProvider = provider;
-                    currentModelId = modelId;
-                    AgentState.get().setModel(provider, modelId, MainActivity.this);
+                    // 等 set_model 成功响应后再信任状态；失败路径会 get_state 回滚
                     Toast.makeText(this, provider + " / " + modelId, Toast.LENGTH_SHORT).show();
-                    rpc("get_state", null);
                 });
     }
 
@@ -1393,7 +1485,28 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     static String textOfMessage(JSONObject msg) {
         JSONArray content = msg.optJSONArray("content");
         String s = textOfContent(content);
-        return s.isEmpty() ? msg.optString("text", "") : s;
+        if (!s.isEmpty()) return s;
+        String plain = msg.optString("text", "");
+        if (!plain.isEmpty()) return plain;
+        // 鉴权/供应商错误时常只有 stopReason=error + errorMessage，正文为空
+        if ("error".equals(msg.optString("stopReason"))) {
+            return msg.optString("errorMessage", "");
+        }
+        return "";
+    }
+
+    private void showErrorsFromAgentEnd(JSONObject ev) {
+        JSONArray msgs = ev.optJSONArray("messages");
+        if (msgs == null || adapter == null) return;
+        for (int i = msgs.length() - 1; i >= 0; i--) {
+            JSONObject m = msgs.optJSONObject(i);
+            if (m == null || !"assistant".equals(m.optString("role"))) continue;
+            if (!"error".equals(m.optString("stopReason"))) continue;
+            String err = textOfMessage(m);
+            if (err.isEmpty()) err = getString(R.string.prompt_failed);
+            adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "⚠ " + err));
+            return;
+        }
     }
 
     static String textOfContent(JSONArray content) {
