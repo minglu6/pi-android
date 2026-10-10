@@ -122,7 +122,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private MaterialButton emptyAction;
     private View reconnectBanner;
     private TextView reconnectText;
-    private MaterialButton reconnectBtn;
+    private TextView reconnectBtn;
     private View scrollBottom;
     private View topBar;
     private View composerBar;
@@ -257,6 +257,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
             @Override public void onEditResend(@NonNull ChatMessage userMessage) {
                 editResendUser(userMessage);
+            }
+            @Override public void onNoticeAction(@NonNull String command) {
+                runNoticeCommand(command);
             }
         });
         list.setAdapter(adapter);
@@ -680,10 +683,29 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 ? getString(R.string.prompt_failed)
                 : detail.trim();
         if (adapter != null) {
-            adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "⚠ " + msg));
+            adapter.add(ChatMessage.notice(new ChatMessage.NoticeData(
+                    ChatMessage.NoticeData.LEVEL_ERROR,
+                    getString(R.string.notice_prompt_failed),
+                    msg, "", "")));
         } else {
             Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
         }
+    }
+
+    /** Notice action chip: insert slash into composer and send when connected. */
+    private void runNoticeCommand(@NonNull String command) {
+        String cmd = command.trim();
+        if (cmd.isEmpty()) return;
+        if (!cmd.startsWith("/")) cmd = "/" + cmd;
+        if (composer != null) {
+            composer.setText(cmd);
+            composer.setSelection(composer.getText().length());
+        }
+        if (!isConnected()) {
+            Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        onSendOrStop();
     }
 
     private void onThinkingTimeout() {
@@ -1653,6 +1675,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         if (reconnectText != null) reconnectText.setText(message);
         if (reconnectBtn != null) {
             reconnectBtn.setText(goSettings ? R.string.go_settings : R.string.reconnect_action);
+            reconnectBtn.setVisibility(View.VISIBLE);
         }
     }
 
@@ -2032,9 +2055,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     public void onEvent(@NonNull JSONObject ev) {
         String type = ev.optString("type");
         if ("extension_notify".equals(type)) {
-            String prefix = notifyPrefix(ev.optString("notifyType", "info"));
-            adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM,
-                    prefix + ev.optString("message", "")));
+            adapter.add(ChatMessage.notice(dev.pi.android.util.NoticeLite.fromNotify(
+                    ev.optString("message", ""),
+                    ev.optString("notifyType", "info"))));
+            maybeScrollToBottom(false);
             return;
         }
         if ("extension_ui_request".equals(type)) {
@@ -2198,12 +2222,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             actionsBody.setVisibility(View.GONE);
             actionsBody.setText("");
         }
-    }
-
-    private static String notifyPrefix(String type) {
-        if ("error".equals(type)) return "⚠ ";
-        if ("warning".equals(type)) return "△ ";
-        return "• ";
     }
 
     private void renderExtStatus() {

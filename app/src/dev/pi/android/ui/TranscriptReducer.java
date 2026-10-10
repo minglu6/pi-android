@@ -275,7 +275,9 @@ public final class TranscriptReducer {
         String key = message.optLong("timestamp") + ":" + text;
         if (text.isEmpty() || key.equals(lastError)) return;
         lastError = key;
-        edits.add(new Edit(size, new ChatMessage(ChatMessage.Role.SYSTEM, "⚠ " + text), true));
+        edits.add(new Edit(size, ChatMessage.notice(
+                new ChatMessage.NoticeData(ChatMessage.NoticeData.LEVEL_ERROR, "出错了", text, "", ""),
+                message.optLong("timestamp", System.currentTimeMillis())), true));
     }
 
     /** 补回重连期间错过 message_start/message_end 的助手正文；已渲染过的内容不重拍。 */
@@ -507,7 +509,10 @@ public final class TranscriptReducer {
                         result.add(new ChatMessage(ChatMessage.Role.AGENT, text, timestamp, false, entryId));
                     }
                     String error = message.optString("errorMessage", text);
-                    if (!error.isEmpty()) result.add(new ChatMessage(ChatMessage.Role.SYSTEM, "⚠ " + error, timestamp));
+                    if (!error.isEmpty()) {
+                        result.add(ChatMessage.notice(new ChatMessage.NoticeData(
+                                ChatMessage.NoticeData.LEVEL_ERROR, "出错了", error, "", ""), timestamp));
+                    }
                     continue;
                 }
                 if (text.isEmpty()) continue;
