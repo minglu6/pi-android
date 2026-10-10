@@ -1,7 +1,6 @@
 package dev.pi.android.ui;
 
 import android.content.Context;
-import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.text.InputType;
@@ -143,16 +142,6 @@ public class SettingsActivity extends AppCompatActivity {
         }
 
         findViewById(R.id.pref_theme).setOnClickListener(v -> showThemePicker());
-
-        View checkUpdate = findViewById(R.id.pref_check_update);
-        if (checkUpdate != null) {
-            checkUpdate.setOnClickListener(v -> {
-                Intent i = new Intent(this, MainActivity.class);
-                i.putExtra(MainActivity.EXTRA_CHECK_UPDATE, true);
-                i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-                startActivity(i);
-            });
-        }
 
         termFontValue = findViewById(R.id.pref_term_font_value);
         termSizeValue = findViewById(R.id.pref_term_size_value);
