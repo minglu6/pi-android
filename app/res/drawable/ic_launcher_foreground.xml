@@ -9,14 +9,14 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- scale ≈ 0.106, translate ≈ 28.4 → 内容落在约 28–80（宽 52，安全区内） -->
+    <!-- scale ≈ 0.106, translate = 54 − 400×0.106 ≈ 11.6 → logo 中心(400,400)落在画布中心 54，内容约 29–79 -->
     <group
         android:pivotX="0"
         android:pivotY="0"
         android:scaleX="0.106"
         android:scaleY="0.106"
-        android:translateX="28.4"
-        android:translateY="28.4">
+        android:translateX="11.6"
+        android:translateY="11.6">
         <path
             android:fillColor="#F09082"
             android:pathData="M165.29,165.29H517.36V400H400V282.65H165.29Z" />
