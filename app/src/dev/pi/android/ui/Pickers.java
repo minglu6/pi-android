@@ -51,10 +51,14 @@ public final class Pickers {
         List<PickerItem> items = buildModelItems(activity, labels, refs, currentProvider, currentModelId);
         PickerSheet sheet = new PickerSheet(activity, R.string.action_model, true, item -> {
             Object p = item.payload;
+            // payload 必须是 get_available_models 的 {provider,id}，禁止用展示 label
             if (p instanceof String[]) {
                 String[] ref = (String[]) p;
-                RecentModels.touch(activity, ref[0], ref[1]);
-                listener.onModel(ref[0], ref[1]);
+                if (ref.length >= 2 && ref[0] != null && ref[1] != null
+                        && !ref[0].isEmpty() && !ref[1].isEmpty()) {
+                    RecentModels.touch(activity, ref[0], ref[1]);
+                    listener.onModel(ref[0], ref[1]);
+                }
             }
         });
         sheet.setItems(items);

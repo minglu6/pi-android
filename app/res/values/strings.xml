@@ -49,6 +49,8 @@
     <string name="settings_port_label">端口</string>
     <string name="settings_token_label">Token</string>
     <string name="settings_token_hint">~/.pi/agent/pi-android.token</string>
+    <string name="settings_token_show">显示 Token</string>
+    <string name="settings_token_hide">隐藏 Token</string>
     <string name="settings_help">返回聊天页后会按新配置自动重连。连接器须绑 loopback，且不要默认开启 --allow-bash。</string>
     <string name="settings_saved">已保存，返回后会重连</string>
     <string name="settings_theme">主题</string>
@@ -83,6 +85,10 @@
     <string name="session_list_error_detail">无法列出会话：%1$s</string>
     <string name="connection_failed">连接器未响应</string>
     <string name="rpc_failed">操作未完成，请稍后重试</string>
+    <string name="prompt_failed">请求失败，请重试</string>
+    <string name="prompt_timeout">等待回复超时，已停止</string>
+    <string name="set_model_failed">切换模型失败：%1$s</string>
+    <string name="model_ref_invalid">模型参数无效，请重新选择</string>
     <string name="streaming_marker"> ▍</string>
     <string name="suggest_explain">解释这段代码</string>
     <string name="suggest_plan">帮我订个计划</string>
