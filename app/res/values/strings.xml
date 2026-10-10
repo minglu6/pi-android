@@ -228,4 +228,9 @@
     <string name="paste_placeholder">[已粘贴 %1$s]</string>
     <string name="shell_stop_cd">停止 shell</string>
     <string name="connector_update_required">请更新并重启 Termux 连接器（bridge/pi-rpc-bridge.mjs）</string>
+    <string name="session_interrupt_new_message">当前会话正在生成，新建会中断它。仍要新建吗？</string>
+    <string name="session_interrupt_switch_message">当前会话正在生成，切换会中断它。仍要切换吗？</string>
+    <string name="session_interrupt_continue">仍要继续</string>
+    <string name="session_interrupt_new_toast">已中断当前生成并新建会话</string>
+    <string name="session_interrupt_switch_toast">已中断当前生成并切换会话</string>
 </resources>
