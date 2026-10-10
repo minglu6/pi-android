@@ -42,19 +42,6 @@
                 android:textColor="@color/text_primary"
                 android:textSize="17sp"
                 android:textStyle="bold" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/sessions_new"
-                style="@style/Widget.Material3.Button.TonalButton"
-                android:layout_width="wrap_content"
-                android:layout_height="34dp"
-                android:backgroundTint="@color/pi_blue"
-                android:insetTop="0dp"
-                android:insetBottom="0dp"
-                android:minWidth="0dp"
-                android:text="@string/sessions_new"
-                android:textColor="@color/md_theme_onPrimary"
-                android:textSize="12.5sp" />
         </LinearLayout>
 
         <EditText

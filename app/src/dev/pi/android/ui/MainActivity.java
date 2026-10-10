@@ -286,6 +286,17 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
             loadSessions();
         });
+        View newSessionBtn = findViewById(R.id.btn_new_session);
+        if (newSessionBtn != null) {
+            newSessionBtn.setOnClickListener(v -> {
+                if (!isConnected()) {
+                    Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+                    showConnectionBanner(getString(R.string.bridge_not_connected), true);
+                    return;
+                }
+                startNewSession();
+            });
+        }
         View overflow = findViewById(R.id.btn_overflow);
         if (overflow != null) overflow.setOnClickListener(this::showOverflowMenu);
         if (modelChip != null) {
@@ -956,12 +967,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     private void showOverflowMenu(View anchor) {
         PopupMenu menu = new PopupMenu(this, anchor);
+        // 新建会话 is the dedicated top-bar + button — not duplicated here.
         menu.getMenu().add(0, 1, 0, R.string.menu_settings);
-        menu.getMenu().add(0, 2, 1, R.string.menu_new_session);
-        menu.getMenu().add(0, 3, 2, R.string.menu_reload);
-        menu.getMenu().add(0, 4, 3, R.string.menu_fork);
-        menu.getMenu().add(0, 5, 4, R.string.menu_find);
-        menu.getMenu().add(0, 6, 5, R.string.menu_export);
+        menu.getMenu().add(0, 3, 1, R.string.menu_reload);
+        menu.getMenu().add(0, 4, 2, R.string.menu_fork);
+        menu.getMenu().add(0, 5, 3, R.string.menu_find);
+        menu.getMenu().add(0, 6, 4, R.string.menu_export);
         menu.setOnMenuItemClickListener(this::onOverflowItem);
         menu.show();
     }
@@ -970,13 +981,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         switch (item.getItemId()) {
             case 1:
                 startActivity(new Intent(this, SettingsActivity.class));
-                return true;
-            case 2:
-                if (!isConnected()) {
-                    Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
-                    return true;
-                }
-                startNewSession();
                 return true;
             case 3:
                 setConnectionVisual("connecting", getString(R.string.status_reconnecting));
@@ -2137,7 +2141,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             sessionsSheet = new SessionsSheet(this, new SessionsSheet.Host() {
                 @Override public String currentSessionPath() { return currentSessionPath; }
                 @Override public void openSession(String path) { switchToSession(path); }
-                @Override public void newSession() { startNewSession(); }
                 @Override public void renameSession(String path, @Nullable String knownName) {
                     promptRenameSession(knownName);
                 }
