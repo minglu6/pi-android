@@ -50,6 +50,9 @@ test('params cannot override command type or ordinary ID; bash is whitelisted fo
   const bash = await c.response('bash');
   // Must not be rejected by the bridge allow-list (Pi fixture may still fail the command).
   assert.notEqual(bash.error, '命令不允许: bash');
+  c.rpc('abort', 'abort_bash', {});
+  const abort = await c.response('abort');
+  assert.notEqual(abort.error, '命令不允许: abort_bash');
 });
 
 test('UI answer uses Pi UI ID, has no regular pending response, and is consumed exactly once', async t => {

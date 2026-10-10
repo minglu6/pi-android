@@ -227,4 +227,5 @@
     <string name="mention_with_contents">插入路径并附加内容</string>
     <string name="paste_placeholder">[已粘贴 %1$s]</string>
     <string name="shell_stop_cd">停止 shell</string>
+    <string name="connector_update_required">请更新并重启 Termux 连接器（bridge/pi-rpc-bridge.mjs）</string>
 </resources>

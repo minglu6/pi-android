@@ -28,6 +28,13 @@ TOKEN=$(cat ~/.pi/agent/pi-android.token)
 adb shell am start -n dev.pi.android/.ui.MainActivity --es token "$TOKEN"
 ```
 
+更新仓库里的 `bridge/pi-rpc-bridge.mjs` 后请在 Termux **重启连接器**，否则 APK
+会碰到旧白名单（例如 `!pwd` → `命令不允许: bash`）：
+
+```sh
+sv restart pi-rpc-bridge     # runit；一次性进程则 Ctrl-C 后重新 ~/bin/pi-rpc-bridge
+```
+
 也可把文本分享给 Pi（`ACTION_SEND` text/plain），或深链
 `--es ui sessions|settings|fork|models|thinking|newsession`。
 
@@ -130,7 +137,7 @@ gh run watch
 ## 安全边界
 
 - 连接器只绑 `127.0.0.1`，token 必填（文件权限建议 600）
-- 命令白名单包含官方 `bash` / `abort_bash`（Pocket `!shell` / `!!shell`）；`--allow-bash` 仍为同义词。该白名单不限制 prompt 驱动的 agent 工具，不是工具权限沙箱。桥本地另有 `list_project_files` / `read_project_file` / `git_*`（非 Pi RPC）
+- 命令白名单**始终**包含官方 `bash` / `abort_bash`（Pocket `!shell` / `!!shell`）；`--allow-bash` 仍为同义词。若 App 仍报 `命令不允许: bash`，说明 Termux 还在跑旧 bridge —— `sv restart pi-rpc-bridge`。该白名单不限制 prompt 驱动的 agent 工具。桥本地另有 `list_project_files` / `read_project_file` / `git_*`（非 Pi RPC）
 - 依赖 sha256 清单：`app/libs/manifest.json`（重建后核对）
 
 ## License
