@@ -11,8 +11,6 @@ import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.appcompat.app.AlertDialog;
-import androidx.appcompat.widget.PopupMenu;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
@@ -290,39 +288,26 @@ public final class SessionsSheet {
     }
 
     private void showActions(SessionEntry entry, View anchor) {
-        PopupMenu popup = new PopupMenu(activity, anchor);
-        popup.getMenu().add(0, 1, 0, R.string.session_open);
-        if (host.supportsRename() && entry.current) {
-            popup.getMenu().add(0, 2, 1, R.string.session_rename);
-        }
-        if (host.supportsDelete()) {
-            popup.getMenu().add(0, 3, 2, R.string.session_delete);
-        }
-        popup.setOnMenuItemClickListener(item -> {
-            switch (item.getItemId()) {
-                case 1:
-                    dialog.dismiss();
-                    host.openSession(entry.path);
-                    return true;
-                case 2:
-                    host.renameSession(entry.path, entry.title);
-                    return true;
-                case 3:
-                    confirmDelete(entry);
-                    return true;
-                default:
-                    return false;
-            }
-        });
-        popup.show();
+        Pickers.showSessionActions(activity,
+                host.supportsRename() && entry.current,
+                host.supportsDelete(),
+                new Pickers.ActionListener() {
+                    @Override public void onOpen() {
+                        dialog.dismiss();
+                        host.openSession(entry.path);
+                    }
+                    @Override public void onRename() {
+                        host.renameSession(entry.path, entry.title);
+                    }
+                    @Override public void onDelete() {
+                        confirmDelete(entry);
+                    }
+                });
     }
 
     private void confirmDelete(SessionEntry entry) {
-        new AlertDialog.Builder(activity)
-                .setMessage(R.string.session_delete_confirm)
-                .setPositiveButton(R.string.session_delete, (d, w) -> host.deleteSession(entry.path))
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
+        MaterialDialogs.confirm(activity, R.string.session_delete, R.string.session_delete_confirm,
+                R.string.session_delete, () -> host.deleteSession(entry.path));
     }
 
     private int dp(int v) {

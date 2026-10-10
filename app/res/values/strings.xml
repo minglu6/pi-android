@@ -89,5 +89,24 @@
     <string name="suggest_debug">排查一个错误</string>
     <string name="slash_hint_title">命令</string>
     <string name="slash_no_desc">无说明</string>
+    <string name="picker_search_hint">搜索…</string>
+    <string name="picker_empty">没有匹配项</string>
+    <string name="picker_selected">已选中</string>
+    <string name="picker_recent">最近使用</string>
+    <string name="picker_other_provider">其他</string>
+    <string name="sessions_actions_title">会话操作</string>
+    <string name="session_delete_hint">删除本地会话文件</string>
+    <string name="thinking_desc_off">不使用扩展思考</string>
+    <string name="thinking_desc_low">轻量推理，更快响应</string>
+    <string name="thinking_desc_medium">平衡速度与深度</string>
+    <string name="thinking_desc_high">更充分推理，适合难题</string>
+    <string name="thinking_desc_generic">切换到此思考档位</string>
+    <string name="settings_theme_system_desc">跟随系统浅色 / 深色</string>
+    <string name="settings_theme_light_desc">始终使用浅色界面</string>
+    <string name="settings_theme_dark_desc">始终使用深色界面</string>
+    <string name="models_not_ready">模型列表还没取到</string>
+    <string name="thinking_not_ready">思考档位还没取到</string>
+    <string name="fork_empty">当前会话没有可 fork 的消息</string>
+    <string name="fork_loading">正在取可 fork 的消息…</string>
     <string name="unofficial_notice">Unofficial Pi client · Not affiliated with Earendil Inc.</string>
 </resources>

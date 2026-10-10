@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Pi — M3 pickers preview</title>
+<style>
+  :root{--bg:#0B0D10;--elev:#12151A;--chip:#1A1F27;--text:#F0F3F6;--sec:#9AA4B2;--muted:#6E7681;--div:#242C38;--blue:#4D9ABF}
+  *{box-sizing:border-box}
+  body{margin:0;padding:28px 16px;background:#1a1a1a;color:#eee;font-family:"Segoe UI","PingFang SC",sans-serif;
+    display:flex;flex-wrap:wrap;gap:24px;justify-content:center}
+  .col{display:flex;flex-direction:column;align-items:center;gap:8px}
+  .label{color:#aaa;font-size:12px;letter-spacing:.06em;text-transform:uppercase}
+  .phone{width:340px;height:640px;border-radius:28px;overflow:hidden;border:2px solid #333;background:var(--bg);
+    position:relative;box-shadow:0 18px 50px rgba(0,0,0,.45)}
+  .scrim{position:absolute;inset:0;background:rgba(0,0,0,.45)}
+  .sheet{position:absolute;left:0;right:0;bottom:0;height:78%;background:var(--elev);border-radius:28px 28px 0 0;padding:10px 0 12px;display:flex;flex-direction:column}
+  .handle{width:32px;height:4px;border-radius:2px;background:var(--muted);margin:0 auto 10px}
+  .title{padding:0 20px 10px;font-size:20px;font-weight:700;color:var(--text)}
+  .search{margin:0 16px 8px;height:40px;border-radius:12px;border:1px solid var(--div);background:var(--chip);color:var(--muted);padding:0 14px;display:flex;align-items:center;font-size:14px}
+  .list{flex:1;overflow:auto}
+  .hdr{padding:14px 20px 6px;color:var(--sec);font-size:12.5px;font-weight:700;letter-spacing:.03em}
+  .row{height:56px;padding:0 16px 0 20px;display:flex;align-items:center;gap:12px;border:0;background:transparent;width:100%;text-align:left;color:var(--text)}
+  .row:active{background:rgba(77,154,191,.12)}
+  .meta{flex:1;min-width:0}
+  .meta .t{font-weight:700;font-size:15.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .meta .s{margin-top:1px;color:var(--muted);font-size:12.5px}
+  .check{color:var(--blue);font-size:18px;width:24px;text-align:center}
+  .dlg{position:absolute;left:28px;right:28px;top:38%;background:var(--elev);border-radius:28px;padding:22px 20px 14px;box-shadow:0 12px 40px rgba(0,0,0,.4)}
+  .dlg h3{margin:0 0 10px;font-size:20px}
+  .dlg p{margin:0 0 18px;color:var(--sec);font-size:15px;line-height:1.35}
+  .dlg .actions{display:flex;justify-content:flex-end;gap:8px}
+  .dlg button{border:0;background:transparent;color:var(--blue);font-weight:600;padding:10px 12px;font-size:14px}
+  .old{position:absolute;left:24px;right:24px;top:12%;bottom:12%;background:#2a2f36;border-radius:8px;padding:16px;display:flex;flex-direction:column}
+  .old h3{margin:0 0 12px;font-size:17px}
+  .old .o{padding:10px 0;display:flex;gap:12px;align-items:flex-start;font-size:14px;color:#ddd;border-bottom:1px solid #3a4048}
+  .old .radio{width:18px;height:18px;border:2px solid #888;border-radius:50%;flex-shrink:0;margin-top:2px}
+  .old .cancel{margin-top:auto;text-align:right;color:#4D9ABF;padding-top:12px}
+</style>
+</head>
+<body>
+  <div class="col">
+    <div class="label">Before — system AlertDialog</div>
+    <div class="phone">
+      <div class="scrim"></div>
+      <div class="old">
+        <h3>切换模型</h3>
+        <div class="o"><div class="radio"></div>deepseek / deepseek-flash</div>
+        <div class="o"><div class="radio"></div>deepseek / deepseek-v4-pro</div>
+        <div class="o"><div class="radio"></div>openai-codex / gpt-5.6-sol</div>
+        <div class="o"><div class="radio"></div>openai-codex / gpt-6.1-sol</div>
+        <div class="o"><div class="radio"></div>opencode-go / claude-haiku-5-5</div>
+        <div class="cancel">取消</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="label">After — model picker sheet</div>
+    <div class="phone">
+      <div class="scrim"></div>
+      <div class="sheet">
+        <div class="handle"></div>
+        <div class="title">切换模型</div>
+        <div class="search">搜索…</div>
+        <div class="list">
+          <div class="hdr">最近使用</div>
+          <button class="row"><div class="meta"><div class="t">gpt-6.1-sol</div><div class="s">openai-codex</div></div><div class="check">✓</div></button>
+          <div class="hdr">deepseek</div>
+          <button class="row"><div class="meta"><div class="t">deepseek-flash</div><div class="s">deepseek</div></div><div class="check"></div></button>
+          <button class="row"><div class="meta"><div class="t">deepseek-v4-pro</div><div class="s">deepseek</div></div><div class="check"></div></button>
+          <div class="hdr">openai-codex</div>
+          <button class="row"><div class="meta"><div class="t">gpt-5.6-sol</div><div class="s">openai-codex</div></div><div class="check"></div></button>
+          <button class="row"><div class="meta"><div class="t">gpt-6.1-sol</div><div class="s">openai-codex</div></div><div class="check">✓</div></button>
+          <div class="hdr">opencode-go</div>
+          <button class="row"><div class="meta"><div class="t">claude-haiku-5-5</div><div class="s">opencode-go</div></div><div class="check"></div></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="label">Thinking + confirm</div>
+    <div class="phone">
+      <div class="scrim"></div>
+      <div class="sheet" style="height:52%">
+        <div class="handle"></div>
+        <div class="title">思考档位</div>
+        <div class="list">
+          <button class="row"><div class="meta"><div class="t">off</div><div class="s">不使用扩展思考</div></div><div class="check"></div></button>
+          <button class="row"><div class="meta"><div class="t">medium</div><div class="s">平衡速度与深度</div></div><div class="check"></div></button>
+          <button class="row"><div class="meta"><div class="t">high</div><div class="s">更充分推理，适合难题</div></div><div class="check">✓</div></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="label">M3 confirm dialog</div>
+    <div class="phone">
+      <div class="scrim"></div>
+      <div class="dlg">
+        <h3>删除</h3>
+        <p>删除本地会话文件？此操作不可撤销。</p>
+        <div class="actions"><button>取消</button><button>删除</button></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
