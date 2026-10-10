@@ -37,6 +37,7 @@ ChatGPT 在原始对话里建议 fork [Pocket Pi](https://github.com/earendil-wo
 | `app/tools/` | 替代 gradle 的四个脚本（依赖获取、依赖 R 生成、打包、AXML 包名读取） |
 | `app/build.sh` | 一键构建：`aapt2 → javac → d8 → assemble → apksigner` |
 | `app/libs/` | 依赖 AAR/JAR（**不进 git**，用 `tools/fetch-aars.py` 重建） |
+| `artwork/` | logo 原件与 adaptive / monochrome 说明 |
 | `docs/build-pipeline.md` | 无 gradle 构建链的坑目录（含 1200 条 `No package ID 7f` 的成因） |
 | `NOTICE.md` | 商标 / logo / 许可证说明 |
 
@@ -64,38 +65,36 @@ adb shell am start -n dev.pi.android/.ui.MainActivity --es token "$TOKEN" --disp
 ```
 
 也可把文本直接分享给 Pi（`am start -a android.intent.action.SEND -t text/plain --es android.intent.extra.TEXT "…"`），
-这是本机自动化驱动它的正规入口。
+这是本机自动化驱动它的正规入口。深链面板：`--es ui sessions|settings|fork|models|thinking|newsession`。
 
 ## 已实现 / 待办
 
-已通过实测（虚拟屏 + OCR 取证，见 `docs/`）：
+### 已实现
 
-- WebSocket 连接 + token 鉴权 + 自动重连；
+- WebSocket 连接 + token 鉴权 + 自动重连（配置签名变化才重连，避免分享 Intent 掐断流式回复）；
 - 提问与流式回复（`message_update` delta 累积，`text_end`/`message_end` 用权威文本覆写）；
 - 工具调用气泡（`tool_execution_start/update/end`）；
-- 中断（abort）、新建会话、模型切换、思考档位切换；
-- `get_state` 驱动的顶栏状态（模型名 · 思考档位 · ready）；
-- 前台常驻通知（显示桥状态 + 一键停止桥）；改为由 `BridgeService` 持有 WebSocket，
-  这样 App 进后台也不会丢连接；
-- **会话列表（`list_sessions`，桥侧本地命令） `list_sessions`**：Pi 的 RPC 没有“有哪些会话”这条（只有当前会话内部的
-  `get_tree`），所以列 `$HOME/.pi/agent/sessions/**/*.jsonl` 由桥代劳；点条目即可切换并重建历史；
-- **扩展 UI 子协议**：select / confirm / input / editor 用聊天流下方的一行按钮作答，
-  notify 落成气泡、setStatus/setTitle 反映到顶栏。为什么不用 AlertDialog：本机 scrcpy 虚拟屏上
-  AlertDialog 有“对象创建成功、isShowing() 为 true、屏幕上却什么都没有”的情况，而这几种请求是
-  **阻塞式**的 —— 没有可见 UI 就等于把 Pi 挂死。
+- 中断（abort：顶栏菜单 / 发送钮在流式时变为停止）；
+- 新建会话、模型切换、思考档位切换；
+- `get_state` 驱动的状态芯片（模型名 · 思考档位 · 连接点）；
+- **前台 `BridgeService`**：持有 WebSocket + 常驻通知（桥状态 + 一键停止），App 进后台不丢连接；
+- **会话列表**（桥本地命令 `list_sessions` → `switch_session` → `get_messages` 重建历史）；顶栏快捷入口；
+- **Fork**（`get_fork_messages` → `fork`）；
+- **扩展 UI 子协议**：select / confirm / input / editor —— 前台用聊天流下方按钮行作答；后台走高优先级通知按钮；`notify` 落成气泡，`setStatus` / `setTitle` 反映到顶栏。不用 AlertDialog：虚拟屏上存在「对象创建成功、isShowing() 为 true、屏幕上却没有」的情况，而这几种请求会**阻塞 Pi**；
+- 首次启动空状态：无 Token / 未连接时引导进设置；
+- Adaptive launcher icon + Material You **monochrome** 层（`artwork/` 说明）。
 
-还没做：
+### 还没做 / 已知限制
 
-- 会话列表 / 会话树 / fork 界面（`switch_session`、`get_tree` 已在命令白名单里）；
-- 扩展 UI 子协议（`select`/`confirm`/`input`/`editor`/`setWidget`）—— 目前这些请求被忽略，
-  依赖交互式扩展的流程会卡住；
-- 通知、前台服务保活（ColorOS 会杀后台，见 AGENTS.md）；
-- 多窗口/折叠适配与Monochrome 图标。
+- 会话树可视化（`get_tree` 已在命令白名单，UI 未做）；
+- `setWidget` / 富编辑器大文本体验仍偏简陋（不阻塞，可忽略）；
+- 多窗口 / 折叠屏专门布局；
+- ColorOS 等厂商仍可能杀前台服务以外的进程 —— 依赖常驻通知保活，无法 100% 对抗激进清理。
 
 ## 安全边界
 
 - 桥只绑 `127.0.0.1`，token 必填（token 文件丢失时会明确告警）。本机 loopback 不对 App 做隔离，
-  所以 token 是唯一的门槛，别把它放进 `~/.pi/agent/pi-android.token`（600）。
+  所以 token 是唯一的门槛，权限应是 `~/.pi/agent/pi-android.token` 的 600。
 - 命令白名单默认**不包含 `bash`**。开 `--allow-bash` 等于把设备的 shell 交给能连到 loopback 的 App。
 - 依赖里有 sha256 清单（`app/libs/manifest.json`），重建时核对即可。
 

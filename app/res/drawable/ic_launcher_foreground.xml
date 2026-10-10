@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive icon 前景：官方三色 logo，四周留出安全区（约 18% inset）。 -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_pi_logo"
+    android:inset="18%" />

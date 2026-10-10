@@ -2,16 +2,54 @@
 <resources>
     <style name="AppTheme" parent="Theme.Material3.Dark.NoActionBar">
         <item name="colorPrimary">@color/md_theme_primary</item>
+        <item name="colorOnPrimary">@color/md_theme_onPrimary</item>
         <item name="colorSecondary">@color/md_theme_secondary</item>
         <item name="colorTertiary">@color/md_theme_tertiary</item>
         <item name="android:statusBarColor">@color/bg_elevated</item>
         <item name="android:navigationBarColor">@color/bg_base</item>
         <item name="android:windowBackground">@color/bg_base</item>
+        <item name="android:colorBackground">@color/bg_base</item>
+        <item name="colorSurface">@color/bg_elevated</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="android:textColorPrimary">@color/text_primary</item>
+        <item name="android:textColorSecondary">@color/text_secondary</item>
+        <item name="popupMenuBackground">@color/bg_elevated</item>
     </style>
 
     <style name="ComposerText">
         <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textColorHint">@color/text_muted</item>
         <item name="android:textSize">16sp</item>
         <item name="android:lineSpacingExtra">2dp</item>
+    </style>
+
+    <style name="ToolbarTitle">
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textSize">17sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:letterSpacing">0.02</item>
+    </style>
+
+    <style name="StatusChipText">
+        <item name="android:textColor">@color/text_secondary</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+    </style>
+
+    <style name="SettingsLabel">
+        <item name="android:textColor">@color/text_secondary</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:paddingTop">14dp</item>
+        <item name="android:paddingBottom">6dp</item>
+    </style>
+
+    <style name="SettingsField">
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textColorHint">@color/text_muted</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:background">@drawable/bg_composer</item>
+        <item name="android:padding">14dp</item>
+        <item name="android:minHeight">48dp</item>
     </style>
 </resources>

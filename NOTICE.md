@@ -4,6 +4,8 @@
 
 `app/res/drawable/ic_pi_logo.xml` 是 Pi 官方 logo 的 vector 版本，取自 https://pi.dev/logo.svg
 （三条路径与 `#F09082 / #4D9ABF / #F1BE58` 三个色值与上游一致），用作本 App 的图标。
+Monochrome / adaptive 变体见 `artwork/README.md` 与
+`app/res/drawable/ic_pi_logo_monochrome.xml`。
 
 pi.dev 的 [Press Kit](https://pi.dev/press-kit) 把它描述为「Vector logo for light/dark usage and
 **editorial placements**」，并未明确允许第三方把它当作独立 App 的品牌标识。因此：

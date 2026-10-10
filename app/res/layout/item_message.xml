@@ -4,17 +4,20 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:paddingStart="6dp"
-    android:paddingEnd="6dp"
-    android:paddingTop="3dp"
-    android:paddingBottom="3dp">
+    android:paddingStart="4dp"
+    android:paddingTop="5dp"
+    android:paddingEnd="4dp"
+    android:paddingBottom="5dp">
 
     <TextView
         android:id="@+id/role"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:letterSpacing="0.06"
-        android:textColor="@color/text_secondary"
+        android:letterSpacing="0.08"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp"
+        android:paddingBottom="3dp"
+        android:textAllCaps="true"
         android:textSize="11sp"
         android:textStyle="bold" />
 
@@ -23,6 +26,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:autoLink="web"
+        android:lineSpacingExtra="2dp"
         android:textColor="@color/text_primary"
         android:textIsSelectable="true"
         android:textSize="15sp" />

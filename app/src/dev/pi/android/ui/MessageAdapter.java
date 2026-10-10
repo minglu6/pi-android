@@ -1,9 +1,8 @@
 package dev.pi.android.ui;
 
 import android.content.Context;
-import android.graphics.Color;
-import android.graphics.drawable.GradientDrawable;
 import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -20,7 +19,7 @@ import java.util.List;
 import dev.pi.android.R;
 import dev.pi.android.model.ChatMessage;
 
-/** 聊天列表适配器。气泡靠 gravity + 圆角 drawable 区分角色，避免复杂 ItemDecoration。 */
+/** 聊天列表适配器。气泡靠 gravity + 圆角 drawable 区分角色。 */
 public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
 
     private static final String TAG = "PiUI";
@@ -38,20 +37,20 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
     }
 
     public void add(ChatMessage msg) {
-        android.util.Log.i(TAG, "add " + msg.role + " len=" + msg.text.length() + " :: " + msg.text.replace("\n", "\\n"));
+        android.util.Log.i(TAG, "add " + msg.role + " len=" + msg.text.length());
         items.add(msg);
         notifyItemInserted(items.size() - 1);
         if (listener != null) listener.onChanged(items.size());
     }
 
-    /** 流式输出时反复更新最后一条「助手消息」，避免疯狂插入 item。 */
+    /** 流式输出时反复更新最后一条助手消息，避免疯狂插入 item。 */
     public boolean upsertTail(ChatMessage msg) {
         if (!items.isEmpty()) {
             int last = items.size() - 1;
-            if (items.get(last).role == ChatMessage.Role.AGENT || items.get(last).role == ChatMessage.Role.TOOL) {
-                android.util.Log.i(TAG, "upsertTail len=" + msg.text.length());
+            if (items.get(last).role == ChatMessage.Role.AGENT) {
                 items.set(last, msg);
                 notifyItemChanged(last);
+                if (listener != null) listener.onChanged(items.size());
                 return true;
             }
         }
@@ -59,10 +58,9 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
         return false;
     }
 
-    /** 更新指定位置（工具结果回填时用，避免重复插入条目）。 */
+    /** 更新指定位置（工具结果回填时用）。 */
     public void replaceAt(int position, ChatMessage msg) {
         if (position < 0 || position >= items.size()) return;
-        android.util.Log.i(TAG, "replaceAt " + position + " " + msg.role + " len=" + msg.text.length());
         items.set(position, msg);
         notifyItemChanged(position);
     }
@@ -82,6 +80,14 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
 
     public int size() {
         return items.size();
+    }
+
+    /** 是否只有系统提示（用于空状态判断：纯引导文案仍算「空」）。 */
+    public boolean onlySystemOrEmpty() {
+        for (ChatMessage m : items) {
+            if (m.role != ChatMessage.Role.SYSTEM) return false;
+        }
+        return true;
     }
 
     @NonNull
@@ -117,37 +123,52 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
 
         void bind(ChatMessage msg) {
             boolean mine = msg.role == ChatMessage.Role.USER;
-            root.setGravity(mine ? android.view.Gravity.END : android.view.Gravity.START);
+            boolean system = msg.role == ChatMessage.Role.SYSTEM;
+            int gravity = system ? Gravity.CENTER_HORIZONTAL
+                    : (mine ? Gravity.END : Gravity.START);
+            root.setGravity(gravity);
+            role.setGravity(gravity);
             text.setText(msg.text);
-            int pad = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 12, ctx.getResources().getDisplayMetrics());
-            int radius = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 14, ctx.getResources().getDisplayMetrics());
 
-            GradientDrawable bubble = new GradientDrawable();
-            bubble.setCornerRadius(radius);
+            int padH = dp(12);
+            int padV = dp(9);
+            text.setPadding(padH, padV, padH, padV);
+            text.setMaxWidth((int) (ctx.getResources().getDisplayMetrics().widthPixels
+                    * (system ? 0.92f : 0.82f)));
+
             switch (msg.role) {
                 case USER:
-                    bubble.setColor(ContextCompat.getColor(ctx, R.color.bg_bubble_user));
                     role.setText("YOU");
+                    role.setTextColor(ContextCompat.getColor(ctx, R.color.role_you));
+                    text.setBackgroundResource(R.drawable.bg_bubble_user);
                     break;
                 case TOOL:
-                    bubble.setColor(ContextCompat.getColor(ctx, R.color.bg_code));
                     role.setText("TOOL");
+                    role.setTextColor(ContextCompat.getColor(ctx, R.color.role_tool));
+                    text.setBackgroundResource(R.drawable.bg_bubble_tool);
                     break;
                 case SYSTEM:
-                    bubble.setColor(Color.TRANSPARENT);
                     role.setText("INFO");
+                    role.setTextColor(ContextCompat.getColor(ctx, R.color.role_info));
+                    text.setBackgroundResource(R.drawable.bg_bubble_system);
+                    text.setTextColor(ContextCompat.getColor(ctx, R.color.text_secondary));
                     break;
                 case AGENT:
                 default:
-                    bubble.setColor(ContextCompat.getColor(ctx, R.color.bg_bubble_agent));
                     role.setText("PI");
+                    role.setTextColor(ContextCompat.getColor(ctx, R.color.role_pi));
+                    text.setBackgroundResource(R.drawable.bg_bubble_agent);
+                    text.setTextColor(ContextCompat.getColor(ctx, R.color.text_primary));
                     break;
             }
-            text.setBackground(bubble);
-            text.setPadding(pad, (int) (pad * 0.7f), pad, (int) (pad * 0.7f));
-            text.setTextColor(ContextCompat.getColor(ctx, R.color.text_primary));
-            // 气泡最多占屏宽 88%，否则长回复会把角色标签挤没了
-            text.setMaxWidth((int) (ctx.getResources().getDisplayMetrics().widthPixels * 0.88f));
+            if (msg.role != ChatMessage.Role.SYSTEM) {
+                text.setTextColor(ContextCompat.getColor(ctx, R.color.text_primary));
+            }
+        }
+
+        private int dp(int v) {
+            return (int) TypedValue.applyDimension(
+                    TypedValue.COMPLEX_UNIT_DIP, v, ctx.getResources().getDisplayMetrics());
         }
     }
 }
