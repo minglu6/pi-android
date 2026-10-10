@@ -86,7 +86,8 @@ adb shell am start -n dev.pi.android/.ui.MainActivity --es token "$TOKEN" --disp
 - **Fork**（`get_fork_messages` → `fork`）；
 - **扩展 UI 子协议**：select / confirm / input / editor —— 前台用聊天流下方按钮行作答；后台走高优先级通知按钮；`notify` 落成气泡，`setStatus` / `setTitle` 反映到顶栏。不用 AlertDialog：虚拟屏上存在「对象创建成功、isShowing() 为 true、屏幕上却没有」的情况，而这几种请求会**阻塞 Pi**；
 - 首次启动空状态：无 Token / 未连接时引导进设置；
-- Adaptive launcher icon + Material You **monochrome** 层（`artwork/` 说明）。
+- Adaptive launcher icon + Material You **monochrome** 层（`artwork/` 说明）；
+- 日用聊天打磨：Markdown/代码块、工具气泡、时间戳、断线横幅、粘底滚动、会话重命名/删除。
 
 ### 还没做 / 已知限制
 
