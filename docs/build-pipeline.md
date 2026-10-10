@@ -1,26 +1,50 @@
-# pi-android 构建流水线（本机无 gradle / Android SDK 的替代方案）
+# pi-android 构建流水线（无 Gradle）
 
-本机 Termux 只有 `aapt2 / javac / d8 / apksigner / python3`，没有 gradle、没有 Android SDK、
-也没有 apktool（见 AGENTS.md「Android reverse engineering」）。所以 gradle 干的活拆成四个脚本：
+本仓库**故意不用 Gradle**。Termux 场景里往往只有 `aapt2 / javac / d8 / apksigner / python3`；
+桌面 / CI 则用 Android cmdline-tools 提供同样的二进制。Gradle 干的活拆成：
 
 ```
 app/tools/fetch-aars.py    ← 替代 gradle 的依赖解析（Google Maven + Maven Central，传递依赖 + 版本择优）
 app/tools/gen-dep-r.py     ← 替代 AGP 的依赖 R 类生成
 app/tools/assemble.py      ← 替代 AGP 的打包（dex + AAR 的 assets/.so 合并）
 app/build.sh               ← 串起来：aapt2 → javac → d8 → assemble → apksigner
+Makefile                   ← 仓库根目录规范入口：make deps / make apk
 ```
 
 不可省的工具适配器。`app/tools/lib-resources.py`（把依赖做成 `aapt2 link --static-lib` 静态库）
 **当前不在主构建路径里**，保留它只是作为记录与备用：见下 §3 结论。
 
+贡献入口与最短路径：[`CONTRIBUTING.md`](../CONTRIBUTING.md)。
+
 ```sh
-cd ~/projects/pi-android/app && bash build.sh            # 产出 out/pi-android.apk
-adb -s <serial> install -r out/pi-android.apk
-PHONE_VD_SERIAL=<serial> phone-vd-start --app dev.pi.android   # 必须在虚拟屏验证
+make apk                                                 # 或：bash app/build.sh --only-apk
+adb install -r app/out/pi-android.apk
+PHONE_VD_SERIAL=<serial> phone-vd-start --app dev.pi.android   # 虚拟屏验证（可选）
 ```
 
-依赖是 `aapt2/../libs/`（56 个构件，含 `manifest.json` 的 sha256 审计清单），
-重新取用同一条 `--root` 命令；`libs/*` 不进 git，任何机器重建都靠脚本 + 清单。
+依赖落在 `app/libs/`（约 59 个构件，含 `manifest.json` 的 sha256 审计清单；以实际拉取为准），
+**不进 git**；任何机器重建都靠下面的 `--root` 命令（与 CI 相同）。
+
+## 非 Termux 环境变量
+
+`app/build.sh` 默认：
+
+```sh
+ANDROID_JAR="${ANDROID_JAR:-$HOME/antdaily/android/android.jar}"   # Termux 布局
+```
+
+并要求 `aapt2` / `d8` / `apksigner` / `python3` 在 `PATH` 上。桌面或 CI 请显式设置：
+
+```sh
+export ANDROID_HOME=/path/to/android-sdk
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
+export PATH="$ANDROID_HOME/build-tools/35.0.0:$PATH"   # 与 CI BUILD_TOOLS_VERSION 对齐即可
+export ANDROID_JAR="$ANDROID_HOME/platforms/android-36/android.jar"
+```
+
+- **MIN_SDK=26** / **TARGET_SDK=36**（见 `app/build.sh`）
+- 平台 jar 必须来自 `platforms;android-36`
+- 请用 `bash app/build.sh …` 调用（脚本 shebang 指向 Termux 的 bash 路径）
 
 ## 依赖清单（一次即可）
 
