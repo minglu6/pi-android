@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher 背景：深色品牌底，略带蓝调，与聊天深色模式一致。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:angle="135"
+        android:endColor="#121820"
+        android:startColor="#0B1016"
+        android:type="linear" />
+</shape>
