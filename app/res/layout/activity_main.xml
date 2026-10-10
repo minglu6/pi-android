@@ -371,9 +371,10 @@
                 android:paddingEnd="10dp"
                 android:paddingBottom="2dp" />
 
+            <!-- attach · chip(shrink) · Plan/Steer/Queue · stop · send — fits 360dp -->
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="40dp"
+                android:layout_height="36dp"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingStart="2dp"
@@ -381,11 +382,11 @@
 
                 <ImageButton
                     android:id="@+id/btn_attach"
-                    android:layout_width="36dp"
-                    android:layout_height="36dp"
+                    android:layout_width="32dp"
+                    android:layout_height="32dp"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/action_attach"
-                    android:padding="7dp"
+                    android:padding="6dp"
                     android:scaleType="centerInside"
                     android:src="@drawable/ic_attach"
                     android:tint="@color/text_secondary" />
@@ -393,83 +394,79 @@
                 <TextView
                     android:id="@+id/model_chip"
                     style="@style/MonoMetaText"
-                    android:layout_width="wrap_content"
-                    android:layout_height="28dp"
+                    android:layout_width="0dp"
+                    android:layout_height="26dp"
                     android:layout_marginStart="2dp"
+                    android:layout_marginEnd="4dp"
+                    android:layout_weight="1"
                     android:background="@drawable/bg_status_chip"
                     android:clickable="true"
                     android:ellipsize="end"
                     android:focusable="true"
                     android:gravity="center_vertical"
-                    android:maxWidth="120dp"
                     android:maxLines="1"
-                    android:paddingStart="8dp"
-                    android:paddingEnd="8dp"
+                    android:minWidth="36dp"
+                    android:paddingStart="6dp"
+                    android:paddingEnd="6dp"
+                    android:singleLine="true"
                     android:text="@string/action_model"
                     android:textColor="@color/pi_blue"
-                    android:textSize="11sp" />
+                    android:textSize="10.5sp" />
 
-                <HorizontalScrollView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="6dp"
-                    android:layout_weight="1"
-                    android:scrollbars="none">
+                <LinearLayout
+                    android:id="@+id/steer_toggle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="26dp"
+                    android:layout_marginEnd="2dp"
+                    android:background="@drawable/bg_segmented"
+                    android:orientation="horizontal"
+                    android:visibility="gone">
 
-                    <LinearLayout
-                        android:id="@+id/steer_toggle"
+                    <TextView
+                        android:id="@+id/steer_mode_plan"
+                        style="@style/MonoMetaText"
                         android:layout_width="wrap_content"
-                        android:layout_height="28dp"
-                        android:background="@drawable/bg_segmented"
-                        android:orientation="horizontal"
-                        android:visibility="gone">
+                        android:layout_height="match_parent"
+                        android:gravity="center"
+                        android:paddingStart="5dp"
+                        android:paddingEnd="5dp"
+                        android:text="@string/composer_plan"
+                        android:textColor="@color/text_muted"
+                        android:textSize="10sp" />
 
-                        <TextView
-                            android:id="@+id/steer_mode_plan"
-                            style="@style/MonoMetaText"
-                            android:layout_width="wrap_content"
-                            android:layout_height="match_parent"
-                            android:gravity="center"
-                            android:paddingStart="8dp"
-                            android:paddingEnd="8dp"
-                            android:text="@string/composer_plan"
-                            android:textColor="@color/text_muted"
-                            android:textSize="11sp" />
+                    <TextView
+                        android:id="@+id/steer_mode_steer"
+                        style="@style/MonoMetaText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/bg_segmented_on"
+                        android:gravity="center"
+                        android:paddingStart="5dp"
+                        android:paddingEnd="5dp"
+                        android:text="@string/composer_steer"
+                        android:textColor="@color/md_theme_onPrimary"
+                        android:textSize="10sp" />
 
-                        <TextView
-                            android:id="@+id/steer_mode_steer"
-                            style="@style/MonoMetaText"
-                            android:layout_width="wrap_content"
-                            android:layout_height="match_parent"
-                            android:background="@drawable/bg_segmented_on"
-                            android:gravity="center"
-                            android:paddingStart="8dp"
-                            android:paddingEnd="8dp"
-                            android:text="@string/composer_steer"
-                            android:textColor="@color/md_theme_onPrimary"
-                            android:textSize="11sp" />
-
-                        <TextView
-                            android:id="@+id/steer_mode_queue"
-                            style="@style/MonoMetaText"
-                            android:layout_width="wrap_content"
-                            android:layout_height="match_parent"
-                            android:gravity="center"
-                            android:paddingStart="8dp"
-                            android:paddingEnd="8dp"
-                            android:text="@string/composer_queue"
-                            android:textColor="@color/text_muted"
-                            android:textSize="11sp" />
-                    </LinearLayout>
-                </HorizontalScrollView>
+                    <TextView
+                        android:id="@+id/steer_mode_queue"
+                        style="@style/MonoMetaText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="match_parent"
+                        android:gravity="center"
+                        android:paddingStart="5dp"
+                        android:paddingEnd="5dp"
+                        android:text="@string/composer_queue"
+                        android:textColor="@color/text_muted"
+                        android:textSize="10sp" />
+                </LinearLayout>
 
                 <ImageButton
                     android:id="@+id/btn_stop"
-                    android:layout_width="34dp"
-                    android:layout_height="34dp"
+                    android:layout_width="32dp"
+                    android:layout_height="32dp"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/action_stop"
-                    android:padding="7dp"
+                    android:padding="6dp"
                     android:scaleType="centerInside"
                     android:src="@drawable/ic_stop"
                     android:tint="@color/status_offline"
@@ -477,28 +474,28 @@
 
                 <ImageButton
                     android:id="@+id/send"
-                    android:layout_width="34dp"
-                    android:layout_height="34dp"
+                    android:layout_width="32dp"
+                    android:layout_height="32dp"
                     android:background="@drawable/bg_send_button"
                     android:contentDescription="@string/action_send"
-                    android:padding="8dp"
+                    android:padding="7dp"
                     android:scaleType="centerInside"
                     android:src="@drawable/ic_send"
                     android:tint="@color/md_theme_onPrimary" />
             </LinearLayout>
         </LinearLayout>
 
-        <!-- Tiny footer: connection · context bar · cache · cost · tokens -->
+        <!-- Tiny footer: single line; long status/stats ellipsize -->
         <LinearLayout
             android:id="@+id/status_footer"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="18dp"
             android:gravity="center_vertical"
             android:orientation="horizontal"
             android:paddingStart="6dp"
-            android:paddingTop="4dp"
+            android:paddingTop="0dp"
             android:paddingEnd="6dp"
-            android:paddingBottom="1dp">
+            android:paddingBottom="0dp">
 
             <View
                 android:id="@+id/status_dot"
@@ -509,11 +506,13 @@
             <TextView
                 android:id="@+id/status_text"
                 style="@style/MonoMetaText"
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="5dp"
+                android:layout_weight="1"
                 android:ellipsize="end"
                 android:maxLines="1"
+                android:singleLine="true"
                 android:text="@string/status_connecting"
                 android:textColor="@color/text_muted"
                 android:textSize="10.5sp" />
@@ -523,8 +522,8 @@
                 style="@style/MonoMetaText"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:paddingStart="5dp"
-                android:paddingEnd="5dp"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp"
                 android:text="·"
                 android:textColor="@color/text_faint"
                 android:textSize="10.5sp"
@@ -532,7 +531,7 @@
 
             <FrameLayout
                 android:id="@+id/context_bar_wrap"
-                android:layout_width="36dp"
+                android:layout_width="28dp"
                 android:layout_height="4dp"
                 android:layout_marginEnd="4dp"
                 android:background="@drawable/bg_context_bar_track"
@@ -548,11 +547,12 @@
             <TextView
                 android:id="@+id/footer_stats"
                 style="@style/MonoMetaText"
-                android:layout_width="0dp"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
                 android:ellipsize="end"
                 android:maxLines="1"
+                android:maxWidth="160dp"
+                android:singleLine="true"
                 android:textColor="@color/text_faint"
                 android:textSize="10.5sp"
                 android:visibility="gone" />

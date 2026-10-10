@@ -28,10 +28,11 @@
   .col { display: flex; flex-direction: column; align-items: center; gap: 8px; }
   .label { color: #777; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
   .phone {
-    width: 320px; height: 680px; border-radius: 26px; overflow: hidden;
+    width: 360px; height: 680px; border-radius: 26px; overflow: hidden;
     background: var(--bg); color: var(--fg); border: 1px solid #2a2b36;
     box-shadow: 0 16px 40px #000a; display: flex; flex-direction: column;
   }
+  .composer-wrap, .composer { min-width: 0; }
   .bar {
     display: flex; align-items: center; gap: 2px; padding: 6px 4px 4px; min-height: 48px;
   }
@@ -112,25 +113,35 @@
     font-family: inherit;
   }
   .composer textarea::placeholder { color: var(--muted); }
-  .crow { display: flex; align-items: center; gap: 3px; padding: 0 2px; height: 36px; }
-  .chip {
-    font-family: ui-monospace, monospace; font-size: 11px; color: var(--accent);
-    background: var(--chip); border-radius: 999px; padding: 5px 8px; white-space: nowrap;
+  .crow {
+    display: flex; align-items: center; gap: 2px; padding: 0 2px; height: 36px;
+    min-width: 0; width: 100%;
   }
-  .seg { display: flex; background: var(--chip); border-radius: 7px; overflow: hidden; flex-shrink: 0; }
-  .seg span { font-family: ui-monospace, monospace; font-size: 11px; padding: 5px 8px; color: var(--muted); }
+  .chip {
+    font-family: ui-monospace, monospace; font-size: 10.5px; color: var(--accent);
+    background: var(--chip); border-radius: 999px; padding: 4px 6px;
+    min-width: 0; flex: 1 1 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .seg { display: flex; background: var(--chip); border-radius: 7px; overflow: hidden; flex: 0 0 auto; }
+  .seg span { font-family: ui-monospace, monospace; font-size: 10px; padding: 4px 5px; color: var(--muted); }
   .seg .on { background: var(--accent); color: var(--on-accent); }
   .send {
     width: 32px; height: 32px; border-radius: 16px; border: 0;
-    background: var(--accent); color: var(--on-accent); font-size: 14px; flex-shrink: 0;
+    background: var(--accent); color: var(--on-accent); font-size: 14px; flex: 0 0 32px;
   }
   .stop {
-    width: 32px; height: 32px; border: 0; background: transparent; color: var(--err); font-size: 14px;
+    width: 32px; height: 32px; border: 0; background: transparent; color: var(--err);
+    font-size: 14px; flex: 0 0 32px;
   }
   .footer {
-    display: flex; align-items: center; gap: 5px; padding: 4px 6px 1px;
+    display: flex; align-items: center; gap: 5px; padding: 3px 6px 1px;
     font-family: ui-monospace, monospace; font-size: 10.5px; color: var(--muted);
+    white-space: nowrap; overflow: hidden; min-width: 0;
   }
+  .footer .fstatus {
+    flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .footer .fstats { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 55%; }
   .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--ok); flex-shrink: 0; }
   .cbar {
     width: 36px; height: 4px; border-radius: 2px; background: var(--chip); overflow: hidden; flex-shrink: 0;
@@ -202,10 +213,11 @@
         </div>
       </div>
       <div class="footer">
-        <span class="dot"></span>已连接
+        <span class="dot"></span>
+        <span class="fstatus">已连接</span>
         <span>·</span>
         <span class="cbar"><i></i></span>
-        3% · cache 69% · $0.84
+        <span class="fstats">3% · cache 69% · $0.84</span>
       </div>
     </div>
   </div>
@@ -236,10 +248,11 @@
         </div>
       </div>
       <div class="footer">
-        <span class="dot"></span>已连接 · 引导下一句
+        <span class="dot"></span>
+        <span class="fstatus">已连接 · 引导下一句</span>
         <span>·</span>
         <span class="cbar"><i style="width:12%"></i></span>
-        3% · cache 73% · $0.84
+        <span class="fstats">3% · cache 73% · $0.84</span>
       </div>
     </div>
   </div>
@@ -270,7 +283,7 @@
           <button class="send">↑</button>
         </div>
       </div>
-      <div class="footer"><span class="dot"></span>已连接</div>
+      <div class="footer"><span class="dot"></span><span class="fstatus">已连接</span></div>
     </div>
   </div>
 </div>
