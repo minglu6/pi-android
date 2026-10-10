@@ -96,6 +96,19 @@ material 又依赖 appcompat，一并失败。这也是 P6 决定先不走这条
 现在产一棵 `classes.dex`（含全部 AndroidX），没触发上限。真到那一步，
 d8 默认不会自己拆 dex，需要显式切 multi-dex 并在 Application 里挂 `MultiDex`。
 
+### P10 · 虚拟屏上 AlertDialog 可能“存在但不可见”，阻塞式扩展 UI 别用它
+同一个 Activity 里，`AlertDialog.Builder(this).show()` 不抛异常、`isShowing()` 返回 true，
+但屏幕上根本看不到（同一次会话里 RecyclerView 内容正常显示）。为了定位这个坑花了不少轮：
+先把构建时间烘进 UI（`build.sh` 生成 `BuildInfo.java`）确认跑的是新代码，再靠**界面里的可见
+取证**（见 #66：本机 App 的 logcat 收不到，连 `Log.i` 都没有）一步步排除。
+结论：select/confirm/input/editor 这类**会阻塞 Pi** 的请求，UI 改用 Activity 布局里的按钮行，
+不要用 AlertDialog。`list_sessions` 那种“信息型”列表对话框仍可以用 AlertDialog（实测可见）。
+
+### P11 · 验证 Debugging 的时序：改完 APK 要 `am force-stop`
+`adb install -r` 之后，正在运行的进程仍跑旧 dex —— 这不是缓存错觉，是 Android 的加载行为。
+每次验证新构建都要：`install -r` → `am force-stop dev.pi.android` → 重启虚拟屏 → 立刻操作。
+虚拟屏大约 1 分钟内会把窗口息掉、tap 失去响应，验证脚本要把“启动 → 意图 → 抓屏”压在一轮里做完。
+
 ## 验证（2026-10-10）
 
 安装后在虚拟屏启动 `dev.pi.android`，`dumpsys activity` 显示

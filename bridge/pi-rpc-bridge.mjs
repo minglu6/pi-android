@@ -194,6 +194,9 @@ function ensurePi() {
 
 /** Pi stdout 的每一条记录：响应按 id 回填，其余作为事件广播。 */
 function routeRecord(rec) {
+  if (rec && rec.type === "extension_ui_request" && DIALOG_METHODS.has(rec.method) && rec.id) {
+    uiRequests.set(rec.id, { method: rec.method, ts: Date.now() });
+  }
   if (rec && rec.type === "response") {
     const pending = [...pendingReqs.entries()].find(([, v]) => v.command === rec.command);
     if (pending) {
@@ -221,7 +224,168 @@ function routeRecord(rec) {
 /** id -> {ws, command, ts}；Pi 的 response 会带上同样的 id。 */
 const pendingReqs = new Map();
 
+/**
+ * 未答复的阻塞式 UI 请求（select / confirm / input / editor）。
+ * 这类请求会让 Pi **停在那里等** —— 如果请求的客户端中途断开（APK 被杀、特效、锁屏），
+ * 没有任何人会回答，Pi 就一直挂着，之后所有 prompt 都会报 "Agent is already processing"。
+ * 所以客户端全部离开时，桥代表它们回一条 cancelled 把 Pi 松开。
+ * 代价要说清楚：真正还在思考/等待人类点击的场景点上钮之前，如果最后一个客户端断开，也会被取消。
+ */
+const DIALOG_METHODS = new Set(["select", "confirm", "input", "editor"]);
+const uiRequests = new Map();   // id -> {method, ts}
+const UI_GRACE_MS = 10 * 60 * 1000;
+
+function releaseStuckDialogs(why) {
+  const now = Date.now();
+  let released = 0;
+  for (const [id, info] of [...uiRequests]) {
+    if (now - info.ts > UI_GRACE_MS) {
+      uiRequests.delete(id);
+      continue;
+    }
+    if (child && child.exitCode === null) {
+      try {
+        child.stdin.write(JSON.stringify({ type: "extension_ui_response", id, cancelled: true }) + "\n");
+      } catch {
+        continue;
+      }
+    }
+    uiRequests.delete(id);
+    released++;
+  }
+  if (released) log(`${why}：补答 ${released} 个未答复的 UI 对话框（cancelled），避免 Pi 卡住`);
+}
+
+/** 会话文件根目录 `$HOME/.pi/agent/sessions/<cwd 编码>/<时间>_<id>.jsonl` */
+const SESSIONS_DIR = arg("sessions-dir", path.join(os.homedir(), ".pi/agent/sessions"));
+
+/**
+ * 列出本地会话文件。Pi 的 RPC 只有 get_tree（当前会话内部的树）而没有“有哪些会话”，
+ * 所以列目录这件事只能由桥来做 —— 这是本桥自己加的能力，不是 Pi 的命令。
+ * 只读文件头与前若干行取首条用户消息做预览，不整文件读进内存。
+ */
+function listSessions(limit) {
+  const files = [];
+  const walk = (dir) => {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full);
+      else if (e.isFile() && e.name.endsWith(".jsonl")) files.push(full);
+    }
+  };
+  walk(SESSIONS_DIR);
+
+  // 先只 stat 排序（323 个文件也很快），再只对要返回的前 N 个做读解码 —— 不要对全部文件进水 involving 提纯
+  const statted = [];
+  for (const file of files) {
+    try {
+      const st = fs.statSync(file);
+      statted.push({ path: file, mtimeMs: st.mtimeMs, bytes: st.size });
+    } catch {
+      /* 读不到就跳过 */
+    }
+  }
+  statted.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return statted.slice(0, limit).map((entry) => enrichSession(entry));
+}
+
+/**
+ * 读一小段文件内容填预览。头 64 KiB 取 session header 与首条用户消息；
+ * 头里没有（长会话把早期消息挤出了头）就从尾部 128 KiB 取最近一条用户消息 —— 更符合“切回上次那条”的直觉。
+ */
+function enrichSession(entry) {
+  const out = { path: entry.path, bytes: entry.bytes, mtimeMs: entry.mtimeMs, id: null, cwd: null, timestamp: null, preview: "" };
+  try {
+    const fh = fs.openSync(entry.path, "r");
+    const headLen = Math.min(entry.bytes, 65536);
+    const head = Buffer.alloc(headLen);
+    fs.readSync(fh, head, 0, headLen, 0);
+    scanHead(out, head.toString("utf8"));
+    if (!out.preview && entry.bytes > headLen) {
+      const tailLen = Math.min(entry.bytes, 131072);
+      const tail = Buffer.alloc(tailLen);
+      fs.readSync(fh, tail, 0, tailLen, Math.max(0, entry.bytes - tailLen));
+      // 尾部切片可能从一行中间开始，丢掉第一段不完整的行
+      const lines = tail.toString("utf8").split("\n").slice(1);
+      for (const line of lines) {
+        const preview = userTextOfLine(line);
+        if (preview) out.preview = preview;
+      }
+    }
+    fs.closeSync(fh);
+  } catch {
+    /* 预览拿不到也不影响切换 */
+  }
+  return out;
+}
+
+function scanHead(out, text) {
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    let rec;
+    try {
+      rec = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (rec.type === "session") {
+      out.id = rec.id || null;
+      out.cwd = rec.cwd || null;
+      out.timestamp = rec.timestamp || null;
+      continue;
+    }
+    if (!out.preview) {
+      const text = userTextOfLine(line);
+      if (text) out.preview = text;
+    }
+  }
+  if (out.preview) out.preview = out.preview.slice(0, 200);
+}
+
+function userTextOfLine(line) {
+  if (!line.trim()) return "";
+  try {
+    const rec = JSON.parse(line);
+    if (rec.type === "message" && rec.message && rec.message.role === "user") {
+      return textOfContentLike(rec.message.content).slice(0, 200);
+    }
+  } catch {
+    return "";
+  }
+  return "";
+}
+
+function textOfContentLike(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  for (const part of content) {
+    if (part && typeof part === "object" && part.type === "text" && typeof part.text === "string") return part.text;
+  }
+  return "";
+}
+
 function writeCommand(id, ws, command, params) {
+  // 桥自己的本地命令：不进 Pi 的 stdin，直接由桥回答
+  if (command === "list_sessions") {
+    const t0 = Date.now();
+    let items = [];
+    let err = null;
+    try {
+      items = listSessions(Math.max(1, Math.min(500, Number((params || {}).limit) || 50)));
+    } catch (e) {
+      err = e.message;
+    }
+    log(`local list_sessions -> ${items.length} 项 (${Date.now() - t0}ms)`);
+    respond(ws, id, true, "list_sessions",
+      err ? { sessions: [], error: err } : { sessions: items, dir: SESSIONS_DIR }, err);
+    return;
+  }
   if (!ALLOWED.has(command)) {
     safeSend(
       ws,
@@ -238,6 +402,10 @@ function writeCommand(id, ws, command, params) {
     pendingReqs.delete(id);
     safeSend(ws, JSON.stringify({ v: 1, kind: "response", id, ok: false, command, error: e.message }));
   }
+}
+
+function respond(ws, id, ok, command, data, error) {
+  safeSend(ws, JSON.stringify({ v: 1, kind: "response", id, ok, command, data: data || null, error: error || null }));
 }
 
 function stopPi(why) {
@@ -306,6 +474,8 @@ wss.on("connection", (ws, req) => {
   ws.on("close", () => {
     const i = clients.indexOf(c);
     if (i >= 0) clients.splice(i, 1);
+    // 最后一个客户端离开：把它可能没来得及回答的对话框取消掉
+    if (!clients.length) releaseStuckDialogs("所有客户端已断开");
     scheduleIdleExit();
   });
   ws.on("error", () => {});

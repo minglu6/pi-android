@@ -9,6 +9,7 @@ import android.view.MenuItem;
 import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
 import android.widget.ImageButton;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -16,6 +17,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
+import com.google.android.material.button.MaterialButton;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -42,6 +44,7 @@ import dev.pi.android.model.ChatMessage;
 public class MainActivity extends AppCompatActivity implements BridgeConnection.Listener {
 
     private static final String TAG = "PiUI";
+    private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
 
     private MessageAdapter adapter;
     private RecyclerView list;
@@ -62,6 +65,8 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
     private final java.util.List<CharSequence> modelLabels = new java.util.ArrayList<>();
     private final java.util.List<String[]> modelRefs = new java.util.ArrayList<>();   // [provider, id]
     private final java.util.List<CharSequence> thinkingLevels = new java.util.ArrayList<>();
+    private final java.util.List<CharSequence> sessionLabels = new java.util.ArrayList<>();
+    private final java.util.List<String> sessionPaths = new java.util.ArrayList<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -84,6 +89,35 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
         list.setAdapter(adapter);
 
         bridge = new BridgeConnection();
+        actions = findViewById(R.id.actions);
+        actionsTitle = findViewById(R.id.actions_title);
+        actionsInput = findViewById(R.id.actions_input);
+        actionsButtons = findViewById(R.id.actions_buttons);
+
+        extUi = new ExtensionUi(
+                msg -> Toast.makeText(MainActivity.this, msg, Toast.LENGTH_SHORT).show(),
+                r -> bridge.rpc("extension_ui_response", r),
+                new ExtensionUi.StatusSink() {
+                    @Override
+                    public void onStatus(String key, String text) {
+                        if (text == null) extStatuses.remove(key);
+                        else extStatuses.put(key, text);
+                        runOnUiThread(MainActivity.this::renderExtStatus);
+                    }
+
+                    @Override
+                    public void onTitle(String title) {
+                        runOnUiThread(() -> setTitleExt(title));
+                    }
+
+                    @Override
+                    public void onNotify(String message, String type) {
+                        runOnUiThread(() -> adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM,
+                                notifyPrefix(type) + message)));
+                    }
+                },
+                (kind, title, hint, options, prefill, sink) -> runOnUiThread(
+                        () -> showExtensionActions(kind, title, hint, options, prefill, sink)));
         bridge.setListener(this);
 
         send.setOnClickListener(v -> submit());
@@ -104,6 +138,7 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
         });
 
         handleIntentExtras(getIntent());
+        if (bridge.isConnected()) openUiTarget(uiTarget);
         adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM,
                 "尚未连接：在设置里填 Token（或启动时传 --es token）。\nbuild " + dev.pi.android.BuildInfo.BUILD_TIME));
         reconnect();
@@ -126,12 +161,55 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
             } catch (NumberFormatException ignored) {
             }
         }
+        // ui=sessions|settings|fork|models|thinking：给本机自动化用的深链入口，
+        // 启动直接落到某个面板（配合 --es token 一键到达）
+        uiTarget = intent.getStringExtra("ui");
+        pendingUiTarget = uiTarget;
         if (Intent.ACTION_SEND.equals(intent.getAction()) && "text/plain".equals(intent.getType())) {
             String shared = intent.getStringExtra(Intent.EXTRA_TEXT);
             if (shared != null && !shared.isEmpty()) pendingPrompt = shared;
         }
         String prompt = intent.getStringExtra("prompt");
         if (prompt != null && !prompt.isEmpty()) pendingPrompt = prompt;
+    }
+
+    private ExtensionUi extUi;
+    private LinearLayout actions;
+    private android.widget.TextView actionsTitle;
+    private EditText actionsInput;
+    private LinearLayout actionsButtons;
+    private final java.util.LinkedHashMap<String, String> extStatuses = new java.util.LinkedHashMap<>();
+    private String uiTarget;
+    private String pendingUiTarget;
+
+    private void openUiTarget(String target) {
+        if (target == null) return;
+        pendingUiTarget = null;
+        switch (target) {
+            case "sessions":
+                loadSessions();
+                break;
+            case "settings":
+                startActivity(new Intent(this, SettingsActivity.class));
+                break;
+            case "fork":
+                showForkPicker();
+                break;
+            case "models":
+                bridge.rpc("get_available_models", null);
+                bridge.rpc("get_available_thinking_levels", null);
+                showModelPicker();
+                break;
+            case "thinking":
+                bridge.rpc("get_available_thinking_levels", null);
+                showThinkingPicker();
+                break;
+            case "newsession":
+                startNewSession();
+                break;
+            default:
+                break;
+        }
     }
 
     /** 未连上时先排队，onStatus(online) 里再发 —— 桥可能也才刚拉起 Pi。 */
@@ -158,6 +236,12 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
         super.onNewIntent(intent);
         setIntent(intent);      // singleTop：新的分享intent在这里到，onCreate 不会再跑
         handleIntentExtras(intent);
+        // 已经连着的话直接开面板；没连上则由 onStatus(online) 补做
+        if (bridge.isConnected() && pendingUiTarget != null) {
+            String target = pendingUiTarget;
+            pendingUiTarget = null;
+            main.postDelayed(() -> openUiTarget(target), 400);
+        }
         if (pendingPrompt != null) {
             String text = pendingPrompt;
             pendingPrompt = null;
@@ -225,6 +309,8 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
         menu.add(Menu.NONE, 3, 300, R.string.action_reload);
         menu.add(Menu.NONE, 5, 500, R.string.action_model);
         menu.add(Menu.NONE, 6, 600, R.string.action_thinking);
+        menu.add(Menu.NONE, 7, 700, R.string.action_sessions);
+        menu.add(Menu.NONE, 8, 800, R.string.action_fork);
         menu.add(Menu.NONE, 4, 400, R.string.settings);
         return true;
     }
@@ -233,9 +319,7 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
     public boolean onOptionsItemSelected(@NonNull MenuItem item) {
         switch (item.getItemId()) {
             case 1:
-                bridge.rpc("new_session", null);
-                adapter.clear();
-                adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "新会话已开始。"));
+                startNewSession();
                 return true;
             case 2:
                 bridge.rpc("abort", null);
@@ -245,6 +329,12 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
                 return true;
             case 6:
                 showThinkingPicker();
+                return true;
+            case 7:
+                loadSessions();
+                return true;
+            case 8:
+                showForkPicker();
                 return true;
             case 3:
                 reconnect();
@@ -268,6 +358,12 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
             case "online":
                 setStatus(getString(R.string.status_online));
                 bridge.rpc("get_state", null);
+                if (pendingUiTarget != null) {
+                    String target = pendingUiTarget;
+                    pendingUiTarget = null;
+                    // 模型/档位列表要等 get_available_* 回来才有内容，稍等一拍再开面板
+                    main.postDelayed(() -> openUiTarget(target), 400);
+                }
                 if (pendingPrompt != null) {
                     String text = pendingPrompt;
                     pendingPrompt = null;
@@ -287,6 +383,64 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
     public void onResponse(String id, boolean ok, String command, @Nullable JSONObject data, @Nullable String error) {
         if (!ok) {
             adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, command + " 失败：" + error));
+            return;
+        }
+        if ("list_sessions".equals(command)) {
+            renderSessions(data);
+            return;
+        }
+        if ("switch_session".equals(command) && data != null) {
+            if (data.optBoolean("cancelled", false)) {
+                adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "切换会话被扩展取消了。"));
+            } else {
+                bridge.rpc("get_messages", null);
+            }
+            return;
+        }
+        if ("get_messages".equals(command)) {
+            renderHistory(data);
+            return;
+        }
+        if ("get_fork_messages".equals(command) && data != null) {
+            JSONArray msgs = data.optJSONArray("messages");
+            final java.util.List<CharSequence> labels = new java.util.ArrayList<>();
+            final java.util.List<String> ids = new java.util.ArrayList<>();
+            if (msgs != null) {
+                for (int i = 0; i < msgs.length(); i++) {
+                    JSONObject m = msgs.optJSONObject(i);
+                    if (m == null) continue;
+                    String t = m.optString("text", "");
+                    t = t.replace("\\s+", " ").trim();
+                    if (t.length() > 60) t = t.substring(0, 60) + "…";
+                    labels.add(t.isEmpty() ? "(空)" : t);
+                    ids.add(m.optString("entryId", ""));
+                }
+            }
+            if (labels.isEmpty()) {
+                Toast.makeText(this, "当前会话没有可 fork 的消息", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            new androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle(R.string.action_fork)
+                    .setItems(labels.toArray(new CharSequence[0]), (dialog, which) -> {
+                        JSONObject params = new JSONObject();
+                        try {
+                            params.put("entryId", ids.get(which));
+                        } catch (Exception ignored) {
+                        }
+                        bridge.rpc("fork", params);
+                    })
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
+            return;
+        }
+        if ("fork".equals(command) && data != null) {
+            if (data.optBoolean("cancelled", false)) {
+                adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "fork 被扩展取消了。"));
+            } else {
+                adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "已 fork，从这条消息继续：" + data.optString("text", "")));
+                bridge.rpc("get_messages", null);
+            }
             return;
         }
         if ("get_available_models".equals(command) && data != null) {
@@ -329,6 +483,16 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
     @Override
     public void onEvent(@NonNull JSONObject ev) {
         String type = ev.optString("type");
+        if ("extension_ui_request".equals(type) && extUi != null) {
+            String method = ev.optString("method");
+            if ("select".equals(method) || "confirm".equals(method) || "input".equals(method) || "editor".equals(method)) {
+                // 阻塞式请求：先留一条可见记录。没有 logcat 的机器上，这是唯一可靠的取证方式
+                adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM,
+                        "扩展请求 " + method + "：" + ev.optString("title", ev.optString("message", ""))));
+            }
+            extUi.handle(ev);
+            return;
+        }
         android.util.Log.i(TAG, "event " + type);
         JSONObject agg = ev.optJSONObject("assistantMessageEvent");
         switch (type) {
@@ -419,6 +583,192 @@ public class MainActivity extends AppCompatActivity implements BridgeConnection.
     public void onFailure(@Nullable Throwable t) {
         adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM,
                 "连接失败：" + (t == null ? "?" : t.getMessage()) + "（Termux 里跑起 pi-rpc-bridge 了吗？）"));
+    }
+
+    /**
+     * 会话列表来自桥的本地命令 list_sessions：Pi 的 RPC 只有 get_tree（当前会话内部的树），
+     * 没有“有哪些会话文件”这条，所以列目录这件小事必须由桥代劳。
+     */
+    private void loadSessions() {
+        JSONObject params = new JSONObject();
+        try {
+            params.put("limit", 40);
+        } catch (Exception ignored) {
+        }
+        bridge.rpc("list_sessions", params);
+    }
+
+    private void setTitleExt(String title) {
+        String name = getString(R.string.app_name);
+        setTitle(title.isEmpty() ? name : name + " · " + title);
+    }
+
+    /**
+     * 扩展的阻塞式提问改用聊天流上方的一行按钮来问（不走 AlertDialog）。
+     * 屏幕旋转/虚拟屏熄灭都要能看见，否则用户没法回答、Pi 一直等着。
+     */
+    private void showExtensionActions(String kind, String title, String hint,
+                                      java.util.List<String> options, String prefill,
+                                      ExtensionUi.AnswerSink sink) {
+        actionsButtons.removeAllViews();
+        actions.setVisibility(android.view.View.VISIBLE);
+        actionsTitle.setText(title.isEmpty() ? "Pi" : title);
+        boolean wantsText = "input".equals(kind) || "editor".equals(kind);
+        actionsInput.setVisibility(wantsText ? android.view.View.VISIBLE : android.view.View.GONE);
+        if (wantsText) {
+            actionsInput.setText(prefill == null ? "" : prefill);
+            actionsInput.setHint(hint.isEmpty() ? (("editor".equals(kind) ? "编辑内容" : "输入")) : hint);
+        }
+        for (String opt : options) {
+            com.google.android.material.button.MaterialButton b =
+                    new MaterialButton(this);
+            b.setText(opt);
+            b.setTextSize(14f);
+            b.setPadding(8, 0, 8, 0);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp.setMarginEnd(12);
+            b.setLayoutParams(lp);
+            b.setOnClickListener(v -> {
+                hideExtensionActions();
+                if ("confirm".equals(kind)) sink.confirmed("确定".equals(opt));
+                else if ("取消".equals(opt)) sink.cancelled();
+                else if (wantsText) sink.value(actionsInput.getText().toString());
+                else sink.value(opt);
+            });
+            actionsButtons.addView(b);
+        }
+        adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "扩展提问：" + title + "（在下方按钮里回答）"));
+    }
+
+    private void hideExtensionActions() {
+        actions.setVisibility(android.view.View.GONE);
+        actionsButtons.removeAllViews();
+        actionsInput.setVisibility(android.view.View.GONE);
+    }
+
+    private static String notifyPrefix(String type) {
+        if ("error".equals(type)) return "⚠ ";
+        if ("warning".equals(type)) return "△ ";
+        return "• ";
+    }
+
+    /** 给 ExtensionUi 用的可见调试记录：本机 App 的 logcat 收不到，只能靠屏幕取证 */
+    void debugNote(String text) {
+        adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, text));
+    }
+
+    /** 扩展给的状态条目拼到顶栏右侧（同 key 覆盖，清空则移除），避免它抢走模型/状态那行。 */
+    private void renderExtStatus() {
+        if (extStatuses.isEmpty()) {
+            bridge.rpc("get_state", null);
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String v : extStatuses.values()) {
+            if (sb.length() > 0) sb.append(" · ");
+            sb.append(v);
+        }
+        setStatus(sb.length() > 60 ? sb.substring(0, 60) + "…" : sb.toString());
+    }
+
+    private void setTitle(Object titleOrResId) {
+        if (titleOrResId instanceof Integer) setTitle((Integer) titleOrResId);
+        else setTitle(String.valueOf(titleOrResId));
+    }
+
+    private void renderSessions(JSONObject data) {
+        JSONArray arr = data != null ? data.optJSONArray("sessions") : null;
+        sessionLabels.clear();
+        sessionPaths.clear();
+        if (arr != null) {
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject item = arr.optJSONObject(i);
+                if (item == null) continue;
+                String path = item.optString("path", "");
+                if (path.isEmpty()) continue;
+                String preview = item.optString("preview", "");
+                if (preview.isEmpty()) preview = "(无预览)";
+                preview = preview.replace("\\s+", " ").trim();
+                if (preview.length() > 60) preview = preview.substring(0, 60) + "…";
+                long mtime = item.optLong("mtimeMs", 0L);
+                sessionLabels.add(relTime(mtime) + " · " + preview);
+                sessionPaths.add(path);
+            }
+        }
+        if (sessionLabels.isEmpty()) {
+            Toast.makeText(this, "没有读到会话文件（会话目录变了？）", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(R.string.action_sessions)
+                .setItems(sessionLabels.toArray(new CharSequence[0]), (dialog, which) -> {
+                    JSONObject params = new JSONObject();
+                    try {
+                        params.put("sessionPath", sessionPaths.get(which));
+                    } catch (Exception ignored) {
+                    }
+                    bridge.rpc("switch_session", params);
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private String relTime(long ms) {
+        if (ms <= 0) return "?";
+        long diff = System.currentTimeMillis() - ms;
+        long min = diff / 60000L;
+        if (min < 1) return "刚刚";
+        if (min < 60) return min + " 分钟前";
+        long h = min / 60L;
+        if (h < 24) return h + " 小时前";
+        long d = h / 24L;
+        if (d < 30) return d + " 天前";
+        return android.text.format.DateFormat.format("yyyy-MM-dd", ms).toString();
+    }
+
+    /** 切到某个会话后，把它已有的消息渲染回列表（get_messages）。 */
+    private void renderHistory(JSONObject data) {
+        JSONArray messages = data != null ? data.optJSONArray("messages") : null;
+        java.util.List<ChatMessage> history = new java.util.ArrayList<>();
+        if (messages != null) {
+            for (int i = 0; i < messages.length(); i++) {
+                JSONObject m = messages.optJSONObject(i);
+                if (m == null) continue;
+                String text = textOfMessage(m);
+                if (text.isEmpty()) continue;
+                switch (m.optString("role", "")) {
+                    case "user":
+                        history.add(new ChatMessage(ChatMessage.Role.USER, text));
+                        break;
+                    case "assistant":
+                        history.add(new ChatMessage(ChatMessage.Role.AGENT, text));
+                        break;
+                    default:
+                        history.add(new ChatMessage(ChatMessage.Role.TOOL, text));
+                        break;
+                }
+            }
+        }
+        if (history.isEmpty()) {
+            adapter.clear();
+            adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "这个会话是空的。"));
+        } else {
+            adapter.replaceAll(history);
+        }
+        list.scrollToPosition(Math.max(0, adapter.size() - 1));
+    }
+
+    /** fork：从之前某条用户消息的新分支继续（Pi 的 get_fork_messages）。 */
+    private void showForkPicker() {
+        bridge.rpc("get_fork_messages", null);
+        Toast.makeText(this, "正在取可 fork 的消息…", Toast.LENGTH_SHORT).show();
+    }
+
+    private void startNewSession() {
+        bridge.rpc("new_session", null);
+        adapter.clear();
+        adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "新会话已开始。"));
     }
 
     private void showModelPicker() {

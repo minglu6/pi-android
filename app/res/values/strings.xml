@@ -17,4 +17,6 @@
     <string name="status_offline_with">未连接（%1$s）</string>
     <string name="action_model">Model</string>
     <string name="action_thinking">Thinking</string>
+    <string name="action_sessions">Sessions</string>
+    <string name="action_fork">Fork from…</string>
 </resources>

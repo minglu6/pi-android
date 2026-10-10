@@ -74,7 +74,13 @@ adb shell am start -n dev.pi.android/.ui.MainActivity --es token "$TOKEN" --disp
 - 提问与流式回复（`message_update` delta 累积，`text_end`/`message_end` 用权威文本覆写）；
 - 工具调用气泡（`tool_execution_start/update/end`）；
 - 中断（abort）、新建会话、模型切换、思考档位切换；
-- `get_state` 驱动的顶栏状态（模型名 · 思考档位 · ready）。
+- `get_state` 驱动的顶栏状态（模型名 · 思考档位 · ready）；
+- **会话列表（`list_sessions`，桥侧本地命令） `list_sessions`**：Pi 的 RPC 没有“有哪些会话”这条（只有当前会话内部的
+  `get_tree`），所以列 `$HOME/.pi/agent/sessions/**/*.jsonl` 由桥代劳；点条目即可切换并重建历史；
+- **扩展 UI 子协议**：select / confirm / input / editor 用聊天流下方的一行按钮作答，
+  notify 落成气泡、setStatus/setTitle 反映到顶栏。为什么不用 AlertDialog：本机 scrcpy 虚拟屏上
+  AlertDialog 有“对象创建成功、isShowing() 为 true、屏幕上却什么都没有”的情况，而这几种请求是
+  **阻塞式**的 —— 没有可见 UI 就等于把 Pi 挂死。
 
 还没做：
 
