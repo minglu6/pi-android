@@ -102,11 +102,12 @@ gh run watch
 - WebSocket + token 鉴权 + 按配置签名重连
 - 流式回复、工具气泡、abort（菜单 / 发送钮）
 - 新建会话、模型 / 思考档位切换；`get_state` 状态芯片
-- 前台 `BridgeService`（常驻通知，后台不丢连接）
-- 会话列表（`list_sessions` → `switch_session` → `get_messages`）、Fork
+- 前台 `BridgeService`（常驻通知 / 连接器状态，后台不丢连接）
+- 会话列表（`list_sessions` → `switch_session` → `get_messages`）、Fork；可重命名 / 删除
 - 扩展 UI：select / confirm / input / editor（前台按钮行；后台通知；`notify` / `setStatus` / `setTitle`）
 - 首启空状态（无 Token / 未连接引导）、adaptive + monochrome 图标
 - GitHub Actions 自动打 APK
+- 日用聊天打磨：Markdown/代码块、时间戳、断线横幅、粘底滚动、会话重命名/删除
 
 ### 已知限制 / 未做
 

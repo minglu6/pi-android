@@ -82,9 +82,14 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private TextView emptyTitle;
     private TextView emptyBody;
     private MaterialButton emptyAction;
+    private View reconnectBanner;
+    private TextView reconnectText;
+    private View scrollBottom;
     private BridgeService service;
     private boolean serviceBound;
     private boolean resumed;
+    /** 用户靠近列表底部时才自动跟滚；上翻阅读时不打断。 */
+    private boolean stickToBottom = true;
 
     /** contentIndex -> 该块的累积文本 */
     private final Map<Integer, StringBuilder> blocks = new LinkedHashMap<>();
@@ -93,11 +98,14 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private boolean streaming;
     private String pendingPrompt;
     private String lastConfig;
+    private String currentSessionPath = "";
+    private String currentSessionName = "";
     private final java.util.List<CharSequence> modelLabels = new java.util.ArrayList<>();
     private final java.util.List<String[]> modelRefs = new java.util.ArrayList<>();
     private final java.util.List<CharSequence> thinkingLevels = new java.util.ArrayList<>();
     private final java.util.List<CharSequence> sessionLabels = new java.util.ArrayList<>();
     private final java.util.List<String> sessionPaths = new java.util.ArrayList<>();
+    private final java.util.List<String> sessionNames = new java.util.ArrayList<>();
 
     private LinearLayout actions;
     private TextView actionsTitle;
@@ -127,6 +135,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         emptyTitle = findViewById(R.id.empty_title);
         emptyBody = findViewById(R.id.empty_body);
         emptyAction = findViewById(R.id.empty_action);
+        reconnectBanner = findViewById(R.id.reconnect_banner);
+        reconnectText = findViewById(R.id.reconnect_text);
+        scrollBottom = findViewById(R.id.scroll_bottom);
         actions = findViewById(R.id.actions);
         actionsTitle = findViewById(R.id.actions_title);
         actionsInput = findViewById(R.id.actions_input);
@@ -138,9 +149,20 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         list.setLayoutManager(lm);
         adapter = new MessageAdapter(size -> {
             refreshEmptyState();
-            if (size > 0) list.smoothScrollToPosition(size - 1);
+            maybeScrollToBottom(false);
         });
         list.setAdapter(adapter);
+        list.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override
+            public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
+                updateStickToBottom();
+            }
+        });
+        scrollBottom.setOnClickListener(v -> {
+            stickToBottom = true;
+            scrollBottom.setVisibility(View.GONE);
+            maybeScrollToBottom(true);
+        });
 
         findViewById(R.id.btn_sessions).setOnClickListener(v -> {
             if (!isConnected()) {
@@ -151,6 +173,13 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         });
         emptyAction.setOnClickListener(v ->
                 startActivity(new Intent(this, SettingsActivity.class)));
+        findViewById(R.id.reconnect_btn).setOnClickListener(v -> {
+            if (!SettingsActivity.hasToken(this)) {
+                startActivity(new Intent(this, SettingsActivity.class));
+            } else {
+                reconnect();
+            }
+        });
 
         Intent svc = new Intent(this, BridgeService.class);
         ContextCompat.startForegroundService(this, svc);
@@ -251,7 +280,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 throw new IllegalStateException("prompt params", e);
             }
             rpc("prompt", params);
-            setConnectionVisual("online", "thinking…");
+            setConnectionVisual("online", getString(R.string.status_thinking));
+            stickToBottom = true;
+            maybeScrollToBottom(true);
         }
     }
 
@@ -369,9 +400,57 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     private void updateSendEnabled() {
         if (send == null || composer == null) return;
-        boolean canSend = streaming || composer.getText().toString().trim().length() > 0;
+        boolean connected = isConnected();
+        composer.setEnabled(connected || streaming);
+        composer.setHint(getString(connected || streaming ? R.string.hint_message : R.string.hint_disconnected));
+        boolean canSend = streaming || (connected && composer.getText().toString().trim().length() > 0);
         send.setEnabled(canSend);
         send.setAlpha(canSend ? 1f : 0.45f);
+    }
+
+    private void updateStickToBottom() {
+        if (list == null || scrollBottom == null) return;
+        LinearLayoutManager lm = (LinearLayoutManager) list.getLayoutManager();
+        if (lm == null) return;
+        int last = lm.findLastVisibleItemPosition();
+        int total = adapter == null ? 0 : adapter.size();
+        stickToBottom = total == 0 || last >= total - 2;
+        scrollBottom.setVisibility(stickToBottom || total == 0 ? View.GONE : View.VISIBLE);
+    }
+
+    private void maybeScrollToBottom(boolean force) {
+        if (list == null || adapter == null || adapter.size() == 0) return;
+        if (!force && !stickToBottom) {
+            if (scrollBottom != null) scrollBottom.setVisibility(View.VISIBLE);
+            return;
+        }
+        list.post(() -> list.smoothScrollToPosition(adapter.size() - 1));
+        if (scrollBottom != null) scrollBottom.setVisibility(View.GONE);
+    }
+
+    private void refreshReconnectBanner() {
+        if (reconnectBanner == null) return;
+        if (isConnected()) {
+            reconnectBanner.setVisibility(View.GONE);
+            return;
+        }
+        reconnectBanner.setVisibility(View.VISIBLE);
+        if (reconnectText != null) {
+            reconnectText.setText(SettingsActivity.hasToken(this)
+                    ? R.string.reconnect_banner
+                    : R.string.reconnect_banner_token);
+        }
+    }
+
+    private void applySessionTitle() {
+        TextView brand = findViewById(R.id.brand_title);
+        if (brand == null) return;
+        String name = getString(R.string.app_name);
+        if (currentSessionName != null && !currentSessionName.isEmpty()) {
+            brand.setText(name + " · " + currentSessionName);
+        } else {
+            brand.setText(name);
+        }
     }
 
     private void onSendOrStop() {
@@ -403,7 +482,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             throw new IllegalStateException("prompt params", e);
         }
         rpc("prompt", params);
-        setConnectionVisual("online", "thinking…");
+        setConnectionVisual("online", getString(R.string.status_thinking));
+        stickToBottom = true;
+        maybeScrollToBottom(true);
     }
 
     private void setConnectionVisual(String state, String label) {
@@ -427,12 +508,16 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         dot.setShape(GradientDrawable.OVAL);
         dot.setColor(ContextCompat.getColor(this, color));
         statusDot.setBackground(dot);
+        updateSendEnabled();
+        refreshReconnectBanner();
     }
 
     private void refreshEmptyState() {
         if (emptyState == null || adapter == null) return;
         boolean show = adapter.onlySystemOrEmpty();
         emptyState.setVisibility(show ? View.VISIBLE : View.GONE);
+        refreshReconnectBanner();
+        updateSendEnabled();
         if (!show) return;
 
         if (!SettingsActivity.hasToken(this)) {
@@ -500,7 +585,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
     }
 
-    // ---------- 桥事件 ----------
+    // ---------- 连接器事件 ----------
 
     @Override
     public void onStatus(String state, @Nullable String error) {
@@ -512,6 +597,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 lastConfig = SettingsActivity.configSignature(this);
                 setConnectionVisual("online", getString(R.string.status_online));
                 rpc("get_state", null);
+                rpc("get_session_name", null);
                 refreshEmptyState();
                 if (pendingUiTarget != null) {
                     String target = pendingUiTarget;
@@ -542,14 +628,40 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             return;
         }
         if ("list_sessions".equals(command)) {
+            if (data != null && data.has("error") && !data.isNull("error")
+                    && !data.optString("error").isEmpty()) {
+                Toast.makeText(this, getString(R.string.session_list_error, data.optString("error")),
+                        Toast.LENGTH_LONG).show();
+            }
             renderSessions(data);
+            return;
+        }
+        if ("delete_session".equals(command)) {
+            Toast.makeText(this, R.string.session_deleted, Toast.LENGTH_SHORT).show();
+            if (data != null && data.optString("path").equals(currentSessionPath)) {
+                currentSessionPath = "";
+                startNewSession();
+            } else {
+                loadSessions();
+            }
+            return;
+        }
+        if ("set_session_name".equals(command)) {
+            rpc("get_session_name", null);
+            return;
+        }
+        if ("get_session_name".equals(command) && data != null) {
+            currentSessionName = data.optString("name", data.optString("sessionName", ""));
+            applySessionTitle();
             return;
         }
         if ("switch_session".equals(command) && data != null) {
             if (data.optBoolean("cancelled", false)) {
                 adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "切换会话被扩展取消了。"));
             } else {
+                stickToBottom = true;
                 rpc("get_messages", null);
+                rpc("get_session_name", null);
             }
             return;
         }
@@ -602,8 +714,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             return;
         }
         if ("new_session".equals(command)) {
+            currentSessionPath = "";
+            currentSessionName = "";
+            applySessionTitle();
             adapter.clear();
             adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, getString(R.string.new_session_started)));
+            stickToBottom = true;
             refreshEmptyState();
             return;
         }
@@ -641,6 +757,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             modelStatus = (name != null ? name : getString(R.string.status_online))
                     + (thinking != null && !thinking.isEmpty() ? " · " + thinking : "");
             setConnectionVisual("online", modelStatus);
+            String path = data.optString("sessionFile", data.optString("sessionPath", ""));
+            if (!path.isEmpty()) currentSessionPath = path;
+            if (data.has("sessionName")) currentSessionName = data.optString("sessionName", "");
+            applySessionTitle();
             rpc("get_available_models", null);
             rpc("get_available_thinking_levels", null);
         }
@@ -682,16 +802,16 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                             blocks.put(idx, sb);
                         }
                         sb.append(agg.optString("delta", ""));
-                        adapter.upsertTail(new ChatMessage(ChatMessage.Role.AGENT, joinBlocks()));
+                        adapter.upsertTail(new ChatMessage(ChatMessage.Role.AGENT, joinBlocks(), true));
                         break;
                     }
                     case "text_end":
                         blocks.put(idx, new StringBuilder(agg.optString("content", "")));
-                        adapter.upsertTail(new ChatMessage(ChatMessage.Role.AGENT, joinBlocks()));
+                        adapter.upsertTail(new ChatMessage(ChatMessage.Role.AGENT, joinBlocks(), true));
                         break;
                     case "thinking_start":
                     case "thinking_delta":
-                        setConnectionVisual("online", "thinking…");
+                        setConnectionVisual("online", getString(R.string.status_thinking));
                         break;
                     case "toolcall_start": {
                         String name = agg.optString("toolName", "tool");
@@ -747,6 +867,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 }
                 return;
             case "session_info_changed":
+                currentSessionName = ev.optString("name", currentSessionName);
+                applySessionTitle();
                 adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM,
                         "会话名：" + ev.optString("name")));
                 return;
@@ -761,8 +883,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     @Override
     public void onFailure(@Nullable Throwable t) {
         adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM,
-                "连接失败：" + (t == null ? "?" : t.getMessage())
-                        + "（Termux 里跑起 pi-rpc-bridge 了吗？）"));
+                getString(R.string.connection_failed, t == null ? "?" : t.getMessage())));
         refreshEmptyState();
     }
 
@@ -841,35 +962,117 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         JSONArray arr = data != null ? data.optJSONArray("sessions") : null;
         sessionLabels.clear();
         sessionPaths.clear();
+        sessionNames.clear();
         if (arr != null) {
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject item = arr.optJSONObject(i);
                 if (item == null) continue;
                 String path = item.optString("path", "");
                 if (path.isEmpty()) continue;
+                String name = item.optString("name", "").trim();
                 String preview = item.optString("preview", "");
                 if (preview.isEmpty()) preview = "(无预览)";
                 preview = preview.replaceAll("\\s+", " ").trim();
-                if (preview.length() > 60) preview = preview.substring(0, 60) + "…";
+                if (preview.length() > 48) preview = preview.substring(0, 48) + "…";
                 long mtime = item.optLong("mtimeMs", 0L);
-                sessionLabels.add(relTime(mtime) + " · " + preview);
+                boolean current = path.equals(currentSessionPath);
+                String head = name.isEmpty() ? preview : name;
+                String line = (current ? getString(R.string.session_current_prefix) : "")
+                        + relTime(mtime) + " · " + head
+                        + (name.isEmpty() ? "" : "\n    " + preview);
+                sessionLabels.add(line);
                 sessionPaths.add(path);
+                sessionNames.add(name);
             }
         }
         if (sessionLabels.isEmpty()) {
-            Toast.makeText(this, "没有读到会话文件（会话目录变了？）", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, R.string.session_none, Toast.LENGTH_SHORT).show();
             return;
         }
         new androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle(R.string.action_sessions)
-                .setItems(sessionLabels.toArray(new CharSequence[0]), (dialog, which) -> {
+                .setItems(sessionLabels.toArray(new CharSequence[0]), (dialog, which) ->
+                        showSessionActions(which))
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void showSessionActions(int index) {
+        final String path = sessionPaths.get(index);
+        final String knownName = sessionNames.get(index);
+        boolean current = path.equals(currentSessionPath);
+        CharSequence[] actions = current
+                ? new CharSequence[]{
+                    getString(R.string.session_open),
+                    getString(R.string.session_rename),
+                    getString(R.string.session_delete)}
+                : new CharSequence[]{
+                    getString(R.string.session_open),
+                    getString(R.string.session_delete)};
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(sessionLabels.get(index))
+                .setItems(actions, (d, which) -> {
+                    String action = String.valueOf(actions[which]);
+                    if (action.equals(getString(R.string.session_open))) {
+                        switchToSession(path);
+                    } else if (action.equals(getString(R.string.session_rename))) {
+                        promptRenameSession(knownName);
+                    } else if (action.equals(getString(R.string.session_delete))) {
+                        confirmDeleteSession(path);
+                    }
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void switchToSession(String path) {
+        currentSessionPath = path;
+        JSONObject params = new JSONObject();
+        try {
+            params.put("sessionPath", path);
+        } catch (Exception e) {
+            throw new IllegalStateException("switch_session params", e);
+        }
+        rpc("switch_session", params);
+    }
+
+    private void promptRenameSession(String prefill) {
+        final EditText input = new EditText(this);
+        input.setText(prefill == null ? "" : prefill);
+        input.setHint(R.string.session_rename_hint);
+        int pad = (int) (20 * getResources().getDisplayMetrics().density);
+        input.setPadding(pad, pad / 2, pad, pad / 2);
+        input.setTextColor(ContextCompat.getColor(this, R.color.text_primary));
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(R.string.session_rename_title)
+                .setView(input)
+                .setPositiveButton(android.R.string.ok, (d, w) -> {
+                    String name = input.getText().toString().trim();
                     JSONObject params = new JSONObject();
                     try {
-                        params.put("sessionPath", sessionPaths.get(which));
+                        params.put("name", name);
                     } catch (Exception e) {
-                        throw new IllegalStateException("switch_session params", e);
+                        throw new IllegalStateException("set_session_name params", e);
                     }
-                    rpc("switch_session", params);
+                    rpc("set_session_name", params);
+                    currentSessionName = name;
+                    applySessionTitle();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void confirmDeleteSession(String path) {
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setMessage(R.string.session_delete_confirm)
+                .setPositiveButton(R.string.session_delete, (d, w) -> {
+                    JSONObject params = new JSONObject();
+                    try {
+                        params.put("sessionPath", path);
+                    } catch (Exception e) {
+                        throw new IllegalStateException("delete_session params", e);
+                    }
+                    rpc("delete_session", params);
                 })
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
@@ -916,7 +1119,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         } else {
             adapter.replaceAll(history);
         }
+        stickToBottom = true;
         list.scrollToPosition(Math.max(0, adapter.size() - 1));
+        if (scrollBottom != null) scrollBottom.setVisibility(View.GONE);
         refreshEmptyState();
     }
 
@@ -926,9 +1131,13 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private void startNewSession() {
+        currentSessionPath = "";
+        currentSessionName = "";
+        applySessionTitle();
         rpc("new_session", null);
         adapter.clear();
         adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, getString(R.string.new_session_started)));
+        stickToBottom = true;
         refreshEmptyState();
     }
 

@@ -35,7 +35,7 @@ import dev.pi.android.ui.SettingsActivity;
  * 服务持有连接后，提问可以落到通知栏：不管用户在哪个界面都能点一下答掉。
  *
  * <p>前台服务而不是后台服务：本机后台进程会被系统清理（见 AGENTS.md），前台服务带常驻通知，
- * 存活率高得多。代价是常驻一条通知，所以通知里放了「停止桥」。
+ * 存活率高得多。代价是常驻一条通知，所以通知里放了「停止连接器」。
  */
 public class BridgeService extends Service {
 

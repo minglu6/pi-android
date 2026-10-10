@@ -300,7 +300,16 @@ function listSessions(limit) {
  * 头里没有（长会话把早期消息挤出了头）就从尾部 128 KiB 取最近一条用户消息 —— 更符合“切回上次那条”的直觉。
  */
 function enrichSession(entry) {
-  const out = { path: entry.path, bytes: entry.bytes, mtimeMs: entry.mtimeMs, id: null, cwd: null, timestamp: null, preview: "" };
+  const out = {
+    path: entry.path,
+    bytes: entry.bytes,
+    mtimeMs: entry.mtimeMs,
+    id: null,
+    cwd: null,
+    timestamp: null,
+    name: null,
+    preview: "",
+  };
   try {
     const fh = fs.openSync(entry.path, "r");
     const headLen = Math.min(entry.bytes, 65536);
@@ -338,11 +347,21 @@ function scanHead(out, text) {
       out.id = rec.id || null;
       out.cwd = rec.cwd || null;
       out.timestamp = rec.timestamp || null;
+      if (typeof rec.name === "string" && rec.name.trim()) out.name = rec.name.trim();
+      continue;
+    }
+    // 后续改名常见写成独立记录；后写覆盖先写
+    if (
+      (rec.type === "session_info" || rec.type === "session_name" || rec.type === "name") &&
+      typeof (rec.name || rec.title) === "string"
+    ) {
+      const n = String(rec.name || rec.title).trim();
+      if (n) out.name = n;
       continue;
     }
     if (!out.preview) {
-      const text = userTextOfLine(line);
-      if (text) out.preview = text;
+      const preview = userTextOfLine(line);
+      if (preview) out.preview = preview;
     }
   }
   if (out.preview) out.preview = out.preview.slice(0, 200);
@@ -370,8 +389,24 @@ function textOfContentLike(content) {
   return "";
 }
 
+function assertUnderSessionsDir(sessionPath) {
+  if (typeof sessionPath !== "string" || !sessionPath.trim()) {
+    throw new Error("缺少 sessionPath");
+  }
+  const root = path.resolve(SESSIONS_DIR);
+  const resolved = path.resolve(sessionPath);
+  const prefix = root.endsWith(path.sep) ? root : root + path.sep;
+  if (resolved !== root && !resolved.startsWith(prefix)) {
+    throw new Error("sessionPath 不在会话目录内");
+  }
+  if (!resolved.endsWith(".jsonl")) {
+    throw new Error("不是会话文件（.jsonl）");
+  }
+  return resolved;
+}
+
 function writeCommand(id, ws, command, params) {
-  // 桥自己的本地命令：不进 Pi 的 stdin，直接由桥回答
+  // 连接器本地命令：不进 Pi 的 stdin，直接由本进程回答
   if (command === "list_sessions") {
     const t0 = Date.now();
     let items = [];
@@ -384,6 +419,17 @@ function writeCommand(id, ws, command, params) {
     log(`local list_sessions -> ${items.length} 项 (${Date.now() - t0}ms)`);
     respond(ws, id, true, "list_sessions",
       err ? { sessions: [], error: err } : { sessions: items, dir: SESSIONS_DIR }, err);
+    return;
+  }
+  if (command === "delete_session") {
+    try {
+      const target = assertUnderSessionsDir((params || {}).sessionPath);
+      fs.unlinkSync(target);
+      log(`local delete_session ${target}`);
+      respond(ws, id, true, "delete_session", { path: target, deleted: true }, null);
+    } catch (e) {
+      respond(ws, id, false, "delete_session", null, e.message);
+    }
     return;
   }
   if (!ALLOWED.has(command)) {
@@ -497,4 +543,4 @@ if (!token) {
   log("! 未读到 token 文件，任何本机 App 都能连进来。建议建一份 600 权限的 token：");
   log(`  umask 077; head -c 24 /dev/urandom | base64 > ${TOKEN_FILE}`);
 }
-log(`桥 listening ws://${HOST}:${PORT}/ws  pi=${PI_BIN}  cwd=${CWD}  bash=${ALLOW_BASH ? "on" : "off"}`);
+log(`连接器 listening ws://${HOST}:${PORT}/ws  pi=${PI_BIN}  cwd=${CWD}  bash=${ALLOW_BASH ? "on" : "off"}`);
