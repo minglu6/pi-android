@@ -45,16 +45,18 @@ public final class ExportMarkdown {
 
     private static void appendTool(StringBuilder sb, ChatMessage m) {
         ChatMessage.ToolData t = m.tool;
-        String name = t != null ? t.name : "tool";
+        boolean thinking = t != null && ChatMessage.ToolData.NAME_THINKING.equals(t.name);
+        String name = t == null ? "tool"
+                : thinking ? "思考" : t.name;
         String command = t != null ? t.command : "";
         String output = t != null ? t.output : (m.text == null ? "" : m.text);
         String state = t != null ? t.state : "";
         sb.append("<details>\n<summary>");
         sb.append(escape(name));
-        if (!command.isEmpty()) sb.append(": ").append(escape(firstLine(command)));
-        if (!state.isEmpty()) sb.append(" (").append(escape(state)).append(')');
+        if (!thinking && !command.isEmpty()) sb.append(": ").append(escape(firstLine(command)));
+        if (!thinking && !state.isEmpty()) sb.append(" (").append(escape(state)).append(')');
         sb.append("</summary>\n\n");
-        if (!command.isEmpty()) {
+        if (!thinking && !command.isEmpty()) {
             sb.append("```bash\n").append(command);
             if (!command.endsWith("\n")) sb.append('\n');
             sb.append("```\n\n");

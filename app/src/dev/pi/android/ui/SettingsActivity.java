@@ -22,7 +22,6 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
@@ -33,13 +32,13 @@ import dev.pi.android.BuildInfo;
 import dev.pi.android.R;
 import dev.pi.android.bridge.AgentState;
 import dev.pi.android.bridge.BridgeService;
-import dev.pi.android.bridge.ModelRpc;
 import dev.pi.android.model.PickerItem;
 import dev.pi.android.ui.ExtensionUi;
 import dev.pi.android.util.AppFonts;
 
 /**
- * 独立设置页：连接器、模型/思考、主题、关于。
+ * 独立设置页：连接器、模型/思考（只读状态）、主题、关于。
+ * 模型与思考档位切换只在聊天页 composer 模型芯片 / Pocket picker。
  */
 public class SettingsActivity extends AppCompatActivity implements BridgeService.UiHost {
 
@@ -62,12 +61,6 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
 
     private BridgeService service;
     private boolean serviceBound;
-    private final List<CharSequence> modelLabels = new ArrayList<>();
-    private final List<String[]> modelRefs = new ArrayList<>();
-    private final List<CharSequence> thinkingLevels = new ArrayList<>();
-    private String currentModelLabel = "";
-    private String currentThinking = "";
-    private long thinkingRevision = -1;
     private boolean visible;
 
     private final AgentState.Listener agentListener = this::applyAgentStateToUi;
@@ -185,8 +178,7 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
             aboutVersion.setText(getString(R.string.settings_version_fmt, BuildInfo.HEAD, BuildInfo.BUILD_TIME));
         }
 
-        findViewById(R.id.pref_model).setOnClickListener(v -> showModelPicker());
-        findViewById(R.id.pref_thinking).setOnClickListener(v -> showThinkingPicker());
+        // pref_model / pref_thinking are read-only status; switch via composer chip.
         findViewById(R.id.pref_theme).setOnClickListener(v -> showThemePicker());
 
         termFontValue = findViewById(R.id.pref_term_font_value);
@@ -265,21 +257,16 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
 
     private void applyAgentStateToUi() {
         AgentState st = AgentState.get();
-        currentModelLabel = st.modelLabel();
-        currentThinking = st.thinking();
-        if (modelValue != null) modelValue.setText(currentModelLabel.isEmpty() ? "—" : currentModelLabel);
-        if (thinkingValue != null) thinkingValue.setText(currentThinking.isEmpty() ? "—" : currentThinking);
-        if (thinkingRevision != st.modelRevision()) {
-            thinkingLevels.clear();
-            thinkingRevision = st.modelRevision();
-        }
+        String model = st.modelLabel();
+        String thinking = st.thinking();
+        if (modelValue != null) modelValue.setText(model.isEmpty() ? "—" : model);
+        if (thinkingValue != null) thinkingValue.setText(thinking.isEmpty() ? "—" : thinking);
     }
 
     private void refreshFromService() {
         if (service == null || !service.isConnected()) return;
+        // Only need current identity for read-only display; lists live in MainActivity picker.
         service.rpc("get_state", null);
-        service.rpc("get_available_models", null);
-        service.rpc("get_available_thinking_levels", null);
     }
 
     private void saveConnectorFields() {
@@ -373,71 +360,6 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
         sheet.show();
     }
 
-    private void showModelPicker() {
-        if (service == null || !service.isConnected()) {
-            Toast.makeText(this, R.string.settings_need_connector, Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (modelLabels.isEmpty()) {
-            service.rpc("get_available_models", null);
-            Toast.makeText(this, R.string.models_not_ready, Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (!requireFreshModelState()) return;
-        String curProv = AgentState.get().provider();
-        String curId = AgentState.get().modelId();
-        Pickers.showModel(this, modelLabels, modelRefs, curProv, curId, (provider, modelId) -> {
-            if (!requireFreshModelState()) return;
-            JSONObject params = ModelRpc.setModelParams(provider, modelId);
-            if (params == null) {
-                Toast.makeText(this, R.string.model_ref_invalid, Toast.LENGTH_SHORT).show();
-                return;
-            }
-            service.rpc("set_model", params);
-        });
-    }
-
-    private void showThinkingPicker() {
-        if (service == null || !service.isConnected()) {
-            Toast.makeText(this, R.string.settings_need_connector, Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (!requireFreshModelState()) return;
-        if (thinkingLevels.isEmpty()) {
-            service.rpc("get_available_thinking_levels", null);
-            Toast.makeText(this, R.string.thinking_not_ready, Toast.LENGTH_SHORT).show();
-            return;
-        }
-        long openedRevision = AgentState.get().modelRevision();
-        Pickers.showThinking(this, thinkingLevels, currentThinking, level -> {
-            if (!requireFreshModelState()) return;
-            if (openedRevision != AgentState.get().modelRevision()) {
-                service.rpc("get_available_thinking_levels", null);
-                Toast.makeText(this, R.string.thinking_not_ready, Toast.LENGTH_SHORT).show();
-                return;
-            }
-            JSONObject params = new JSONObject();
-            try {
-                params.put("level", level);
-            } catch (Exception e) {
-                throw new IllegalStateException("set_thinking_level params", e);
-            }
-            // 请求值不是实际值：服务在响应后 get_state，按服务端钳制结果刷新。
-            service.rpc("set_thinking_level", params);
-        });
-    }
-
-    private boolean requireFreshModelState() {
-        if (service == null || !service.isConnected()) {
-            Toast.makeText(this, R.string.settings_need_connector, Toast.LENGTH_SHORT).show();
-            return false;
-        }
-        if (AgentState.get().isFresh()) return true;
-        if (service != null) service.rpc("get_state", null);
-        Toast.makeText(this, "正在同步模型与思考状态…", Toast.LENGTH_SHORT).show();
-        return false;
-    }
-
     private static int requirePort(String s) {
         try {
             int p = Integer.parseInt(s.trim());
@@ -453,13 +375,8 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
     // ---------- BridgeService.UiHost ----------
 
     @Override public void onStatus(String state, @Nullable String error) {
-        // starting ≡ running: connector is up — keep model lists, same as online.
+        // starting ≡ running: connector is up — refresh read-only model/thinking status.
         if ("online".equals(state) || "starting".equals(state)) refreshFromService();
-        else {
-            modelLabels.clear();
-            modelRefs.clear();
-            thinkingLevels.clear();
-        }
     }
 
     @Override public void onEvent(JSONObject ev) {
@@ -469,45 +386,15 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
     @Override
     public void onResponse(String id, boolean ok, String command, @Nullable JSONObject data, @Nullable String error) {
         if (!ok) {
-            if (visible && ("set_model".equals(command) || "set_thinking_level".equals(command)
-                    || "get_state".equals(command) || "get_available_models".equals(command)
-                    || "get_available_thinking_levels".equals(command))) {
+            if (visible && "get_state".equals(command)) {
                 String detail = error != null && !error.isEmpty() ? error : getString(R.string.rpc_failed);
-                String message = "set_model".equals(command)
-                        ? getString(R.string.set_model_failed, detail) : detail;
-                Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+                Toast.makeText(this, detail, Toast.LENGTH_LONG).show();
             }
             return;
         }
-        if ("set_model".equals(command) || "set_thinking_level".equals(command)) {
-            // BridgeService 持有确认状态并负责 get_state；此处不持久化请求值。
-            applyAgentStateToUi();
-            if (visible && "set_model".equals(command) && !currentModelLabel.isEmpty()) {
-                Toast.makeText(this, currentModelLabel, Toast.LENGTH_SHORT).show();
-            }
-            return;
-        }
-        if (data == null) return;
-        if ("get_available_models".equals(command)) {
-            ModelRpc.Catalog cat = ModelRpc.parseAvailableModels(data);
-            modelLabels.clear();
-            modelRefs.clear();
-            modelLabels.addAll(cat.labels);
-            modelRefs.addAll(cat.refs);
-            return;
-        }
-        if ("get_available_thinking_levels".equals(command)) {
-            thinkingRevision = AgentState.get().modelRevision();
-            thinkingLevels.clear();
-            JSONArray levels = data.optJSONArray("levels");
-            if (levels == null) levels = data.optJSONArray("thinkingLevels");
-            if (levels != null) {
-                for (int i = 0; i < levels.length(); i++) thinkingLevels.add(levels.optString(i));
-            }
-            return;
-        }
-        if ("get_state".equals(command)) {
-            // BridgeService 已写入 AgentState；此处只刷新 UI
+        // set_model / set_thinking_level happen from MainActivity; AgentState listener refreshes UI.
+        if ("set_model".equals(command) || "set_thinking_level".equals(command)
+                || "get_state".equals(command)) {
             applyAgentStateToUi();
         }
     }

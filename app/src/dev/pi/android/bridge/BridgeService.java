@@ -127,7 +127,7 @@ public class BridgeService extends Service {
         tracing = new java.io.File(getFilesDir(), "debug.trace").exists();
         dbg("service onCreate");
         ensureChannel();
-        startForeground(ONGOING_ID, ongoingNotification("正在连接…"));
+        startForeground(ONGOING_ID, ongoingNotification("connecting"));
 
         bridge = new BridgeConnection();
         bridge.setTrace(msg -> dbg("conn: " + msg));
@@ -474,10 +474,11 @@ public class BridgeService extends Service {
         Intent stop = new Intent(this, BridgeService.class).setAction(ACTION_STOP);
         PendingIntent stopPi = PendingIntent.getService(this, 2, stop,
                 PendingIntent.FLAG_UPDATE_CURRENT | immutableFlag());
+        // Title stays "Pi 连接器"; status lives only in the body (no redundant 已连接×2).
         return new NotificationCompat.Builder(this, CHANNEL)
                 .setSmallIcon(R.drawable.ic_pi_logo)
-                .setContentTitle("Pi 连接器 · " + connectionStateLabel(state))
-                .setContentText(isConnected() ? "已连接（点一下打开对话）" : "未连接")
+                .setContentTitle(getString(R.string.notif_connector_title))
+                .setContentText(notificationBody(state))
                 .setContentIntent(pi)
                 .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -485,14 +486,32 @@ public class BridgeService extends Service {
                 .build();
     }
 
-    /** Map bridge status codes to Chinese labels; "starting" shows as 运行中 (running). */
-    private String connectionStateLabel(String state) {
-        if ("starting".equals(state)) return getString(R.string.status_starting_pi); // 运行中
-        if ("online".equals(state)) return getString(R.string.status_online);
-        if ("offline".equals(state)) return getString(R.string.status_offline);
-        if ("connecting".equals(state)) return getString(R.string.status_connecting);
-        // Already-localized strings (e.g. startForeground("正在连接…"))
-        return state == null || state.isEmpty() ? getString(R.string.status_offline) : state;
+    /**
+     * Body-only status: online/starting → 运行中 · 点一下打开对话;
+     * connecting → 连接中…; offline → 已断开.
+     */
+    private String notificationBody(String state) {
+        String status;
+        boolean openHint;
+        if ("starting".equals(state) || "online".equals(state)) {
+            status = getString(R.string.status_starting_pi); // 运行中
+            openHint = true;
+        } else if ("connecting".equals(state)) {
+            status = getString(R.string.status_connecting);
+            openHint = true;
+        } else if ("offline".equals(state)) {
+            status = getString(R.string.notif_connector_disconnected);
+            openHint = false;
+        } else if (state != null && !state.isEmpty() && !state.matches("[a-z_]+")) {
+            // Already-localized (e.g. startForeground("正在连接…"))
+            status = state;
+            openHint = isConnected();
+        } else {
+            status = getString(R.string.notif_connector_disconnected);
+            openHint = false;
+        }
+        if (openHint) return status + getString(R.string.notif_connector_tap_suffix);
+        return status;
     }
 
     /**

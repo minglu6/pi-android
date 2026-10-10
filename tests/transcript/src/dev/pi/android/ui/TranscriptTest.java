@@ -48,27 +48,50 @@ public final class TranscriptTest {
     }
     void toolDeltas() {
         event("{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"not prose\"},{\"type\":\"toolCall\",\"id\":\"t1\",\"name\":\"bash\",\"arguments\":{\"command\":\"printf demo\"}}]}}");
-        equal(0, rows.size());
+        equal(1, rows.size());
+        equal(ChatMessage.ToolData.NAME_THINKING, rows.get(0).tool.name);
+        equal("not prose", rows.get(0).tool.output);
         tool("tool_execution_start", "t1", null);
-        equal("printf demo", rows.get(0).tool.command); equal("running", rows.get(0).tool.state);
-        tool("tool_execution_update", "t1", "a"); equal("a", rows.get(0).tool.output);
-        tool("tool_execution_update", "t1", "ab"); equal("ab", rows.get(0).tool.output); equal(1, rows.size());
+        equal("printf demo", rows.get(1).tool.command); equal("running", rows.get(1).tool.state);
+        tool("tool_execution_update", "t1", "a"); equal("a", rows.get(1).tool.output);
+        tool("tool_execution_update", "t1", "ab"); equal("ab", rows.get(1).tool.output); equal(2, rows.size());
         rows.add(new ChatMessage(ChatMessage.Role.SYSTEM, "interleaved notification"));
         tool("tool_execution_start", "t2", null);
-        tool("tool_execution_update", "t1", "abc"); equal("abc", rows.get(0).tool.output);
-        equal("t2", rows.get(2).tool.id);
+        tool("tool_execution_update", "t1", "abc"); equal("abc", rows.get(1).tool.output);
+        equal("t2", rows.get(3).tool.id);
         String large = "**literal** `raw`\n" + "x".repeat(3000) + "FINAL_TAIL";
         event(new JSONObject().put("type", "tool_execution_end").put("toolCallId", "t1").put("toolName", "bash")
                 .put("isError", false).put("durationMs", 4500).put("result", new JSONObject().put("content",
                 new JSONArray().put(new JSONObject().put("type", "text").put("text", large)))));
-        equal(large, rows.get(0).tool.output); equal("done", rows.get(0).tool.state); equal(4500L, rows.get(0).tool.durationMs);
-        equal("printf demo", rows.get(0).tool.command);
+        equal(large, rows.get(1).tool.output); equal("done", rows.get(1).tool.state); equal(4500L, rows.get(1).tool.durationMs);
+        equal("printf demo", rows.get(1).tool.command);
         tool("tool_execution_end", "missed-start", "reconnected result");
-        equal("reconnected result", rows.get(3).tool.output);
+        equal("reconnected result", rows.get(4).tool.output);
         event("{\"type\":\"agent_settled\",\"aborted\":true}");
-        equal("cancelled", rows.get(2).tool.state); equal("done", rows.get(0).tool.state);
+        equal("cancelled", rows.get(3).tool.state); equal("done", rows.get(1).tool.state);
         event("{\"type\":\"tool_execution_end\",\"toolCallId\":\"cancelled-tool\",\"toolName\":\"bash\",\"isError\":true,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"partial kept\"}],\"details\":{\"cancelled\":true}}}");
-        equal("cancelled", rows.get(4).tool.state); equal("partial kept", rows.get(4).tool.output);
+        equal("cancelled", rows.get(5).tool.state); equal("partial kept", rows.get(5).tool.output);
+    }
+    void thinkingStream() {
+        event("{\"type\":\"message_start\",\"message\":{\"role\":\"assistant\",\"timestamp\":99,\"content\":[]}}");
+        event("{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"thinking_start\",\"contentIndex\":0}}");
+        equal(0, rows.size()); // no content yet — hide empty thinking
+        event("{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"thinking_delta\",\"contentIndex\":0,\"delta\":\"先看\"}}");
+        equal(1, rows.size());
+        equal(ChatMessage.ToolData.NAME_THINKING, rows.get(0).tool.name);
+        equal("先看", rows.get(0).tool.output);
+        equal(ChatMessage.ToolData.STATE_RUNNING, rows.get(0).tool.state);
+        event("{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"thinking_delta\",\"contentIndex\":0,\"delta\":\"路由\"}}");
+        equal("先看路由", rows.get(0).tool.output); equal(1, rows.size());
+        event("{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"thinking_end\",\"contentIndex\":0,\"content\":\"先看路由表\"}}");
+        equal("先看路由表", rows.get(0).tool.output);
+        equal(ChatMessage.ToolData.STATE_DONE, rows.get(0).tool.state);
+        delta(1, "结论：");
+        equal(2, rows.size()); equal("结论：", rows.get(1).text);
+        event("{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"timestamp\":99,\"stopReason\":\"stop\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"先看路由表\"},{\"type\":\"text\",\"text\":\"结论：改 login\"}]}}");
+        equal("先看路由表", rows.get(0).tool.output);
+        equal("结论：改 login", rows.get(1).text);
+        equal(false, rows.get(1).streaming);
     }
     void errorsAndAbort() {
         delta(0, "partial");
@@ -81,8 +104,10 @@ public final class TranscriptTest {
         delta(0, "aborted text"); event("{\"type\":\"agent_settled\",\"aborted\":true}");
         equal(false, rows.get(2).streaming); equal("aborted text", rows.get(2).text);
         reducer.reset();
-        event("{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"thinking_delta\",\"delta\":\"invisible reasoning\"}}");
-        equal(3, rows.size());
+        event("{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"thinking_delta\",\"delta\":\"streamed reasoning\"}}");
+        equal(4, rows.size());
+        equal(ChatMessage.ToolData.NAME_THINKING, rows.get(3).tool.name);
+        equal("streamed reasoning", rows.get(3).tool.output);
     }
     static void history() {
         JSONObject data = json("{\"messages\":[{\"role\":\"custom\",\"display\":false,\"content\":\"HIDDEN\"},{\"role\":\"user\",\"content\":\"hello\"},{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Before\"},{\"type\":\"toolCall\",\"id\":\"h1\",\"name\":\"bash\",\"arguments\":{\"command\":\"printf test\"}}]},{\"role\":\"toolResult\",\"toolCallId\":\"h1\",\"toolName\":\"bash\",\"content\":[{\"type\":\"text\",\"text\":\"**raw**\"}],\"isError\":true},{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"After\"}]},{\"role\":\"bashExecution\",\"command\":\"echo hi\",\"output\":\"hi\",\"exitCode\":0}]}");
@@ -90,6 +115,11 @@ public final class TranscriptTest {
         equal(5, history.size()); equal("Before", history.get(1).text);
         equal("printf test", history.get(2).tool.command); equal("**raw**", history.get(2).tool.output); equal("error", history.get(2).tool.state);
         equal("After", history.get(3).text); equal("echo hi", history.get(4).tool.command); equal("hi", history.get(4).tool.output);
+        List<ChatMessage> withThink = TranscriptReducer.history(json("{\"messages\":[{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"内部推理\"},{\"type\":\"text\",\"text\":\"对外答复\"}]}]}"));
+        equal(2, withThink.size());
+        equal(ChatMessage.ToolData.NAME_THINKING, withThink.get(0).tool.name);
+        equal("内部推理", withThink.get(0).tool.output);
+        equal("对外答复", withThink.get(1).text);
         List<ChatMessage> errors = TranscriptReducer.history(json("{\"messages\":[{\"role\":\"assistant\",\"stopReason\":\"error\",\"errorMessage\":\"NO_KEY\",\"content\":[]},{\"role\":\"toolResult\",\"toolCallId\":\"cancel\",\"isError\":true,\"details\":{\"cancelled\":true},\"content\":[{\"type\":\"text\",\"text\":\"partial\"}]}]}"));
         equal(2, errors.size()); equal(ChatMessage.Role.SYSTEM, errors.get(0).role); equal("⚠ NO_KEY", errors.get(0).text);
         equal("cancelled", errors.get(1).tool.state); equal("partial", errors.get(1).tool.output);
@@ -147,7 +177,8 @@ public final class TranscriptTest {
         equal("旧问题", rows.get(0).text); equal("旧正文", rows.get(1).text);
     }
     public static void main(String[] args) {
-        new TranscriptTest().textDeltas(); new TranscriptTest().toolDeltas(); new TranscriptTest().errorsAndAbort(); history();
+        new TranscriptTest().textDeltas(); new TranscriptTest().toolDeltas();
+        new TranscriptTest().thinkingStream(); new TranscriptTest().errorsAndAbort(); history();
         new TranscriptTest().reconnectBackfill(); new TranscriptTest().mergeThenShift();
         System.out.println("TranscriptTest: " + assertions + " assertions passed");
     }
