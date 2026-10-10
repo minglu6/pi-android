@@ -205,11 +205,19 @@ function routeRecord(rec) {
     uiRequests.set(rec.id, { method: rec.method, ts: Date.now() });
   }
   if (rec && rec.type === "response") {
-    const pending = [...pendingReqs.entries()].find(([, v]) => v.command === rec.command);
-    if (pending) {
-      const [id, entry] = pending;
+    // 优先按 id 精确匹配，避免并发 get_state/set_model 时 FIFO 错位导致「切换模型不生效」
+    let id = typeof rec.id === "string" ? rec.id : null;
+    let entry = id ? pendingReqs.get(id) : null;
+    if (!entry) {
+      const pending = [...pendingReqs.entries()].find(([, v]) => v.command === rec.command);
+      if (pending) {
+        id = pending[0];
+        entry = pending[1];
+      }
+    }
+    if (entry && id) {
       pendingReqs.delete(id);
-      if (rec.id) pendingReqs.delete(rec.id);
+      if (rec.id && rec.id !== id) pendingReqs.delete(rec.id);
       // 从 get_state 同步会话名，供本地 get_session_name 使用
       if (entry.command === "get_state" && rec.success && rec.data && typeof rec.data.sessionName === "string") {
         currentSessionName = rec.data.sessionName;
@@ -221,7 +229,7 @@ function routeRecord(rec) {
           kind: "response",
           id,
           ok: !!rec.success,
-          command: rec.command,
+          command: rec.command || entry.command,
           data: rec.data,
           error: rec.error,
         })
@@ -486,7 +494,11 @@ function writeCommand(id, ws, command, params) {
   }
   const rec = { id, type: command, ...(params || {}) };
   pendingReqs.set(id, { ws, command, ts: Date.now() });
-  log(`rpc ${command} ${id}${command === "prompt" ? ` len=${String((params || {}).message || "").length}` : ""}`);
+  if (command === "set_model") {
+    log(`rpc set_model ${id} provider=${params && params.provider} modelId=${params && params.modelId}`);
+  } else {
+    log(`rpc ${command} ${id}${command === "prompt" ? ` len=${String((params || {}).message || "").length}` : ""}`);
+  }
   try {
     child.stdin.write(JSON.stringify(rec) + "\n");
   } catch (e) {

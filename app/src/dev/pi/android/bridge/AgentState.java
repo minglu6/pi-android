@@ -106,9 +106,15 @@ public final class AgentState {
     }
 
     public void setModel(String provider, String modelId, @Nullable Context ctx) {
+        setModel(provider, modelId, null, ctx);
+    }
+
+    public void setModel(String provider, String modelId, @Nullable String label, @Nullable Context ctx) {
         this.provider = provider == null ? "" : provider;
         this.modelId = modelId == null ? "" : modelId;
-        if (!this.provider.isEmpty() && !this.modelId.isEmpty()) {
+        if (label != null && !label.trim().isEmpty()) {
+            modelLabel = label.trim();
+        } else if (!this.provider.isEmpty() && !this.modelId.isEmpty()) {
             modelLabel = this.provider + " / " + this.modelId;
         }
         if (ctx != null) persist(ctx);

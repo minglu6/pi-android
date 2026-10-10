@@ -33,6 +33,7 @@ import dev.pi.android.BuildInfo;
 import dev.pi.android.R;
 import dev.pi.android.bridge.AgentState;
 import dev.pi.android.bridge.BridgeService;
+import dev.pi.android.bridge.ModelRpc;
 import dev.pi.android.ui.ExtensionUi;
 
 /**
@@ -319,21 +320,12 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
             curId = parts[1];
         }
         Pickers.showModel(this, modelLabels, modelRefs, curProv, curId, (provider, modelId) -> {
-            if (provider == null || provider.trim().isEmpty()
-                    || modelId == null || modelId.trim().isEmpty()) {
+            JSONObject params = ModelRpc.setModelParams(provider, modelId);
+            if (params == null) {
                 Toast.makeText(this, R.string.model_ref_invalid, Toast.LENGTH_SHORT).show();
                 return;
             }
-            JSONObject params = new JSONObject();
-            try {
-                params.put("provider", provider.trim());
-                params.put("modelId", modelId.trim());
-            } catch (Exception e) {
-                throw new IllegalStateException("set_model params", e);
-            }
-            // 等成功响应再写 AgentState；失败在 onResponse 提示并 get_state 回滚
             service.rpc("set_model", params);
-            Toast.makeText(this, provider + " / " + modelId, Toast.LENGTH_SHORT).show();
         });
     }
 
@@ -392,14 +384,12 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
             return;
         }
         if ("set_model".equals(command)) {
-            if (data != null) {
-                String prov = data.optString("provider", "");
-                String mid = data.optString("id", data.optString("modelId", ""));
-                if (!prov.isEmpty() && !mid.isEmpty()) {
-                    AgentState.get().setModel(prov, mid, this);
-                    currentModelLabel = prov + " / " + mid;
-                    if (modelValue != null) modelValue.setText(currentModelLabel);
-                }
+            ModelRpc.Applied applied = ModelRpc.fromModelObject(data);
+            if (applied != null) {
+                AgentState.get().setModel(applied.provider, applied.modelId, applied.label, this);
+                currentModelLabel = applied.label;
+                if (modelValue != null) modelValue.setText(currentModelLabel);
+                Toast.makeText(this, applied.label, Toast.LENGTH_SHORT).show();
             }
             applyAgentStateToUi();
             if (service != null) service.rpc("get_state", null);
@@ -407,23 +397,11 @@ public class SettingsActivity extends AppCompatActivity implements BridgeService
         }
         if (data == null) return;
         if ("get_available_models".equals(command)) {
+            ModelRpc.Catalog cat = ModelRpc.parseAvailableModels(data);
             modelLabels.clear();
             modelRefs.clear();
-            JSONArray models = data.optJSONArray("models");
-            if (models == null) models = data.optJSONArray("availableModels");
-            if (models != null) {
-                for (int i = 0; i < models.length(); i++) {
-                    JSONObject m = models.optJSONObject(i);
-                    if (m == null) continue;
-                    String provider = m.optString("provider", m.optString("providerName", ""));
-                    String mid = m.optString("id", m.optString("modelId", ""));
-                    if (provider.isEmpty() || mid.isEmpty()) continue;
-                    // 列表展示可用 name，但 refs 里只存 provider+id 给 set_model
-                    String label = provider + " / " + mid;
-                    modelLabels.add(label);
-                    modelRefs.add(new String[]{provider, mid});
-                }
-            }
+            modelLabels.addAll(cat.labels);
+            modelRefs.addAll(cat.refs);
             return;
         }
         if ("get_available_thinking_levels".equals(command)) {

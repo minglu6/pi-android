@@ -42,9 +42,9 @@ import java.util.Map;
 import dev.pi.android.R;
 import dev.pi.android.bridge.AgentState;
 import dev.pi.android.bridge.BridgeService;
+import dev.pi.android.bridge.ModelRpc;
 import dev.pi.android.model.ChatMessage;
 import dev.pi.android.model.SlashCommand;
-import dev.pi.android.util.Colls;
 import dev.pi.android.util.SlashCommandStore;
 
 /**
@@ -958,16 +958,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             return;
         }
         if ("set_model".equals(command)) {
-            if (data != null) {
-                String prov = data.optString("provider", "");
-                String mid = data.optString("id", data.optString("modelId", ""));
-                if (!prov.isEmpty() && !mid.isEmpty()) {
-                    AgentState.get().setModel(prov, mid, this);
-                    currentProvider = prov;
-                    currentModelId = mid;
-                }
-            }
-            rpc("get_state", null);
+            applySetModelSuccess(data);
             return;
         }
         if ("list_sessions".equals(command)) {
@@ -1070,25 +1061,11 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             return;
         }
         if ("get_available_models".equals(command) && data != null) {
-            JSONArray models = data.optJSONArray("models");
-            if (models == null) models = data.optJSONArray("availableModels");
+            ModelRpc.Catalog cat = ModelRpc.parseAvailableModels(data);
             modelLabels.clear();
             modelRefs.clear();
-            if (models != null) {
-                for (int i = 0; i < models.length(); i++) {
-                    JSONObject m = models.optJSONObject(i);
-                    if (m == null) continue;
-                    // 与 Pi Model 对象对齐：provider + id（绝不用 name 当 modelId）
-                    String prov = m.optString("provider", m.optString("providerName", ""));
-                    String modelId = m.optString("id", m.optString("modelId", ""));
-                    if (prov.isEmpty() || modelId.isEmpty()) continue;
-                    String label = prov + " / " + modelId;
-                    if (!Colls.has(modelLabels, label)) {
-                        modelLabels.add(label);
-                        modelRefs.add(new String[]{prov, modelId});
-                    }
-                }
-            }
+            modelLabels.addAll(cat.labels);
+            modelRefs.addAll(cat.refs);
             return;
         }
         if ("get_available_thinking_levels".equals(command) && data != null) {
@@ -1100,16 +1077,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             return;
         }
         if ("get_state".equals(command) && data != null) {
-            // BridgeService 已同步 AgentState；再读一份填本地字段
-            AgentState st = AgentState.get();
-            if (!st.provider().isEmpty()) currentProvider = st.provider();
-            if (!st.modelId().isEmpty()) currentModelId = st.modelId();
-            if (!st.thinking().isEmpty()) currentThinking = st.thinking();
-            String name = !st.modelLabel().isEmpty()
-                    ? st.modelLabel()
-                    : getString(R.string.status_online);
-            modelStatus = name + (st.thinking().isEmpty() ? "" : " · " + st.thinking());
-            setConnectionVisual("online", modelStatus);
+            applyGetStateModel(data);
             String path = data.optString("sessionFile", data.optString("sessionPath", ""));
             if (!path.isEmpty()) currentSessionPath = path;
             if (data.has("sessionName")) currentSessionName = data.optString("sessionName", "");
@@ -1117,6 +1085,32 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             rpc("get_available_models", null);
             rpc("get_available_thinking_levels", null);
         }
+    }
+
+    /** set_model 成功：立刻刷新芯片，再 get_state 对齐思考档等。 */
+    private void applySetModelSuccess(@Nullable JSONObject data) {
+        ModelRpc.Applied applied = ModelRpc.fromModelObject(data);
+        if (applied != null) {
+            if (!applied.provider.isEmpty()) currentProvider = applied.provider;
+            if (!applied.modelId.isEmpty()) currentModelId = applied.modelId;
+            AgentState.get().setModel(currentProvider, currentModelId, applied.label, this);
+            String thinking = AgentState.get().thinking();
+            modelStatus = applied.label + (thinking.isEmpty() ? "" : " · " + thinking);
+            setConnectionVisual("online", modelStatus);
+            Toast.makeText(this, applied.label, Toast.LENGTH_SHORT).show();
+        }
+        rpc("get_state", null);
+    }
+
+    private void applyGetStateModel(@Nullable JSONObject data) {
+        // BridgeService 已写入 AgentState；此处同步本地字段 + 状态芯片
+        AgentState st = AgentState.get();
+        if (!st.provider().isEmpty()) currentProvider = st.provider();
+        if (!st.modelId().isEmpty()) currentModelId = st.modelId();
+        if (!st.thinking().isEmpty()) currentThinking = st.thinking();
+        String name = !st.modelLabel().isEmpty() ? st.modelLabel() : getString(R.string.status_online);
+        modelStatus = name + (currentThinking.isEmpty() ? "" : " · " + currentThinking);
+        setConnectionVisual("online", modelStatus);
     }
 
     @Override
@@ -1430,23 +1424,15 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         Pickers.showModel(this, modelLabels, modelRefs, currentProvider, currentModelId,
                 (provider, modelId) -> {
-                    if (provider == null || provider.trim().isEmpty()
-                            || modelId == null || modelId.trim().isEmpty()) {
+                    JSONObject params = ModelRpc.setModelParams(provider, modelId);
+                    if (params == null) {
                         Toast.makeText(this, R.string.model_ref_invalid, Toast.LENGTH_SHORT).show();
                         return;
                     }
-                    // Pi RPC: {"type":"set_model","provider":"...","modelId":"..."} —— 必须是 id，不是展示名
-                    JSONObject params = new JSONObject();
-                    try {
-                        params.put("provider", provider.trim());
-                        params.put("modelId", modelId.trim());
-                    } catch (Exception e) {
-                        throw new IllegalStateException("set_model params", e);
-                    }
-                    android.util.Log.i(TAG, "set_model " + provider + "/" + modelId);
+                    android.util.Log.i(TAG, "set_model " + params.optString("provider")
+                            + "/" + params.optString("modelId"));
+                    // 成功后在 onResponse 刷新芯片；失败走 failPrompt 可见错误
                     rpc("set_model", params);
-                    // 等 set_model 成功响应后再信任状态；失败路径会 get_state 回滚
-                    Toast.makeText(this, provider + " / " + modelId, Toast.LENGTH_SHORT).show();
                 });
     }
 
