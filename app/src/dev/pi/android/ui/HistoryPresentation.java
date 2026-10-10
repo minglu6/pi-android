@@ -23,10 +23,11 @@ public final class HistoryPresentation {
         return rawText;
     }
 
+    /**
+     * Footer status under the composer: connection / activity only.
+     * Model + thinking live on the composer chip — never prefix them here.
+     */
     public static String statusLabel(String modelStatus, String label) {
-        if (modelStatus == null || modelStatus.isEmpty()
-                || (label != null && label.startsWith(modelStatus))) return label;
-        // 扩展 setStatus 不能覆盖模型/档位；只在其后附加，保持模型身份可见。
-        return modelStatus + (label == null || label.isEmpty() ? "" : " · " + label);
+        return label == null ? "" : label;
     }
 }

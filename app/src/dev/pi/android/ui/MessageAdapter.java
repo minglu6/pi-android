@@ -59,8 +59,8 @@ import dev.pi.android.util.SyntaxLite;
  *
  * 工具卡片参照 pi-pocket web transcript.js 的 ToolStep / .shell-card：
  * 头部一行元数据（glyph + 名称 + 主题 + 状态），命令/输出为等宽 plaintext
- * （不再是 Markdown 渲染），横向滚动保留长路径；默认 6 行预览，可展开/折叠/复制。
- * 展开状态按 tool id 记忆（legacy 文本消息用派生 key），replaceAt/rebind 不串状态。
+ * （不再是 Markdown 渲染），横向滚动保留长路径；默认折叠（仅摘要行），点按展开。
+ * 思考行在 streaming 时展开，结束后折叠。展开状态按 tool id 记忆。
  */
 public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
 
@@ -106,6 +106,12 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
 
         /** Optional notice action chip (e.g. /mcp). Default no-op. */
         default void onNoticeAction(@NonNull String command) {}
+
+        /** Pocket !shell row Stop — abort_bash. Default no-op. */
+        default void onShellStop(@NonNull String toolId) {}
+
+        /** Fullscreen image preview for chat attachments. Default no-op. */
+        default void onImageFullscreen(@NonNull ChatMessage.AttachmentData attachment) {}
     }
 
     private static final int CODE_FOLD_LINES = 40;
@@ -191,14 +197,6 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
         this.agentActions = listener;
     }
 
-    /** Index of the last USER message; tools after it are “latest turn” (expand by default). */
-    private int latestTurnStart() {
-        for (int i = items.size() - 1; i >= 0; i--) {
-            if (items.get(i).role == ChatMessage.Role.USER) return i;
-        }
-        return 0;
-    }
-
     public void add(ChatMessage msg) {
         items.add(msg);
         notifyItemInserted(items.size() - 1);
@@ -223,6 +221,30 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
         if (position < 0 || position >= items.size()) return;
         items.set(position, msg);
         notifyItemChanged(position);
+    }
+
+    /** Update a TOOL row by ToolData.id; returns index or -1. */
+    public int replaceToolById(@NonNull String toolId, @NonNull ChatMessage.ToolData data) {
+        if (toolId.isEmpty()) return -1;
+        for (int i = 0; i < items.size(); i++) {
+            ChatMessage m = items.get(i);
+            if (m.role == ChatMessage.Role.TOOL && m.tool != null && toolId.equals(m.tool.id)) {
+                replaceAt(i, ChatMessage.tool(data, m.timestampMs));
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    @Nullable
+    public ChatMessage.ToolData findTool(@NonNull String toolId) {
+        if (toolId.isEmpty()) return null;
+        for (ChatMessage m : items) {
+            if (m.role == ChatMessage.Role.TOOL && m.tool != null && toolId.equals(m.tool.id)) {
+                return m.tool;
+            }
+        }
+        return null;
     }
 
     public void replaceAll(List<ChatMessage> newItems) {
@@ -400,6 +422,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
         LinearLayout toolFooter;
         TextView toolToggle;
         TextView toolCopy;
+        TextView toolStop;
 
         // 用户 / 助手可选行头与动作
         TextView userHeader;
@@ -471,6 +494,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                 toolFooter = itemView.findViewById(R.id.tool_footer);
                 toolToggle = itemView.findViewById(R.id.tool_toggle);
                 toolCopy = itemView.findViewById(R.id.tool_copy);
+                toolStop = itemView.findViewById(R.id.tool_stop);
                 android.graphics.Typeface mono = AppFonts.mono(ctx, false);
                 if (toolGlyph != null) toolGlyph.setTypeface(mono);
                 if (toolCommand != null) toolCommand.setTypeface(mono);
@@ -779,6 +803,10 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
             TextView caption = attachmentLabel(name, 12, R.color.attachment_chat_primary);
             caption.setPadding(dp(8), dp(4), dp(8), dp(6));
             card.addView(caption);
+            card.setContentDescription(ctx.getString(R.string.image_fullscreen_cd));
+            card.setOnClickListener(v -> {
+                if (agentActions != null) agentActions.onImageFullscreen(attachment);
+            });
             String data = attachment.imageData;
             if (data == null || data.isEmpty() || data.length() > ChatMessage.MAX_IMAGE_DATA_CHARS) return card;
             Object binding = attachmentBinding;
@@ -975,8 +1003,13 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                         : command);
             }
 
-            // Latest turn expanded by default; older turns stay collapsed unless user opened them.
-            boolean defaultExpand = position >= latestTurnStart();
+            // Tools default COLLAPSED (summary only) — including latest turn — unless the user
+            // opened them. Thinking expands while streaming, then collapses when done.
+            final boolean isThinkingEarly = td != null
+                    && ChatMessage.ToolData.NAME_THINKING.equals(td.name);
+            final boolean thinkingLive = isThinkingEarly
+                    && ChatMessage.ToolData.STATE_RUNNING.equals(td.state);
+            boolean defaultExpand = thinkingLive;
             final boolean expanded = toolExpanded.containsKey(key)
                     ? Boolean.TRUE.equals(toolExpanded.get(key))
                     : defaultExpand;
@@ -1094,7 +1127,11 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
             }
 
             boolean expandable = outLines > 0 || !command.isEmpty();
-            toolFooter.setVisibility(expanded && (expandable || hasOutput) ? View.VISIBLE : View.GONE);
+            boolean showStop = "bash".equals(name)
+                    && ChatMessage.ToolData.STATE_RUNNING.equals(state)
+                    && td != null && !td.id.isEmpty();
+            boolean showFooter = (expanded && (expandable || hasOutput)) || showStop;
+            toolFooter.setVisibility(showFooter ? View.VISIBLE : View.GONE);
             toolToggle.setVisibility(expandable ? View.VISIBLE : View.GONE);
             if (expandable) {
                 if (!expanded && outLines > PREVIEW_LINES) {
@@ -1106,6 +1143,17 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                 }
             }
             toolCopy.setVisibility(hasOutput ? View.VISIBLE : View.GONE);
+            if (toolStop != null) {
+                toolStop.setVisibility(showStop ? View.VISIBLE : View.GONE);
+                if (showStop) {
+                    final String stopId = td.id;
+                    toolStop.setOnClickListener(v -> {
+                        if (agentActions != null) agentActions.onShellStop(stopId);
+                    });
+                } else {
+                    toolStop.setOnClickListener(null);
+                }
+            }
 
             View.OnClickListener toggle = v -> {
                 boolean next = !(toolExpanded.containsKey(key)

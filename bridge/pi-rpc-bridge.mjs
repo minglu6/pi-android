@@ -10,8 +10,8 @@
  *  - 只绑 127.0.0.1 + token 鉴权。loopback 在本机不对 App 做强隔离，token 是唯一门槛。
  *  - 单个 Pi 子进程，客户端共享；最后一个客户端断开后按 --idle-exit 秒空闲退出（默认 600s），
  *    便于 runit/前台两种运行方式。
- *  - 能力白名单：pc julia mayka? 不。默认只允许 read-only + prompt/abort 等交互命令，
- *    `bash` 命令默认关闭（--allow-bash 显式开）；这不限制 prompt 调用 agent 工具。
+ *  - 能力白名单：默认 read-only + prompt/abort 等，以及 Pocket 所需官方 `bash` / `abort_bash`
+ *    （`--allow-bash` 仍为同义词）。白名单不限制 prompt 驱动的 agent 工具。
  *
  * 线协议（client → server）：
  *    {"id":"1","rpc":"get_state","params":{}}
@@ -25,7 +25,7 @@
  *    {"v":1,"kind":"pong","t":<ms>}
  *    {"v":1,"kind":"log","line":"..."}      // Pi 的 stderr 摘录，--verbose-log 时下发
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { WebSocketServer } from "ws";
 import fs from "node:fs";
@@ -76,11 +76,11 @@ const ALLOWED = new Set([
   "export_html",
   "extension_ui_response",
   "set_session_name",
+  // Pocket ports: !shell / !!shell (Pi official bash RPC)
+  "bash", "abort_bash",
 ]);
-if (ALLOW_BASH) {
-  ALLOWED.add("bash");
-  ALLOWED.add("abort_bash");
-}
+// --allow-bash kept as documented opt-in synonym; bash is now always whitelisted for Pocket.
+void ALLOW_BASH;
 
 /** 当前会话显示名；get_session_name 通过官方 get_state 获取，不返回乐观缓存。 */
 let currentSessionName = "";
@@ -302,6 +302,142 @@ function releaseStuckDialogs(why) {
 /** 会话文件根目录 `$HOME/.pi/agent/sessions/<cwd 编码>/<时间>_<id>.jsonl` */
 const SESSIONS_DIR = arg("sessions-dir", path.join(os.homedir(), ".pi/agent/sessions"));
 
+const SKIP_DIR = new Set([
+  ".git", "node_modules", ".pi", "__pycache__", ".gradle", "build", "dist",
+  ".idea", ".vscode", "target", "vendor", ".next", ".cache",
+]);
+
+function resolveProjectCwd() {
+  const root = CWD && fs.existsSync(CWD) ? path.resolve(CWD) : path.resolve(DEFAULT_CWD || ".");
+  return root;
+}
+
+/** Safe relative path under project cwd; rejects .. escape. */
+function underProject(rel) {
+  const root = resolveProjectCwd();
+  const full = path.resolve(root, rel || ".");
+  if (full !== root && !full.startsWith(root + path.sep)) {
+    throw new Error("路径越界");
+  }
+  return full;
+}
+
+/**
+ * Pocket @-mention: shallow-ish walk of project files (cap by count, skip bulky dirs).
+ * query filters basename/path substring (case-insensitive).
+ */
+function listProjectFiles(query, limit) {
+  const root = resolveProjectCwd();
+  const out = [];
+  const walk = (dir, depth) => {
+    if (out.length >= limit || depth > 8) return;
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (out.length >= limit) return;
+      if (e.name.startsWith(".") && e.name !== ".env.example") {
+        if (e.isDirectory() && SKIP_DIR.has(e.name)) continue;
+        if (e.isDirectory() && e.name !== ".github") continue;
+      }
+      if (e.isDirectory()) {
+        if (SKIP_DIR.has(e.name)) continue;
+        walk(path.join(dir, e.name), depth + 1);
+        continue;
+      }
+      if (!e.isFile()) continue;
+      const full = path.join(dir, e.name);
+      const rel = path.relative(root, full);
+      if (query && !rel.toLowerCase().includes(query) && !e.name.toLowerCase().includes(query)) {
+        continue;
+      }
+      let bytes = 0;
+      try { bytes = fs.statSync(full).size; } catch { /* skip */ }
+      out.push({ path: rel.replace(/\\/g, "/"), name: e.name, bytes });
+    }
+  };
+  walk(root, 0);
+  out.sort((a, b) => a.path.localeCompare(b.path));
+  return out.slice(0, limit);
+}
+
+/** Fixed-argv git helpers for Files / Changes / branch chip. */
+function runGitLocal(command, params) {
+  const cwd = resolveProjectCwd();
+  const run = (args) => {
+    const r = spawnSync("git", args, {
+      cwd, encoding: "utf8", timeout: 15000, maxBuffer: 2 * 1024 * 1024,
+    });
+    if (r.error) throw new Error(r.error.message);
+    return {
+      stdout: (r.stdout || "").toString(),
+      stderr: (r.stderr || "").toString(),
+      status: r.status == null ? 1 : r.status,
+    };
+  };
+  if (command === "git_status") {
+    const r = run(["status", "--porcelain=v1", "-uall", "--no-optional-locks"]);
+    if (r.status !== 0 && !(r.stdout || "").trim()) {
+      throw new Error((r.stderr || "git status failed").trim());
+    }
+    const files = [];
+    for (const line of (r.stdout || "").split("\n")) {
+      if (!line || line.length < 4) continue;
+      const code = line.slice(0, 2);
+      let p = line.slice(3);
+      // rename: "R  old -> new"
+      const arrow = p.indexOf(" -> ");
+      if (arrow >= 0) p = p.slice(arrow + 4);
+      files.push({ path: p, status: code.trim() || code });
+    }
+    const branch = run(["rev-parse", "--abbrev-ref", "HEAD"]);
+    return {
+      files,
+      branch: (branch.stdout || "").trim() || null,
+      cwd,
+    };
+  }
+  if (command === "git_branches") {
+    const r = run(["branch", "--list", "--no-color"]);
+    if (r.status !== 0) throw new Error((r.stderr || "git branch failed").trim());
+    const branches = [];
+    let current = "";
+    for (const line of (r.stdout || "").split("\n")) {
+      const s = line.trim();
+      if (!s) continue;
+      if (s.startsWith("* ")) {
+        current = s.slice(2).trim();
+        branches.push(current);
+      } else {
+        branches.push(s.replace(/^\*\s*/, ""));
+      }
+    }
+    return { branches, current, cwd };
+  }
+  if (command === "git_checkout") {
+    const branch = String(params.branch || "").trim();
+    if (!/^[A-Za-z0-9._/\-]+$/.test(branch)) throw new Error("非法分支名");
+    const r = run(["checkout", branch]);
+    if (r.status !== 0) throw new Error((r.stderr || r.stdout || "checkout failed").trim());
+    return { branch, cwd };
+  }
+  if (command === "git_diff") {
+    const file = String(params.path || "").trim();
+    const args = ["diff", "--no-color", "--"];
+    if (file) {
+      underProject(file); // path escape check
+      args.push(file);
+    }
+    const r = run(args);
+    // untracked: fall back to /dev/null diff via show if needed — empty ok
+    return { path: file || null, diff: r.stdout || "", cwd };
+  }
+  throw new Error("unknown git command");
+}
+
 /**
  * 列出本地会话文件。Pi 的 RPC 只有 get_tree（当前会话内部的树）而没有“有哪些会话”，
  * 所以列目录这件事只能由桥来做 —— 这是本桥自己加的能力，不是 Pi 的命令。
@@ -504,6 +640,59 @@ function writeCommand(id, ws, command, params) {
     log(`local list_sessions -> ${items.length} 项 (${Date.now() - t0}ms)`);
     respond(ws, id, true, "list_sessions",
       err ? { sessions: [], error: err } : { sessions: items, dir: SESSIONS_DIR }, err);
+    return;
+  }
+  // Pocket: @ file mentions — bridge-local walk of session cwd (not a Pi RPC).
+  if (command === "list_project_files") {
+    try {
+      const query = String((params || {}).query || "").trim().toLowerCase();
+      const limit = Math.max(1, Math.min(200, Number((params || {}).limit) || 80));
+      const files = listProjectFiles(query, limit);
+      respond(ws, id, true, "list_project_files",
+        { files, cwd: resolveProjectCwd(), query }, null);
+    } catch (e) {
+      respond(ws, id, false, "list_project_files", null, e.message);
+    }
+    return;
+  }
+  // Pocket: Files tile viewer — capped text read under project cwd (not a Pi RPC).
+  if (command === "read_project_file") {
+    try {
+      const rel = String((params || {}).path || "").trim();
+      if (!rel) throw new Error("缺少 path");
+      const full = underProject(rel);
+      const st = fs.statSync(full);
+      if (!st.isFile()) throw new Error("不是文件");
+      const max = Math.max(1024, Math.min(512 * 1024, Number((params || {}).maxBytes) || 200 * 1024));
+      const buf = Buffer.alloc(Math.min(st.size, max + 1));
+      const fd = fs.openSync(full, "r");
+      let n = 0;
+      try { n = fs.readSync(fd, buf, 0, buf.length, 0); } finally { fs.closeSync(fd); }
+      const truncated = n > max || st.size > max;
+      const slice = buf.subarray(0, Math.min(n, max));
+      // Reject obvious binary (NUL in first chunk)
+      if (slice.includes(0)) throw new Error("二进制文件，无法预览");
+      respond(ws, id, true, "read_project_file", {
+        path: rel.replace(/\\/g, "/"),
+        content: slice.toString("utf8"),
+        bytes: st.size,
+        truncated,
+        cwd: resolveProjectCwd(),
+      }, null);
+    } catch (e) {
+      respond(ws, id, false, "read_project_file", null, e.message);
+    }
+    return;
+  }
+  // Pocket: Files / Changes / branch switcher — fixed-argv git only (no shell).
+  if (command === "git_status" || command === "git_branches"
+      || command === "git_checkout" || command === "git_diff") {
+    try {
+      const data = runGitLocal(command, params || {});
+      respond(ws, id, true, command, data, null);
+    } catch (e) {
+      respond(ws, id, false, command, null, e.message);
+    }
     return;
   }
   if (command === "delete_session") {

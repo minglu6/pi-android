@@ -130,7 +130,7 @@ gh run watch
 ## 安全边界
 
 - 连接器只绑 `127.0.0.1`，token 必填（文件权限建议 600）
-- 命令白名单默认**不含直接 `bash` RPC**；`--allow-bash` 显式开启。该白名单不限制 prompt 驱动的 agent 工具，不是工具权限沙箱
+- 命令白名单包含官方 `bash` / `abort_bash`（Pocket `!shell` / `!!shell`）；`--allow-bash` 仍为同义词。该白名单不限制 prompt 驱动的 agent 工具，不是工具权限沙箱。桥本地另有 `list_project_files` / `read_project_file` / `git_*`（非 Pi RPC）
 - 依赖 sha256 清单：`app/libs/manifest.json`（重建后核对）
 
 ## License

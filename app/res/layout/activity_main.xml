@@ -475,7 +475,7 @@
                     android:singleLine="true"
                     android:text="@string/action_model"
                     android:textColor="@color/pi_blue"
-                    android:textSize="10.5sp" />
+                    android:textSize="11.5sp" />
 
                 <LinearLayout
                     android:id="@+id/steer_toggle"
