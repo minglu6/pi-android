@@ -44,6 +44,7 @@ import dev.pi.android.bridge.BridgeService;
 import dev.pi.android.model.ChatMessage;
 import dev.pi.android.model.SlashCommand;
 import dev.pi.android.util.Colls;
+import dev.pi.android.util.SlashCommandStore;
 
 /**
  * 聊天主界面。
@@ -96,6 +97,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private LinearLayout suggestRow;
     private View slashPanel;
     private SlashCommandAdapter slashAdapter;
+    private SlashCommandStore slashStore;
     private BridgeService service;
     private boolean serviceBound;
     private boolean resumed;
@@ -490,6 +492,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private void setupSlashCommands() {
+        slashStore = new SlashCommandStore(this);
         slashPanel = findViewById(R.id.slash_panel);
         RecyclerView slashList = findViewById(R.id.slash_list);
         if (slashList == null) return;
@@ -497,6 +500,15 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         slashAdapter = new SlashCommandAdapter(this::applySlashCommand);
         slashList.setAdapter(slashAdapter);
         hideSlashSuggestions();
+    }
+
+    /** 向连接器拉 get_commands；失败静默，沿用缓存 / App overlay。 */
+    private void refreshSlashCommands() {
+        if (!isConnected()) {
+            if (slashStore != null) slashStore.useOverlayOnly();
+            return;
+        }
+        rpc("get_commands", null);
     }
 
     private boolean slashPanelVisible() {
@@ -510,10 +522,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             hideSlashSuggestions();
             return;
         }
-        List<SlashCommand> matched = new ArrayList<>();
-        for (SlashCommand c : SlashCommand.catalog()) {
-            if (c.matches(t)) matched.add(c);
-        }
+        if (slashStore == null) return;
+        List<SlashCommand> matched = slashStore.filter(t);
         if (matched.isEmpty()) {
             hideSlashSuggestions();
             return;
@@ -529,8 +539,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private void applySlashCommand(SlashCommand cmd) {
         hideSlashSuggestions();
         if (composer != null) composer.setText("");
-        if (cmd.kind == SlashCommand.Kind.UI) {
-            switch (cmd.action) {
+        if (cmd.isAppAction()) {
+            switch (cmd.appAction) {
                 case "model":
                     showModelPicker();
                     break;
@@ -555,23 +565,21 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                     setConnectionVisual("connecting", getString(R.string.status_reconnecting));
                     reconnect();
                     break;
+                case "stop":
+                    rpc("abort", null);
+                    setStreaming(false);
+                    break;
                 default:
                     break;
             }
             return;
         }
-        // RPC：走连接器白名单命令
+        // 服务端命令：经 prompt 发送 "/name"（Pi get_commands 约定）
         if (!isConnected()) {
             Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
             return;
         }
-        if ("abort".equals(cmd.action)) {
-            rpc("abort", null);
-            setStreaming(false);
-            return;
-        }
-        rpc(cmd.action, null);
-        Toast.makeText(this, cmd.name, Toast.LENGTH_SHORT).show();
+        requestSend(cmd.name);
     }
 
     @Override
@@ -600,11 +608,13 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private void submit() {
         String text = composer.getText().toString().trim();
         if (text.isEmpty()) return;
-        // 完整匹配本地斜杠命令 → 执行动作，不作为普通消息发出
-        for (SlashCommand c : SlashCommand.catalog()) {
-            if (c.name.equalsIgnoreCase(text)) {
-                applySlashCommand(c);
-                return;
+        // 完整匹配已知斜杠命令 → App 动作或 prompt /name
+        if (slashStore != null && text.startsWith("/")) {
+            for (SlashCommand c : slashStore.current()) {
+                if (c.name.equalsIgnoreCase(text)) {
+                    applySlashCommand(c);
+                    return;
+                }
             }
         }
         if (!isConnected()) {
@@ -762,7 +772,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private static boolean isOptionalRpc(String command) {
         return "get_session_name".equals(command)
                 || "get_session_stats".equals(command)
-                || "export_html".equals(command);
+                || "export_html".equals(command)
+                || "get_commands".equals(command);
     }
 
     private static String friendlyConnectionError(@Nullable Throwable t) {
@@ -793,6 +804,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 setConnectionVisual("online", getString(R.string.status_online));
                 rpc("get_state", null);
                 rpc("get_session_name", null);
+                refreshSlashCommands();
                 refreshEmptyState();
                 if (pendingUiTarget != null) {
                     String target = pendingUiTarget;
@@ -865,6 +877,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             applySessionTitle();
             return;
         }
+        if ("get_commands".equals(command)) {
+            if (slashStore != null) slashStore.applyServerResponse(data);
+            // 若正在输入 /，刷新面板
+            if (composer != null) updateSlashSuggestions(composer.getText().toString());
+            return;
+        }
         if ("switch_session".equals(command) && data != null) {
             if (data.optBoolean("cancelled", false)) {
                 Toast.makeText(this, R.string.rpc_failed, Toast.LENGTH_SHORT).show();
@@ -872,6 +890,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 stickToBottom = true;
                 rpc("get_messages", null);
                 rpc("get_session_name", null);
+                refreshSlashCommands();
             }
             return;
         }
@@ -928,6 +947,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             adapter.clear();
             stickToBottom = true;
             refreshEmptyState();
+            refreshSlashCommands();
             return;
         }
         if ("get_available_models".equals(command) && data != null) {

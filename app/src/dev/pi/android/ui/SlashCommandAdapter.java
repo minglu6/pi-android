@@ -52,7 +52,12 @@ public class SlashCommandAdapter extends RecyclerView.Adapter<SlashCommandAdapte
     public void onBindViewHolder(@NonNull VH holder, int position) {
         SlashCommand cmd = items.get(position);
         holder.cmd.setText(cmd.name);
-        holder.desc.setText(cmd.descRes);
+        String desc = cmd.description;
+        if (desc == null || desc.isEmpty()) {
+            holder.desc.setText(R.string.slash_no_desc);
+        } else {
+            holder.desc.setText(desc);
+        }
         holder.itemView.setOnClickListener(v -> {
             if (listener != null) listener.onPick(cmd);
         });

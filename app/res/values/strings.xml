@@ -88,14 +88,6 @@
     <string name="suggest_plan">帮我订个计划</string>
     <string name="suggest_debug">排查一个错误</string>
     <string name="slash_hint_title">命令</string>
-    <string name="slash_model">切换模型</string>
-    <string name="slash_thinking">切换思考档位</string>
-    <string name="slash_new">新建对话</string>
-    <string name="slash_sessions">打开会话列表</string>
-    <string name="slash_settings">打开设置</string>
-    <string name="slash_compact">压缩当前上下文</string>
-    <string name="slash_clear">清空并新建会话</string>
-    <string name="slash_stop">停止当前生成</string>
-    <string name="slash_reload">重新连接连接器</string>
+    <string name="slash_no_desc">无说明</string>
     <string name="unofficial_notice">Unofficial Pi client · Not affiliated with Earendil Inc.</string>
 </resources>
