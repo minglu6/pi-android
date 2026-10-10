@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="generation_active">正在生成…</string>
+    <string name="generation_thinking">正在思考…</string>
+    <string name="generation_output">正在输出…</string>
+    <string name="generation_tool">正在运行 %1$s…</string>
+    <string name="generation_retry">正在重试…</string>
+    <string name="generation_model_sync">正在同步模型…</string>
+</resources>

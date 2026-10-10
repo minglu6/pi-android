@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  工具卡片（tool card）专用资源：尺寸、字体许可。
+
+  字体：app/res/font/meslo_nerd.ttf = 本机 Termux 终端字体 ~/.termux/font.ttf
+  （MesloLGLDZ Nerd Font Regular，SFNT name 表已核实），即 Pi TUI 实际显示的终端字形。
+  来源：ryanoasis/nerd-fonts 仓库 patched-fonts/Meslo/L-DZ/（与字体同目录附 LICENSE.txt），
+  上游 André Berg 的 Meslo LG（Apple Menlo 的定制版），Apache License 2.0 —— 允许再分发。
+  下面的 meslo_nerd_font_license 把该 LICENSE.txt 原文打包进 APK，满足「包含许可」；
+  CJK 字形不在 Meslo 内，由系统自动回退到中文等宽/正文字体。
+-->
+<resources>
+    <dimen name="tool_card_padding">10dp</dimen>
+    <dimen name="tool_state_bar_width">3dp</dimen>
+    <dimen name="tool_header_text">12.5sp</dimen>
+    <dimen name="tool_meta_text">11.5sp</dimen>
+    <dimen name="tool_output_text">12sp</dimen>
+    <dimen name="tool_output_padding">8dp</dimen>
+
+    <!-- 随字体再分发的许可原文（nerd-fonts patched-fonts/Meslo/L-DZ/LICENSE.txt）。 -->
+    <string name="meslo_nerd_font_license" translatable="false">Copyright 2009, 2010, 2013 André Berg\n\nLicensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License.\nYou may obtain a copy of the License at\n\nhttp://www.apache.org/licenses/LICENSE-2.0\n\nUnless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.</string>
+</resources>

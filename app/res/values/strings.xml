@@ -115,4 +115,15 @@
     <string name="fork_empty">当前会话没有可 fork 的消息</string>
     <string name="fork_loading">正在取可 fork 的消息…</string>
     <string name="unofficial_notice">Unofficial Pi client · Not affiliated with Earendil Inc.</string>
+    <string name="tool_state_running">运行中…</string>
+    <string name="tool_state_done">完成</string>
+    <string name="tool_state_error">失败</string>
+    <string name="tool_state_cancelled">已取消</string>
+    <string name="tool_expand_lines">展开全部 %1$d 行</string>
+    <string name="tool_expand">展开详情</string>
+    <string name="tool_collapse">收起</string>
+    <string name="tool_copy_output">复制输出</string>
+    <string name="tool_copied">已复制输出</string>
+    <string name="tool_legacy_name">工具</string>
+    <string name="tool_card_cd">工具调用，双击展开或收起</string>
 </resources>

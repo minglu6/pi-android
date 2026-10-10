@@ -294,6 +294,21 @@
         </HorizontalScrollView>
     </LinearLayout>
 
+    <!-- 生成/工具等待反馈：协调器在 setStreaming 与 thinking/tool 事件时更新；默认 gone，单行克制，不占聊天正文。 -->
+    <TextView
+        android:id="@+id/generation_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/bg_elevated"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:paddingStart="16dp"
+        android:paddingTop="6dp"
+        android:paddingEnd="16dp"
+        android:textColor="@color/text_muted"
+        android:textSize="12sp"
+        android:visibility="gone" />
+
     <LinearLayout
         android:id="@+id/composer_bar"
         android:layout_width="match_parent"
@@ -315,7 +330,7 @@
             android:layout_weight="1"
             android:background="@drawable/bg_composer"
             android:hint="@string/hint_message"
-            android:imeOptions="actionSend"
+            android:imeOptions="actionNone|flagNoExtractUi"
             android:inputType="textMultiLine|textCapSentences"
             android:maxLines="6"
             android:minHeight="48dp"

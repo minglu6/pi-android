@@ -9,8 +9,10 @@ import android.os.Bundle;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.KeyEvent;
+import android.view.InputDevice;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.BaseInputConnection;
 import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
@@ -34,7 +36,6 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -85,6 +86,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private EditText composer;
     private ImageButton send;
     private TextView statusText;
+    private TextView generationStatus;
     private View statusDot;
     private View emptyState;
     private TextView emptyTitle;
@@ -106,10 +108,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     /** 用户靠近列表底部时才自动跟滚；上翻阅读时不打断。 */
     private boolean stickToBottom = true;
 
-    /** contentIndex -> 该块的累积文本 */
-    private final Map<Integer, StringBuilder> blocks = new LinkedHashMap<>();
-    /** toolCallId -> 气泡在列表里的位置 */
-    private final Map<String, Integer> toolRows = new HashMap<>();
+    private final TranscriptReducer transcript = new TranscriptReducer();
+    private final Map<Integer, ChatMessage> pendingRows = new LinkedHashMap<>();
+    private final Runnable paintTranscript = this::flushTranscriptPaint;
+    private boolean paintScheduled;
     private boolean streaming;
     /** 思考中看门狗：无 agent_settled / agent_end 时不能永久卡在 stop 态。 */
     private static final long THINKING_TIMEOUT_MS = 90_000L;
@@ -119,7 +121,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     };
     private boolean historyNeedsSync = true;
     private String historyRequest = "";
-    private int assistantRow = -1;
     private String pendingPrompt;
     private String lastConfig;
     private String currentSessionPath = "";
@@ -152,6 +153,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
         statusText = findViewById(R.id.status_text);
         statusDot = findViewById(R.id.status_dot);
+        generationStatus = findViewById(R.id.generation_status);
         composer = findViewById(R.id.composer);
         send = findViewById(R.id.send);
         emptyState = findViewById(R.id.empty_state);
@@ -178,6 +180,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         LinearLayoutManager lm = new LinearLayoutManager(this);
         lm.setStackFromEnd(false);
         list.setLayoutManager(lm);
+        // 每个增量都触发 change cross-fade 会闪烁/滞后；流式列表直接绘制最新内容。
+        list.setItemAnimator(null);
         adapter = new MessageAdapter(size -> {
             refreshEmptyState();
             maybeScrollToBottom(false);
@@ -188,7 +192,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         list.addOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
             public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
-                updateStickToBottom();
+                if (recyclerView.getScrollState() == RecyclerView.SCROLL_STATE_DRAGGING) updateStickToBottom();
+            }
+            @Override
+            public void onScrollStateChanged(@NonNull RecyclerView recyclerView, int state) {
+                if (state == RecyclerView.SCROLL_STATE_DRAGGING) stickToBottom = false;
+                if (state == RecyclerView.SCROLL_STATE_IDLE) updateStickToBottom();
             }
         });
         scrollBottom.setOnClickListener(v -> {
@@ -238,19 +247,17 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         send.setEnabled(false);
         send.setAlpha(0.45f);
         composer.setOnEditorActionListener((v, actionId, event) -> {
-            if (actionId == EditorInfo.IME_ACTION_SEND
-                    || (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER
-                    && event.getAction() == KeyEvent.ACTION_DOWN)) {
-                if (slashPanelVisible() && slashAdapter != null && !slashAdapter.isEmpty()) {
-                    SlashCommand first = slashAdapter.first();
-                    if (first != null) {
-                        applySlashCommand(first);
-                        return true;
-                    }
-                }
-                onSendOrStop();
-                return true;
-            }
+            if (!streaming && actionId == EditorInfo.IME_ACTION_SEND && event == null
+                    && BaseInputConnection.getComposingSpanStart(composer.getText()) < 0) return submitComposer();
+            return false;
+        });
+        composer.setOnKeyListener((v, keyCode, event) -> {
+            InputDevice device = event.getDevice();
+            boolean physicalKeyboard = device != null && !device.isVirtual()
+                    && device.getKeyboardType() == InputDevice.KEYBOARD_TYPE_ALPHABETIC;
+            if (!streaming && physicalKeyboard && keyCode == KeyEvent.KEYCODE_ENTER
+                    && event.getAction() == KeyEvent.ACTION_DOWN && !event.isShiftPressed()
+                    && BaseInputConnection.getComposingSpanStart(composer.getText()) < 0) return submitComposer();
             return false;
         });
         composer.addTextChangedListener(new TextWatcher() {
@@ -353,15 +360,23 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
     }
 
+    private boolean submitComposer() {
+        if (slashPanelVisible() && slashAdapter != null && !slashAdapter.isEmpty()) {
+            SlashCommand first = slashAdapter.first();
+            if (first != null) { applySlashCommand(first); return true; }
+        }
+        onSendOrStop();
+        return true;
+    }
+
     private void requestSend(String text) {
         android.util.Log.i(TAG, "requestSend len=" + text.length());
         pendingPrompt = text;
         if (isConnected()) {
             pendingPrompt = null;
             composer.setText("");
+            resetTranscript();
             adapter.add(new ChatMessage(ChatMessage.Role.USER, text));
-            blocks.clear();
-            assistantRow = -1;
             historyRequest = "";
             setStreaming(true);
             JSONObject params = new JSONObject();
@@ -443,6 +458,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     @Override
     protected void onPause() {
+        flushTranscriptPaint();
         snapshotChat();
         super.onPause();
     }
@@ -457,6 +473,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     protected void onDestroy() {
         main.removeCallbacks(thinkingTimeout);
         main.removeCallbacks(settleAfterAgentEnd);
+        flushTranscriptPaint();
         snapshotChat();
         if (serviceBound) {
             if (service != null) service.clearHostIf(this);
@@ -503,7 +520,13 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private void setStreaming(boolean on) {
+        boolean changed = streaming != on;
         streaming = on;
+        if (generationStatus != null) {
+            generationStatus.setVisibility(on ? View.VISIBLE : View.GONE);
+            if (on && (changed || generationStatus.length() == 0)) generationStatus.setText(R.string.generation_active);
+        }
+        if (!on) flushTranscriptPaint();
         main.removeCallbacks(thinkingTimeout);
         if (on) main.postDelayed(thinkingTimeout, THINKING_TIMEOUT_MS);
         if (send == null) return;
@@ -558,21 +581,32 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     private void updateStickToBottom() {
         if (list == null || scrollBottom == null) return;
-        LinearLayoutManager lm = (LinearLayoutManager) list.getLayoutManager();
-        if (lm == null) return;
-        int last = lm.findLastVisibleItemPosition();
         int total = adapter == null ? 0 : adapter.size();
-        stickToBottom = total == 0 || last >= total - 2;
+        // 末条消息可能比屏幕还高；“看得到末条”不等于“正在读末尾”。
+        stickToBottom = total == 0 || !list.canScrollVertically(1);
         scrollBottom.setVisibility(stickToBottom || total == 0 ? View.GONE : View.VISIBLE);
     }
 
     private void maybeScrollToBottom(boolean force) {
         if (list == null || adapter == null || adapter.size() == 0) return;
+        if (force) stickToBottom = true;
         if (!force && !stickToBottom) {
             if (scrollBottom != null) scrollBottom.setVisibility(View.VISIBLE);
             return;
         }
-        list.post(() -> list.smoothScrollToPosition(adapter.size() - 1));
+        list.post(() -> {
+            if (!stickToBottom || adapter.size() == 0) return;
+            int last = adapter.size() - 1;
+            LinearLayoutManager lm = (LinearLayoutManager) list.getLayoutManager();
+            if (lm == null) return;
+            View tail = lm.findViewByPosition(last);
+            if (tail == null) {
+                list.scrollToPosition(last);
+                list.post(() -> scrollTailEnd(lm, last));
+            } else {
+                scrollTailEnd(lm, last);
+            }
+        });
         if (scrollBottom != null) scrollBottom.setVisibility(View.GONE);
     }
 
@@ -731,9 +765,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         composer.setText("");
         hideSlashSuggestions();
+        resetTranscript();
         adapter.add(new ChatMessage(ChatMessage.Role.USER, text));
-        blocks.clear();
-        assistantRow = -1;
         historyRequest = "";
         setStreaming(true);
         JSONObject params = new JSONObject();
@@ -749,7 +782,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private void setConnectionVisual(String state, String label) {
-        if ("online".equals(state)) label = HistoryPresentation.statusLabel(modelStatus, label);
+        if ("online".equals(state)) label = AgentState.get().isFresh()
+                ? HistoryPresentation.statusLabel(modelStatus, label)
+                : getString(R.string.generation_model_sync);
         if (statusText != null) statusText.setText(label);
         if (statusDot == null) return;
         int color;
@@ -1033,9 +1068,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             // 服务向所有 Activity 扇出响应，只接收本页最新的历史请求。
             if (id.equals(historyRequest) && !streaming) {
                 historyRequest = "";
-                blocks.clear();
-                assistantRow = -1;
-                toolRows.clear();
+                resetTranscript();
                 renderHistory(data);
             }
             return;
@@ -1112,7 +1145,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             applyGetStateModel(data);
             // BridgeService 只交付最新、且未跨模型/会话/运行状态变更的 get_state。
             String path = data.optString("sessionFile", data.optString("sessionPath", ""));
-            if (!path.equals(currentSessionPath)) historyNeedsSync = true;
+            if (!path.equals(currentSessionPath)) {
+                if (adapter != null) adapter.clearToolExpansions();
+                historyNeedsSync = true;
+            }
             currentSessionPath = path;
             currentSessionName = data.optString("sessionName", "");
             applySessionTitle();
@@ -1170,77 +1206,33 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             return;
         }
         android.util.Log.i(TAG, "event " + type);
-        JSONObject agg = ev.optJSONObject("assistantMessageEvent");
         switch (type) {
             case "agent_start":
+                applyTranscriptEvent(ev, true);
                 main.removeCallbacks(settleAfterAgentEnd);
                 setStreaming(true);
                 return;
-            case "message_start": {
-                JSONObject msg = ev.optJSONObject("message");
-                if (msg != null && "assistant".equals(msg.optString("role"))) {
-                    blocks.clear();
-                    assistantRow = -1;
-                }
+            case "message_start":
+                applyTranscriptEvent(ev, true);
                 return;
-            }
             case "message_update": {
-                if (agg == null) return;
-                // 有流式增量就续命看门狗，避免长回复被误判超时
-                if (streaming) {
-                    main.removeCallbacks(thinkingTimeout);
-                    main.postDelayed(thinkingTimeout, THINKING_TIMEOUT_MS);
-                }
-                int idx = agg.optInt("contentIndex", 0);
-                switch (agg.optString("type")) {
-                    case "text_start":
-                        blocks.put(idx, new StringBuilder());
-                        break;
-                    case "text_delta": {
-                        StringBuilder sb = blocks.get(idx);
-                        if (sb == null) {
-                            sb = new StringBuilder();
-                            blocks.put(idx, sb);
-                        }
-                        sb.append(agg.optString("delta", ""));
-                        updateAssistant(new ChatMessage(ChatMessage.Role.AGENT, joinBlocks(), true));
-                        break;
-                    }
-                    case "text_end":
-                        blocks.put(idx, new StringBuilder(agg.optString("content", "")));
-                        updateAssistant(new ChatMessage(ChatMessage.Role.AGENT, joinBlocks(), true));
-                        break;
-                    case "thinking_start":
-                    case "thinking_delta":
-                        setConnectionVisual("online", getString(R.string.status_thinking));
-                        break;
-                    case "toolcall_start":
-                        // 卡片由 tool_execution_start 创建，避免同一工具重复两个气泡。
-                        break;
-                    default:
-                        break;
-                }
+                JSONObject update = ev.optJSONObject("assistantMessageEvent");
+                if (update == null) return;
+                if (!streaming) setStreaming(true);
+                main.removeCallbacks(thinkingTimeout);
+                main.postDelayed(thinkingTimeout, THINKING_TIMEOUT_MS);
+                String kind = update.optString("type");
+                if (kind.startsWith("thinking_")) showGenerationFeedback(getString(R.string.generation_thinking));
+                else if (kind.startsWith("text_")) showGenerationFeedback(getString(R.string.generation_output));
+                applyTranscriptEvent(ev, false);
                 return;
             }
-            case "message_end": {
-                JSONObject msg = ev.optJSONObject("message");
-                if (msg != null && "assistant".equals(msg.optString("role"))) {
-                    String text = textOfMessage(msg);
-                    if (!text.isEmpty()) {
-                        blocks.clear();
-                        if ("error".equals(msg.optString("stopReason"))) {
-                            adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "⚠ " + text));
-                        } else {
-                            updateAssistant(new ChatMessage(ChatMessage.Role.AGENT, text));
-                        }
-                    }
-                }
-                assistantRow = -1;
+            case "message_end":
+                applyTranscriptEvent(ev, true);
                 return;
-            }
             case "agent_end": {
+                applyTranscriptEvent(ev, true);
                 // 旧版 Pi 只有 agent_end；新版会再发 agent_settled。willRetry 时先别 idle。
-                showErrorsFromAgentEnd(ev);
                 if (!ev.optBoolean("willRetry", false)) {
                     main.removeCallbacks(settleAfterAgentEnd);
                     main.postDelayed(settleAfterAgentEnd, 1500);
@@ -1248,24 +1240,23 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 return;
             }
             case "tool_execution_start":
-                adapter.add(new ChatMessage(ChatMessage.Role.TOOL,
-                        "⟶ " + ev.optString("toolName") + " " + oneLine(ev.optJSONObject("args"))));
-                toolRows.put(ev.optString("toolCallId"), adapter.size() - 1);
+            case "tool_execution_update":
+            case "tool_execution_end":
+                if (!streaming) setStreaming(true);
+                main.removeCallbacks(thinkingTimeout);
+                main.postDelayed(thinkingTimeout, THINKING_TIMEOUT_MS);
+                showGenerationFeedback("tool_execution_end".equals(type)
+                        ? getString(R.string.generation_active)
+                        : getString(R.string.generation_tool, ev.optString("toolName", "tool")));
+                applyTranscriptEvent(ev, "tool_execution_end".equals(type));
                 return;
-            case "tool_execution_end": {
-                Integer row = toolRows.remove(ev.optString("toolCallId"));
-                JSONObject res = ev.optJSONObject("result");
-                String out = res != null ? textOfContent(res.optJSONArray("content")) : "";
-                if (row != null) {
-                    adapter.replaceAt(row, new ChatMessage(ChatMessage.Role.TOOL,
-                            (ev.optBoolean("isError") ? "✗ " : "✓ ") + ev.optString("toolName")
-                                    + (out.isEmpty() ? "" : "\n" + clip(out))));
-                }
-                return;
-            }
             case "agent_settled":
+                applyTranscriptEvent(ev, true);
                 historyNeedsSync = true;
                 settleStreaming(true);
+                return;
+            case "auto_retry_start":
+                showGenerationFeedback(getString(R.string.generation_retry));
                 return;
             case "auto_retry_end":
                 if (!ev.optBoolean("success", true)) {
@@ -1419,31 +1410,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private void renderHistory(JSONObject data) {
-        JSONArray messages = data != null ? data.optJSONArray("messages") : null;
-        java.util.List<ChatMessage> history = new java.util.ArrayList<>();
-        if (messages != null) {
-            for (int i = 0; i < messages.length(); i++) {
-                JSONObject m = messages.optJSONObject(i);
-                if (m == null || HistoryPresentation.hidden(m)) continue;
-                String text = HistoryPresentation.displayText(m, textOfMessage(m));
-                if (text.isEmpty()) continue;
-                long timestamp = m.optLong("timestamp", 0);
-                switch (m.optString("role", "")) {
-                    case "user":
-                        history.add(new ChatMessage(ChatMessage.Role.USER, text, timestamp));
-                        break;
-                    case "assistant":
-                        history.add(new ChatMessage(ChatMessage.Role.AGENT, text, timestamp));
-                        break;
-                    case "toolResult":
-                        history.add(new ChatMessage(ChatMessage.Role.TOOL, text, timestamp));
-                        break;
-                    default:
-                        history.add(new ChatMessage(ChatMessage.Role.SYSTEM, text, timestamp));
-                        break;
-                }
-            }
-        }
+        List<ChatMessage> history = TranscriptReducer.history(data);
         if (history.isEmpty()) {
             // 空会话走 empty state + 建议 chips，不往聊天流塞 SYSTEM 气泡
             adapter.clear();
@@ -1451,7 +1418,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             adapter.replaceAll(history);
         }
         stickToBottom = true;
-        list.scrollToPosition(Math.max(0, adapter.size() - 1));
+        maybeScrollToBottom(true);
         if (scrollBottom != null) scrollBottom.setVisibility(View.GONE);
         refreshEmptyState();
     }
@@ -1466,9 +1433,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private void syncSessionAfterChange() {
-        blocks.clear();
-        toolRows.clear();
-        assistantRow = -1;
+        resetTranscript();
         historyRequest = "";
         historyNeedsSync = true;
         stickToBottom = true;
@@ -1476,14 +1441,48 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         refreshSlashCommands();
     }
 
-    private void updateAssistant(ChatMessage message) {
-        if (assistantRow >= 0 && assistantRow < adapter.size()) {
-            adapter.replaceAt(assistantRow, message);
-            snapshotChat();
-            maybeScrollToBottom(false);
-        } else {
-            assistantRow = adapter.size();
-            adapter.add(message);
+    private void resetTranscript() {
+        flushTranscriptPaint();
+        transcript.reset();
+    }
+
+    private void applyTranscriptEvent(JSONObject event, boolean immediate) {
+        for (TranscriptReducer.Edit edit : transcript.accept(event, adapter.size())) {
+            if (edit.append) {
+                flushTranscriptPaint();
+                adapter.add(edit.message);
+            } else {
+                pendingRows.put(edit.row, edit.message);
+            }
+        }
+        if (immediate) flushTranscriptPaint();
+        else if (!pendingRows.isEmpty() && !paintScheduled) {
+            // 合并高频增量，保证每 50ms 可见一次更新，不等 message_end 才刷新。
+            paintScheduled = true;
+            main.postDelayed(paintTranscript, 50);
+        }
+    }
+
+    private void flushTranscriptPaint() {
+        main.removeCallbacks(paintTranscript);
+        paintScheduled = false;
+        if (pendingRows.isEmpty() || adapter == null) return;
+        for (Map.Entry<Integer, ChatMessage> edit : pendingRows.entrySet()) adapter.replaceAt(edit.getKey(), edit.getValue());
+        pendingRows.clear();
+        snapshotChat();
+        maybeScrollToBottom(false);
+    }
+
+    private void showGenerationFeedback(String text) {
+        if (generationStatus != null && streaming && !text.contentEquals(generationStatus.getText())) generationStatus.setText(text);
+    }
+
+    private void scrollTailEnd(LinearLayoutManager lm, int position) {
+        if (!stickToBottom || list == null || adapter == null || position != adapter.size() - 1) return;
+        View tail = lm.findViewByPosition(position);
+        if (tail != null) {
+            int distance = tail.getBottom() - (list.getHeight() - list.getPaddingBottom());
+            if (distance > 0) list.scrollBy(0, distance);
         }
     }
 
@@ -1546,21 +1545,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         return false;
     }
 
-    private String joinBlocks() {
-        StringBuilder out = new StringBuilder();
-        for (StringBuilder b : blocks.values()) out.append(b);
-        return out.toString();
-    }
-
-    private static String clip(String s) {
-        return s.length() > 1200 ? s.substring(0, 1200) + "\n…" : s;
-    }
-
     static String textOfMessage(JSONObject msg) {
-        Object rawContent = msg.opt("content");
-        if (rawContent instanceof String) return (String) rawContent;
-        JSONArray content = msg.optJSONArray("content");
-        String s = textOfContent(content);
+        String s = TranscriptReducer.textOfMessage(msg);
         if (!s.isEmpty()) return s;
         String plain = msg.optString("text", "");
         if (!plain.isEmpty()) return plain;
@@ -1571,39 +1557,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         return "";
     }
 
-    private void showErrorsFromAgentEnd(JSONObject ev) {
-        JSONArray msgs = ev.optJSONArray("messages");
-        if (msgs == null || adapter == null) return;
-        for (int i = msgs.length() - 1; i >= 0; i--) {
-            JSONObject m = msgs.optJSONObject(i);
-            if (m == null || !"assistant".equals(m.optString("role"))) continue;
-            if (!"error".equals(m.optString("stopReason"))) continue;
-            String err = textOfMessage(m);
-            if (err.isEmpty()) err = getString(R.string.prompt_failed);
-            adapter.add(new ChatMessage(ChatMessage.Role.SYSTEM, "⚠ " + err));
-            return;
-        }
-    }
-
     static String textOfContent(JSONArray content) {
-        if (content == null) return "";
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < content.length(); i++) {
-            JSONObject part = content.optJSONObject(i);
-            if (part == null) continue;
-            if ("text".equals(part.optString("type"))) {
-                if (sb.length() > 0) sb.append("\n");
-                sb.append(part.optString("text"));
-            } else if ("toolCall".equals(part.optString("type"))) {
-                sb.append("\n⟶ ").append(part.optString("name", "tool"));
-            }
-        }
-        return sb.toString();
+        return TranscriptReducer.textOfContent(content);
     }
 
-    private static String oneLine(@Nullable JSONObject obj) {
-        if (obj == null) return "";
-        String s = obj.toString();
-        return s.length() > 200 ? s.substring(0, 200) + "…" : s;
-    }
 }
