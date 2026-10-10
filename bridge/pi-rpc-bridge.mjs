@@ -391,6 +391,141 @@ function listCwdEntries(dirPath) {
   return { cwd: root, entries: entries.concat(dirs).slice(0, 200) };
 }
 
+/** Read mcpServers map from a Pi mcp.json; never exposes secrets (env/headers/auth). */
+function readMcpServersFile(file) {
+  try {
+    if (!fs.existsSync(file)) return {};
+    const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+    const map = raw && typeof raw === "object" ? (raw.mcpServers || raw) : null;
+    if (!map || typeof map !== "object" || Array.isArray(map)) return {};
+    return map;
+  } catch {
+    return {};
+  }
+}
+
+function mcpTransportOf(cfg) {
+  if (!cfg || typeof cfg !== "object") return "unknown";
+  const t = String(cfg.type || "").toLowerCase();
+  if (t === "http" || t === "streamable-http") return "http";
+  if (t === "stdio") return "stdio";
+  if (cfg.url) return "http";
+  if (cfg.command) return "stdio";
+  return "unknown";
+}
+
+/**
+ * Project trust from ~/.pi/agent/trust.json (canonical path → decision).
+ * Walks cwd and parents; closest entry wins. null = no saved decision.
+ */
+function resolveProjectTrust(cwd) {
+  const trustFile = path.join(os.homedir(), ".pi/agent/trust.json");
+  let data = {};
+  try {
+    if (fs.existsSync(trustFile)) {
+      data = JSON.parse(fs.readFileSync(trustFile, "utf8")) || {};
+    }
+  } catch { data = {}; }
+  let cur = path.resolve(cwd || ".");
+  while (true) {
+    if (Object.prototype.hasOwnProperty.call(data, cur)) {
+      const v = data[cur];
+      if (v === null || v === undefined) {
+        /* skip null tombstone — keep walking */
+      } else {
+        const decision = typeof v === "string" ? v : (v && v.decision) || v;
+        const trusted = decision === true || decision === "trusted" || decision === "yes"
+          || decision === "allow" || decision === "always";
+        const untrusted = decision === false || decision === "untrusted" || decision === "no"
+          || decision === "deny" || decision === "never";
+        return {
+          trusted: trusted ? true : (untrusted ? false : null),
+          decision: trusted ? "trusted" : (untrusted ? "untrusted" : String(decision)),
+          path: cur,
+        };
+      }
+    }
+    const parent = path.dirname(cur);
+    if (parent === cur) break;
+    cur = parent;
+  }
+  return { trusted: null, decision: null, path: path.resolve(cwd || ".") };
+}
+
+/**
+ * Pocket MCP sheet data: config from user+project mcp.json + trust.json.
+ * Live connected/failed when `pi mcp list` succeeds within timeout; else configured/disabled.
+ * Never returns env/headers/auth secrets.
+ */
+function listMcpServers() {
+  const cwd = resolveProjectCwd();
+  const trust = resolveProjectTrust(cwd);
+  const userFile = path.join(os.homedir(), ".pi/agent/mcp.json");
+  const projectFile = path.join(cwd, ".pi/mcp.json");
+  const userMap = readMcpServersFile(userFile);
+  // Project mcp.json is only loaded by Pi when trusted; still list file presence for UI,
+  // but mark projectTrusted so the client can explain.
+  const projectMap = readMcpServersFile(projectFile);
+  const names = new Set([...Object.keys(userMap), ...Object.keys(projectMap)]);
+  const live = tryPiMcpListStatus(cwd);
+  const servers = [];
+  for (const name of [...names].sort((a, b) => a.localeCompare(b))) {
+    const fromProject = Object.prototype.hasOwnProperty.call(projectMap, name);
+    const cfg = fromProject ? projectMap[name] : userMap[name];
+    if (!cfg || typeof cfg !== "object") continue;
+    const enabled = cfg.enabled !== false;
+    let status = enabled ? "configured" : "disabled";
+    let detail = "";
+    if (live && live[name]) {
+      status = live[name].status || status;
+      detail = live[name].detail || "";
+    }
+    servers.push({
+      name,
+      description: typeof cfg.description === "string" ? cfg.description : "",
+      enabled,
+      status,
+      detail,
+      source: fromProject ? "project" : "user",
+      transport: mcpTransportOf(cfg),
+      exposure: typeof cfg.exposure === "string" ? cfg.exposure : "",
+    });
+  }
+  return {
+    servers,
+    cwd,
+    projectTrusted: trust.trusted,
+    trustDecision: trust.decision,
+    projectMcpPath: projectFile,
+    userMcpPath: userFile,
+    live: !!live,
+  };
+}
+
+/** Best-effort parse of `pi mcp list` text; null when CLI unavailable/times out. */
+function tryPiMcpListStatus(cwd) {
+  try {
+    const r = spawnSync(PI_BIN, ["mcp", "list"], {
+      cwd,
+      encoding: "utf8",
+      timeout: 10_000,
+      env: process.env,
+    });
+    const out = `${r.stdout || ""}\n${r.stderr || ""}`;
+    if (!out.trim()) return null;
+    const map = {};
+    for (const line of out.split(/\r?\n/)) {
+      const m = line.match(/^\s*([A-Za-z0-9_-]+)\s+(connected|failed|error|disabled|idle|connecting|not-connected|cached|needs-auth)\b(.*)$/i);
+      if (!m) continue;
+      const status = m[2].toLowerCase().replace("error", "failed").replace("not-connected", "disconnected");
+      map[m[1]] = { status, detail: (m[3] || "").trim() };
+    }
+    return Object.keys(map).length ? map : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Safe relative path under project cwd; rejects .. escape. */
 function underProject(rel) {
   const root = resolveProjectCwd();
@@ -741,6 +876,24 @@ function writeCommand(id, ws, command, params) {
       respond(ws, id, true, "list_cwd_entries", data, null);
     } catch (e) {
       respond(ws, id, false, "list_cwd_entries", null, e.message);
+    }
+    return;
+  }
+  // Pocket: MCP sheet — no Pi list_mcp RPC; bridge reads mcp.json + trust.json (+ optional pi mcp list).
+  if (command === "list_mcp_servers") {
+    try {
+      respond(ws, id, true, "list_mcp_servers", listMcpServers(), null);
+    } catch (e) {
+      respond(ws, id, false, "list_mcp_servers", null, e.message);
+    }
+    return;
+  }
+  if (command === "get_project_trust") {
+    try {
+      const cwd = resolveProjectCwd();
+      respond(ws, id, true, "get_project_trust", { cwd, ...resolveProjectTrust(cwd) }, null);
+    } catch (e) {
+      respond(ws, id, false, "get_project_trust", null, e.message);
     }
     return;
   }

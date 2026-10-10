@@ -210,3 +210,36 @@ test('Pocket cwd RPCs: get_cwd / list_cwd_entries / set_cwd persist + inject get
   assert.equal(bad.ok, false);
   assert.notEqual(bad.error, '命令不允许: set_cwd');
 });
+
+test('Pocket MCP RPCs: list_mcp_servers + get_project_trust from mcp.json / trust.json', async t => {
+  const h = await harness(t), c = await h.connect();
+  const agentDir = path.join(h.dir, '.pi', 'agent');
+  await fs.mkdir(agentDir, {recursive: true});
+  await fs.writeFile(path.join(agentDir, 'mcp.json'), JSON.stringify({
+    mcpServers: {
+      docs: {url: 'https://example.com/mcp', description: 'Docs search', enabled: true},
+      local: {command: 'npx', args: ['-y', 'noop'], enabled: false},
+    },
+  }));
+  await fs.writeFile(path.join(agentDir, 'trust.json'), JSON.stringify({
+    [h.dir]: 'trusted',
+  }));
+  await fs.mkdir(path.join(h.dir, '.pi'), {recursive: true});
+  await fs.writeFile(path.join(h.dir, '.pi', 'mcp.json'), JSON.stringify({
+    mcpServers: {
+      docs: {url: 'https://example.com/mcp', description: 'Project docs', enabled: true},
+    },
+  }));
+  c.rpc('mcp', 'list_mcp_servers', {});
+  const mcp = await c.response('mcp');
+  assert.equal(mcp.ok, true);
+  assert.ok(Array.isArray(mcp.data.servers));
+  assert.ok(mcp.data.servers.some(s => s.name === 'docs' && s.source === 'project'));
+  assert.ok(mcp.data.servers.some(s => s.name === 'local' && s.status === 'disabled'));
+  assert.equal(mcp.data.projectTrusted, true);
+  assert.ok(!JSON.stringify(mcp.data).includes('example-secret'));
+  c.rpc('trust', 'get_project_trust', {});
+  const trust = await c.response('trust');
+  assert.equal(trust.ok, true);
+  assert.equal(trust.data.trusted, true);
+});
