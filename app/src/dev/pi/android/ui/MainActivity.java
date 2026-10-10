@@ -2365,13 +2365,19 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private void switchToSession(String path) {
-        JSONObject params = new JSONObject();
-        try {
-            params.put("sessionPath", path);
-        } catch (Exception e) {
-            throw new IllegalStateException("switch_session params", e);
-        }
-        rpc("switch_session", params);
+        if (path == null || path.isEmpty()) return;
+        if (path.equals(currentSessionPath)) return;
+        confirmIfBusy(R.string.session_interrupt_switch_message,
+                R.string.session_interrupt_switch_toast,
+                () -> {
+                    JSONObject params = new JSONObject();
+                    try {
+                        params.put("sessionPath", path);
+                    } catch (Exception e) {
+                        throw new IllegalStateException("switch_session params", e);
+                    }
+                    rpc("switch_session", params);
+                });
     }
 
     private void promptRenameSession(String prefill) {
@@ -2460,7 +2466,26 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private void startNewSession() {
-        rpc("new_session", null);
+        confirmIfBusy(R.string.session_interrupt_new_message,
+                R.string.session_interrupt_new_toast,
+                () -> rpc("new_session", null));
+    }
+
+    /**
+     * One Pi RPC process = one active agent. Creating/switching sessions aborts an
+     * in-flight run. Confirm when streaming or bash is running; Cancel leaves it alone.
+     */
+    private void confirmIfBusy(@androidx.annotation.StringRes int messageRes,
+                               @androidx.annotation.StringRes int toastRes,
+                               @NonNull Runnable proceed) {
+        if (!streaming && !bashRunning) {
+            proceed.run();
+            return;
+        }
+        MaterialDialogs.confirm(this, 0, messageRes, R.string.session_interrupt_continue, () -> {
+            proceed.run();
+            Toast.makeText(this, toastRes, Toast.LENGTH_SHORT).show();
+        });
     }
 
     private void syncSessionAfterChange() {
