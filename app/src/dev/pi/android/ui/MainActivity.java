@@ -1057,7 +1057,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 contextBarWrap.setVisibility(View.VISIBLE);
                 if (contextBarFill != null) {
                     int track = contextBarWrap.getWidth();
-                    if (track <= 0) track = Math.round(36 * getResources().getDisplayMetrics().density);
+                    if (track <= 0) track = Math.round(28 * getResources().getDisplayMetrics().density);
                     int fill = Math.max(0, Math.round(track * (float) (contextPct / 100.0)));
                     android.view.ViewGroup.LayoutParams lp = contextBarFill.getLayoutParams();
                     lp.width = fill;
