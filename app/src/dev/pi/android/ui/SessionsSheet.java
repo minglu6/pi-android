@@ -11,6 +11,7 @@ import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.core.content.ContextCompat;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
@@ -65,6 +66,11 @@ public final class SessionsSheet {
     private TextView emptyBody;
     private EditText search;
     private String query = "";
+    private View sessionsTabs;
+    private TextView tabRecent;
+    private TextView tabArchived;
+    /** false = 最近, true = 归档；归档 tab 仅在有 archived 数据时显示。 */
+    private boolean showArchivedTab;
 
     public SessionsSheet(MainActivity activity, Host host) {
         this.activity = activity;
@@ -111,17 +117,50 @@ public final class SessionsSheet {
                 String preview = item.optString("preview", "");
                 long mtime = item.optLong("mtimeMs", 0L);
                 boolean isCurrent = current != null && current.equals(path);
+                String model = firstNonEmpty(item, "model", "modelId", "modelName");
+                int messageCount = -1;
+                if (item.has("messageCount") && !item.isNull("messageCount")) {
+                    messageCount = Math.max(0, item.optInt("messageCount", -1));
+                } else if (item.has("messages") && !item.isNull("messages")) {
+                    messageCount = Math.max(0, item.optInt("messages", -1));
+                }
+                boolean archived = item.optBoolean("archived", false)
+                        || path.contains("/archived/")
+                        || path.contains("/archive/");
                 allSessions.add(SessionEntry.session(
                         path,
                         SessionText.title(name, preview),
                         SessionText.previewLine(name, preview),
                         mtime,
-                        isCurrent));
+                        isCurrent,
+                        model,
+                        messageCount,
+                        archived));
             }
         }
+        boolean hasArchived = false;
+        for (SessionEntry e : allSessions) {
+            if (e.archived) { hasArchived = true; break; }
+        }
+        if (sessionsTabs != null) {
+            sessionsTabs.setVisibility(hasArchived ? View.VISIBLE : View.GONE);
+        }
+        if (!hasArchived) showArchivedTab = false;
+        refreshTabStyles();
         applyFilter();
         dialog.show();
         expandFully();
+    }
+
+    @Nullable
+    private static String firstNonEmpty(JSONObject item, String... keys) {
+        for (String key : keys) {
+            if (item.has(key) && !item.isNull(key)) {
+                String v = item.optString(key, "").trim();
+                if (!v.isEmpty()) return v;
+            }
+        }
+        return null;
     }
 
     public void dismiss() {
@@ -163,6 +202,24 @@ public final class SessionsSheet {
         emptyTitle = root.findViewById(R.id.sessions_empty_title);
         emptyBody = root.findViewById(R.id.sessions_empty_body);
         loading = root.findViewById(R.id.sessions_loading);
+        sessionsTabs = root.findViewById(R.id.sessions_tabs);
+        tabRecent = root.findViewById(R.id.sessions_tab_recent);
+        tabArchived = root.findViewById(R.id.sessions_tab_archived);
+        if (tabRecent != null) {
+            tabRecent.setOnClickListener(v -> {
+                showArchivedTab = false;
+                refreshTabStyles();
+                applyFilter();
+            });
+        }
+        if (tabArchived != null) {
+            tabArchived.setOnClickListener(v -> {
+                showArchivedTab = true;
+                refreshTabStyles();
+                applyFilter();
+            });
+        }
+        refreshTabStyles();
 
         RecyclerView list = root.findViewById(R.id.sessions_list);
         list.setLayoutManager(new LinearLayoutManager(activity));
@@ -227,15 +284,36 @@ public final class SessionsSheet {
         sheet.setLayoutParams(lp);
     }
 
+    private void refreshTabStyles() {
+        if (tabRecent == null || tabArchived == null) return;
+        int onBg = R.drawable.bg_segmented_on;
+        int onFg = ContextCompat.getColor(activity, R.color.md_theme_onPrimary);
+        int offFg = ContextCompat.getColor(activity, R.color.text_muted);
+        if (!showArchivedTab) {
+            tabRecent.setBackgroundResource(onBg);
+            tabRecent.setTextColor(onFg);
+            tabArchived.setBackground(null);
+            tabArchived.setTextColor(offFg);
+        } else {
+            tabArchived.setBackgroundResource(onBg);
+            tabArchived.setTextColor(onFg);
+            tabRecent.setBackground(null);
+            tabRecent.setTextColor(offFg);
+        }
+    }
+
     private void applyFilter() {
         List<SessionEntry> filtered = new ArrayList<>();
         String q = query == null ? "" : query.toLowerCase(java.util.Locale.ROOT);
+        boolean tabsVisible = sessionsTabs != null && sessionsTabs.getVisibility() == View.VISIBLE;
         for (SessionEntry e : allSessions) {
+            if (tabsVisible && e.archived != showArchivedTab) continue;
             if (q.isEmpty()) {
                 filtered.add(e);
                 continue;
             }
-            String hay = ((e.title == null ? "" : e.title) + " " + (e.preview == null ? "" : e.preview))
+            String hay = ((e.title == null ? "" : e.title) + " " + (e.preview == null ? "" : e.preview)
+                    + " " + (e.model == null ? "" : e.model))
                     .toLowerCase(java.util.Locale.ROOT);
             if (hay.contains(q)) filtered.add(e);
         }

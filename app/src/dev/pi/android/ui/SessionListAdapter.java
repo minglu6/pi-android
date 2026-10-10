@@ -17,8 +17,9 @@ import java.util.Locale;
 
 import dev.pi.android.R;
 import dev.pi.android.model.SessionEntry;
+import dev.pi.android.util.AppFonts;
 
-/** 会话列表：分组头 + 卡片行。 */
+/** 会话列表：分组头 + 紧凑行。 */
 public class SessionListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
     public interface Listener {
@@ -91,15 +92,15 @@ public class SessionListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
         if (ms <= 0) return "";
         long diff = System.currentTimeMillis() - ms;
         long min = diff / 60000L;
-        if (min < 1) return "刚刚";
-        if (min < 60) return min + " 分钟前";
+        if (min < 1) return "now";
+        if (min < 60) return min + "m";
         long h = min / 60L;
-        if (h < 24) return h + " 小时前";
+        if (h < 24) return h + "h";
         long d = h / 24L;
-        if (d < 7) return d + " 天前";
+        if (d < 7) return d + "d";
         Calendar cal = Calendar.getInstance();
         cal.setTimeInMillis(ms);
-        return String.format(Locale.CHINA, "%d月%d日",
+        return String.format(Locale.CHINA, "%d/%d",
                 cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH));
     }
 
@@ -122,6 +123,8 @@ public class SessionListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
         final TextView title;
         final TextView preview;
         final TextView time;
+        final TextView model;
+        final TextView msgCount;
 
         SessionVH(@NonNull View itemView) {
             super(itemView);
@@ -130,6 +133,11 @@ public class SessionListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
             title = itemView.findViewById(R.id.session_title);
             preview = itemView.findViewById(R.id.session_preview);
             time = itemView.findViewById(R.id.session_time);
+            model = itemView.findViewById(R.id.session_model);
+            msgCount = itemView.findViewById(R.id.session_msg_count);
+            if (time != null) time.setTypeface(AppFonts.mono(itemView.getContext(), false));
+            if (model != null) model.setTypeface(AppFonts.mono(itemView.getContext(), false));
+            if (msgCount != null) msgCount.setTypeface(AppFonts.mono(itemView.getContext(), false));
         }
 
         void bind(SessionEntry entry, Listener listener) {
@@ -140,7 +148,29 @@ public class SessionListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
                 preview.setVisibility(View.VISIBLE);
                 preview.setText(entry.preview);
             }
-            time.setText(relativeTime(entry.mtimeMs));
+            String when = relativeTime(entry.mtimeMs);
+            if (when.isEmpty()) {
+                time.setVisibility(View.GONE);
+            } else {
+                time.setVisibility(View.VISIBLE);
+                time.setText(when);
+            }
+            if (model != null) {
+                if (entry.model == null || entry.model.isEmpty()) {
+                    model.setVisibility(View.GONE);
+                } else {
+                    model.setVisibility(View.VISIBLE);
+                    model.setText(entry.model);
+                }
+            }
+            if (msgCount != null) {
+                if (entry.messageCount < 0) {
+                    msgCount.setVisibility(View.GONE);
+                } else {
+                    msgCount.setVisibility(View.VISIBLE);
+                    msgCount.setText(String.valueOf(entry.messageCount));
+                }
+            }
             card.setBackgroundResource(entry.current
                     ? R.drawable.bg_session_item_current
                     : R.drawable.bg_session_item);
@@ -148,7 +178,8 @@ public class SessionListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
                 GradientDrawable shape = new GradientDrawable();
                 shape.setShape(GradientDrawable.OVAL);
                 shape.setColor(ContextCompat.getColor(itemView.getContext(),
-                        entry.current ? R.color.pi_blue : R.color.text_muted));
+                        entry.current ? R.color.pi_blue
+                                : entry.archived ? R.color.role_pi : R.color.text_muted));
                 dot.setBackground(shape);
             }
             card.setOnClickListener(v -> {

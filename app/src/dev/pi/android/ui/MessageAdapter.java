@@ -14,13 +14,18 @@ import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
+import android.text.style.ForegroundColorSpan;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.PopupMenu;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -82,14 +87,34 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
         void onChanged(int size);
     }
 
+    /** 助手消息动作：复制 / 重试 / 分叉 / 更多。 */
+    public interface AgentActionListener {
+        void onRetry(@NonNull ChatMessage message);
+
+        void onFork(@NonNull ChatMessage message);
+    }
+
     private final List<ChatMessage> items = new ArrayList<>();
     private final OnMessageChanged listener;
+    @Nullable private AgentActionListener agentActions;
     /** 工具卡片展开状态，key 为 tool id（legacy 为派生 key）。 */
     private final Map<String, Boolean> toolExpanded = new HashMap<>();
 
     public MessageAdapter(OnMessageChanged listener) {
         this.listener = listener;
         setHasStableIds(false);
+    }
+
+    public void setAgentActionListener(@Nullable AgentActionListener listener) {
+        this.agentActions = listener;
+    }
+
+    /** Index of the last USER message; tools after it are “latest turn” (expand by default). */
+    private int latestTurnStart() {
+        for (int i = items.size() - 1; i >= 0; i--) {
+            if (items.get(i).role == ChatMessage.Role.USER) return i;
+        }
+        return 0;
     }
 
     public void add(ChatMessage msg) {
@@ -204,7 +229,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
 
     @Override
     public void onBindViewHolder(@NonNull VH holder, int position) {
-        holder.bind(items.get(position));
+        holder.bind(items.get(position), position);
     }
 
     @Override
@@ -292,8 +317,11 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
 
         // 用户 / 助手可选行头与动作
         TextView userHeader;
-        View agentActions;
+        View agentActionsRow;
+        View agentReactions;
         TextView agentActionCopy;
+        TextView agentActionRetry;
+        TextView agentActionFork;
         TextView agentActionMore;
 
         VH(@NonNull View itemView, int type) {
@@ -306,8 +334,11 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                 userHeader = itemView.findViewById(R.id.user_header);
             }
             if (type == TYPE_AGENT) {
-                agentActions = itemView.findViewById(R.id.agent_actions);
+                agentActionsRow = itemView.findViewById(R.id.agent_actions);
+                agentReactions = itemView.findViewById(R.id.agent_reactions);
                 agentActionCopy = itemView.findViewById(R.id.agent_action_copy);
+                agentActionRetry = itemView.findViewById(R.id.agent_action_retry);
+                agentActionFork = itemView.findViewById(R.id.agent_action_fork);
                 agentActionMore = itemView.findViewById(R.id.agent_action_more);
             }
             if (type == TYPE_TOOL) {
@@ -336,7 +367,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
             }
         }
 
-        void bind(ChatMessage msg) {
+        void bind(ChatMessage msg, int position) {
             int codeBg = ContextCompat.getColor(ctx, R.color.bg_code);
             int codeFg = ContextCompat.getColor(ctx, R.color.pi_amber);
             switch (type) {
@@ -353,7 +384,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                     bindAttachments(msg);
                     break;
                 case TYPE_TOOL:
-                    bindTool(msg);
+                    bindTool(msg, position);
                     break;
                 case TYPE_SYSTEM:
                     text.setText(msg.text);
@@ -362,14 +393,14 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                 default: {
                     CharSequence body = MarkdownLite.render(ctx, msg.text, codeBg, codeFg);
                     if (msg.streaming) {
-                        android.text.SpannableStringBuilder sb =
-                                new android.text.SpannableStringBuilder(body);
+                        SpannableStringBuilder sb = new SpannableStringBuilder(body);
                         sb.append(ctx.getString(R.string.streaming_marker));
                         text.setText(sb);
-                        if (agentActions != null) agentActions.setVisibility(View.GONE);
+                        if (agentActionsRow != null) agentActionsRow.setVisibility(View.GONE);
+                        if (agentReactions != null) agentReactions.setVisibility(View.GONE);
                     } else {
                         text.setText(body);
-                        bindAgentActions(msg.text);
+                        bindAgentActions(msg);
                     }
                     break;
                 }
@@ -383,36 +414,68 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
             });
         }
 
-        private void bindAgentActions(String body) {
-            if (agentActions == null) return;
-            final String copyText = body == null ? "" : body;
-            if (copyText.isEmpty()) {
-                agentActions.setVisibility(View.GONE);
-                return;
-            }
-            agentActions.setVisibility(View.VISIBLE);
+        private void bindAgentActions(ChatMessage msg) {
+            if (agentActionsRow == null) return;
+            final String copyText = msg.text == null ? "" : msg.text;
+            // Always-visible compact action row once reply is complete.
+            agentActionsRow.setVisibility(View.VISIBLE);
+            if (agentReactions != null) agentReactions.setVisibility(View.GONE);
             if (agentActionCopy != null) {
-                agentActionCopy.setOnClickListener(v -> {
-                    ClipboardManager cm =
-                            (ClipboardManager) ctx.getSystemService(Context.CLIPBOARD_SERVICE);
-                    if (cm != null) {
-                        cm.setPrimaryClip(ClipData.newPlainText(
-                                ctx.getString(R.string.action_copy), copyText));
+                agentActionCopy.setOnClickListener(v -> copyPlain(copyText));
+            }
+            if (agentActionRetry != null) {
+                agentActionRetry.setOnClickListener(v -> {
+                    if (MessageAdapter.this.agentActions != null) {
+                        MessageAdapter.this.agentActions.onRetry(msg);
                     }
-                    Toast.makeText(ctx, R.string.tool_copied, Toast.LENGTH_SHORT).show();
+                });
+            }
+            if (agentActionFork != null) {
+                agentActionFork.setOnClickListener(v -> {
+                    if (MessageAdapter.this.agentActions != null) {
+                        MessageAdapter.this.agentActions.onFork(msg);
+                    }
                 });
             }
             if (agentActionMore != null) {
                 agentActionMore.setOnClickListener(v -> {
-                    ClipboardManager cm =
-                            (ClipboardManager) ctx.getSystemService(Context.CLIPBOARD_SERVICE);
-                    if (cm != null) {
-                        cm.setPrimaryClip(ClipData.newPlainText(
-                                ctx.getString(R.string.action_copy), copyText));
-                    }
-                    Toast.makeText(ctx, R.string.tool_copied, Toast.LENGTH_SHORT).show();
+                    PopupMenu menu = new PopupMenu(ctx, v);
+                    menu.getMenu().add(0, 1, 0, R.string.action_copy);
+                    menu.getMenu().add(0, 2, 1, R.string.action_retry);
+                    menu.getMenu().add(0, 3, 2, R.string.action_fork_short);
+                    menu.setOnMenuItemClickListener(item -> {
+                        switch (item.getItemId()) {
+                            case 1:
+                                copyPlain(copyText);
+                                return true;
+                            case 2:
+                                if (MessageAdapter.this.agentActions != null) {
+                                    MessageAdapter.this.agentActions.onRetry(msg);
+                                }
+                                return true;
+                            case 3:
+                                if (MessageAdapter.this.agentActions != null) {
+                                    MessageAdapter.this.agentActions.onFork(msg);
+                                }
+                                return true;
+                            default:
+                                return false;
+                        }
+                    });
+                    menu.show();
                 });
             }
+        }
+
+        private void copyPlain(String copyText) {
+            if (copyText == null || copyText.isEmpty()) return;
+            ClipboardManager cm =
+                    (ClipboardManager) ctx.getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null) {
+                cm.setPrimaryClip(ClipData.newPlainText(
+                        ctx.getString(R.string.action_copy), copyText));
+            }
+            Toast.makeText(ctx, R.string.tool_copied, Toast.LENGTH_SHORT).show();
         }
 
         void cancelThumbnails() {
@@ -536,7 +599,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
          * （"⟶ name args" 运行中 / "✓ name\n输出" / "✗ name\n输出"，以及历史回放的
          * 无标记整段文本）解析成同一卡片形态，任何旧消息都有 fallback。
          */
-        private void bindTool(ChatMessage msg) {
+        private void bindTool(ChatMessage msg, int position) {
             ChatMessage.ToolData td = msg.tool;
             final String key;
             String name;
@@ -544,6 +607,9 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
             final String output;
             String state;
             long durationMs = 0;
+            int additions = -1;
+            int deletions = -1;
+            String summary = "";
 
             if (td != null) {
                 key = "tool|" + (td.id.isEmpty()
@@ -554,6 +620,9 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                 output = td.output;
                 state = td.state;
                 durationMs = td.durationMs;
+                additions = td.additions;
+                deletions = td.deletions;
+                summary = td.summary;
             } else {
                 String head = msg.text;
                 String rest = "";
@@ -572,7 +641,6 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                     command = sp < 0 ? "" : head.substring(sp + 1).trim();
                     output = rest;
                 } else {
-                    // 历史回放等无标记文本：整体当作输出。
                     state = ChatMessage.ToolData.STATE_DONE;
                     name = "";
                     command = "";
@@ -583,9 +651,36 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                         : command);
             }
 
-            final boolean expanded = Boolean.TRUE.equals(toolExpanded.get(key));
+            // Latest turn expanded by default; older turns stay collapsed unless user opened them.
+            boolean defaultExpand = position >= latestTurnStart();
+            final boolean expanded = toolExpanded.containsKey(key)
+                    ? Boolean.TRUE.equals(toolExpanded.get(key))
+                    : defaultExpand;
 
-            if (toolDiff != null) toolDiff.setVisibility(View.GONE);
+            if (toolDiff != null) {
+                if (additions >= 0 || deletions >= 0) {
+                    SpannableStringBuilder diff = new SpannableStringBuilder();
+                    if (additions >= 0) {
+                        int start = diff.length();
+                        diff.append("+").append(String.valueOf(additions));
+                        diff.setSpan(new ForegroundColorSpan(
+                                        ContextCompat.getColor(ctx, R.color.diff_add)),
+                                start, diff.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    }
+                    if (deletions >= 0) {
+                        if (diff.length() > 0) diff.append(' ');
+                        int start = diff.length();
+                        diff.append("-").append(String.valueOf(deletions));
+                        diff.setSpan(new ForegroundColorSpan(
+                                        ContextCompat.getColor(ctx, R.color.diff_del)),
+                                start, diff.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    }
+                    toolDiff.setText(diff);
+                    toolDiff.setVisibility(View.VISIBLE);
+                } else {
+                    toolDiff.setVisibility(View.GONE);
+                }
+            }
 
             int stateColor = stateColor(state);
             toolStateBar.setBackgroundColor(stateColor);
@@ -597,19 +692,24 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
             toolSubject.setText(subject);
             toolSubject.setVisibility(subject.isEmpty() ? View.GONE : View.VISIBLE);
 
-            toolStatus.setText(statusText(state, durationMs));
-            toolStatus.setTextColor(stateColor);
+            String status = !summary.isEmpty() ? summary : statusText(state, durationMs);
+            toolStatus.setText(status);
+            toolStatus.setVisibility(status.isEmpty() ? View.GONE : View.VISIBLE);
+            toolStatus.setTextColor(ChatMessage.ToolData.STATE_PENDING.equals(state)
+                    ? ContextCompat.getColor(ctx, R.color.pi_amber)
+                    : stateColor);
             toolChevron.setText(expanded ? "▾" : "▸");
 
             final boolean hasOutput = !output.isEmpty();
             boolean showCommand = expanded && !command.isEmpty();
-            toolOutputScroll.setVisibility(hasOutput || showCommand ? View.VISIBLE : View.GONE);
+            boolean showBody = expanded && (hasOutput || showCommand);
+            toolOutputScroll.setVisibility(showBody ? View.VISIBLE : View.GONE);
             toolCommand.setVisibility(showCommand ? View.VISIBLE : View.GONE);
             if (showCommand) toolCommand.setText(command);
-            toolOutput.setVisibility(hasOutput ? View.VISIBLE : View.GONE);
-            if (hasOutput) {
+            toolOutput.setVisibility(expanded && hasOutput ? View.VISIBLE : View.GONE);
+            if (expanded && hasOutput) {
                 toolOutput.setText(output);
-                toolOutput.setMaxLines(expanded ? Integer.MAX_VALUE : PREVIEW_LINES);
+                toolOutput.setMaxLines(Integer.MAX_VALUE);
                 toolOutput.setTextColor(ContextCompat.getColor(ctx,
                         ChatMessage.ToolData.STATE_ERROR.equals(state)
                                 ? R.color.status_offline
@@ -617,20 +717,21 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
             }
 
             int outLines = countLines(output);
-            boolean expandable = outLines > PREVIEW_LINES || !command.isEmpty();
-            toolFooter.setVisibility(expandable || hasOutput ? View.VISIBLE : View.GONE);
+            boolean expandable = outLines > 0 || !command.isEmpty();
+            toolFooter.setVisibility(expanded && (expandable || hasOutput) ? View.VISIBLE : View.GONE);
             toolToggle.setVisibility(expandable ? View.VISIBLE : View.GONE);
             if (expandable) {
                 toolToggle.setText(expanded
                         ? ctx.getString(R.string.tool_collapse)
-                        : outLines > PREVIEW_LINES
-                        ? ctx.getString(R.string.tool_expand_lines, outLines)
                         : ctx.getString(R.string.tool_expand));
             }
             toolCopy.setVisibility(hasOutput ? View.VISIBLE : View.GONE);
 
             View.OnClickListener toggle = v -> {
-                toolExpanded.put(key, !Boolean.TRUE.equals(toolExpanded.get(key)));
+                boolean next = !(toolExpanded.containsKey(key)
+                        ? Boolean.TRUE.equals(toolExpanded.get(key))
+                        : defaultExpand);
+                toolExpanded.put(key, next);
                 int pos = getBindingAdapterPosition();
                 if (pos != RecyclerView.NO_POSITION) notifyItemChanged(pos);
             };
@@ -652,6 +753,9 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
             switch (state) {
                 case ChatMessage.ToolData.STATE_RUNNING:
                     res = R.color.pi_blue;
+                    break;
+                case ChatMessage.ToolData.STATE_PENDING:
+                    res = R.color.pi_amber;
                     break;
                 case ChatMessage.ToolData.STATE_ERROR:
                     res = R.color.status_offline;
@@ -695,6 +799,9 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                 case ChatMessage.ToolData.STATE_RUNNING:
                     label = R.string.tool_state_running;
                     break;
+                case ChatMessage.ToolData.STATE_PENDING:
+                    label = R.string.tool_state_pending;
+                    break;
                 case ChatMessage.ToolData.STATE_ERROR:
                     label = R.string.tool_state_error;
                     break;
@@ -707,7 +814,8 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                     break;
             }
             String s = ctx.getString(label);
-            if (durationMs > 0 && !ChatMessage.ToolData.STATE_RUNNING.equals(state)) {
+            if (durationMs > 0 && !ChatMessage.ToolData.STATE_RUNNING.equals(state)
+                    && !ChatMessage.ToolData.STATE_PENDING.equals(state)) {
                 s += " · " + formatDuration(durationMs);
             }
             return s;

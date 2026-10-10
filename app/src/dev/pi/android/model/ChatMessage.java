@@ -58,20 +58,35 @@ public class ChatMessage {
         public static final String STATE_ERROR = "error";
         public static final String STATE_CANCELLED = "cancelled";
 
+        public static final String STATE_PENDING = "pending";
+
         public final String id;
         public final String name;
         public final String command;
         public final String output;
         public final String state;
         public final long durationMs;
+        /** Optional edit/write stats from tool result; -1 means absent (hide). */
+        public final int additions;
+        public final int deletions;
+        /** Optional compact summary e.g. "48 passed · 3.1s"; empty means absent. */
+        public final String summary;
 
         public ToolData(String id, String name, String command, String output, String state, long durationMs) {
+            this(id, name, command, output, state, durationMs, -1, -1, "");
+        }
+
+        public ToolData(String id, String name, String command, String output, String state,
+                        long durationMs, int additions, int deletions, String summary) {
             this.id = id == null ? "" : id;
             this.name = name == null ? "" : name;
             this.command = command == null ? "" : command;
             this.output = output == null ? "" : output;
             this.state = state == null ? STATE_DONE : state;
             this.durationMs = durationMs;
+            this.additions = additions;
+            this.deletions = deletions;
+            this.summary = summary == null ? "" : summary;
         }
     }
 

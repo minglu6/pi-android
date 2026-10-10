@@ -32,6 +32,7 @@
     <string name="action_thinking">思考档位</string>
     <string name="action_sessions">会话列表</string>
     <string name="action_fork">从消息 Fork…</string>
+    <string name="action_fork_short">分叉</string>
     <string name="empty_title">今天想聊点什么？</string>
     <string name="empty_body">连上 Termux 里的连接器后即可开始。</string>
     <string name="empty_need_token_title">先配置 Token</string>
@@ -141,6 +142,11 @@
     <string name="action_retry">重试</string>
     <string name="composer_steer">引导</string>
     <string name="composer_queue">排队</string>
+    <string name="composer_plan">计划</string>
+    <string name="action_discuss">讨论</string>
+    <string name="tool_state_pending">待确认</string>
+    <string name="sessions_tab_recent">最近</string>
+    <string name="sessions_tab_archived">归档</string>
     <string name="user_you">你</string>
     <string name="menu_settings">设置</string>
     <string name="menu_new_session">新建会话</string>
