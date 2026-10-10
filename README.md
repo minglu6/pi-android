@@ -51,9 +51,13 @@ umask 077; head -c 24 /dev/urandom | base64 > ~/.pi/agent/pi-android.token
 sv up pi-rpc-bridge          # 日志 $PREFIX/var/log/sv/pi-rpc-bridge/current
 # （一次性跑：~/bin/pi-rpc-bridge）
 
-# 3) 构建并安装 APK
+# 3) 构建并安装 APK（本机）
 cd ~/projects/pi-android/app && bash build.sh
 adb -s <serial> install -r out/pi-android.apk
+
+# 也可从 GitHub Actions 下载：仓库 Actions → Build APK → Artifacts → pi-android
+# 详见 docs/build-pipeline.md「CI（GitHub Actions）」；手动触发：
+#   gh workflow run build-apk.yml --ref master
 
 # 4) 在虚拟屏上验证（真机主屏不要动）
 PHONE_VD_SERIAL=<serial> phone-vd-start --app dev.pi.android
