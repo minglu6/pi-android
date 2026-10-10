@@ -21,7 +21,7 @@
     <string name="action_sessions">会话列表</string>
     <string name="action_fork">从消息 Fork…</string>
     <string name="empty_title">还没有消息</string>
-    <string name="empty_body">连上 Termux 里的 pi-rpc-bridge 后，就可以在这里和 Pi 对话。</string>
+    <string name="empty_body">连上 Termux 里的连接器（pi-rpc-bridge）后，就可以在这里和 Pi 对话。</string>
     <string name="empty_need_token_title">先配置 Token</string>
     <string name="empty_need_token_body">打开设置填入 ~/.pi/agent/pi-android.token 的内容，或用 adb --es token 投放。</string>
     <string name="empty_open_settings">打开设置</string>
@@ -31,10 +31,10 @@
     <string name="settings_port_label">Port</string>
     <string name="settings_token_label">Token</string>
     <string name="settings_token_hint">~/.pi/agent/pi-android.token</string>
-    <string name="settings_help">保存后返回聊天页会自动重连。桥必须绑在 loopback，且不要默认开启 --allow-bash。</string>
+    <string name="settings_help">保存后返回聊天页会自动重连。连接器必须绑在 loopback，且不要默认开启 --allow-bash。</string>
     <string name="settings_saved">已保存，返回后会重连</string>
     <string name="bridge_missing_token">未设置 Token：点右上角菜单 → 设置</string>
-    <string name="bridge_not_connected">桥未连接，检查设置里的 Token 与端口</string>
+    <string name="bridge_not_connected">连接器未连接，检查设置里的 Token 与端口</string>
     <string name="ext_answer_hint">在下方按钮里回答</string>
     <string name="new_session_started">新会话已开始。</string>
     <string name="session_empty">这个会话是空的。</string>

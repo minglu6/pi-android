@@ -38,7 +38,7 @@ import java.util.Map;
 import dev.pi.android.R;
 import dev.pi.android.bridge.BridgeService;
 import dev.pi.android.model.ChatMessage;
-import dev.pi.android.util.Json;
+import dev.pi.android.util.Colls;
 
 /**
  * 聊天主界面。
@@ -618,7 +618,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                     String prov = m.optString("provider");
                     String modelId = m.optString("id");
                     String label = (prov + " / " + modelId);
-                    if (!Json.has(modelLabels, label)) {
+                    if (!Colls.has(modelLabels, label)) {
                         modelLabels.add(label);
                         modelRefs.add(new String[]{prov, modelId});
                     }

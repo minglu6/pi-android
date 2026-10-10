@@ -1,108 +1,128 @@
 # pi-android
 
-Pi（[@earendil-works/pi-coding-agent](https://github.com/earendil-works/pi)）的非官方 Android 原生客户端。
+Unofficial Android client for Pi
+([@earendil-works/pi-coding-agent](https://github.com/earendil-works/pi)).
 
-**不是** Pi 官方客户端，与 Earendil Inc. 没有隶属关系，也没有其背书。It reuses nothing but Pi's
+**Not affiliated with or endorsed by Earendil Inc.** It reuses nothing but Pi's
 public, documented RPC interface; no Pi source code is vendored or patched here.
 
+Pi（[@earendil-works/pi-coding-agent](https://github.com/earendil-works/pi)）的非官方 Android 原生客户端。
+与 Earendil Inc. 没有隶属关系，也没有其背书。
+
+## Quick start
+
+```sh
+# 1) Token（600），APK 与连接器共用
+umask 077; head -c 24 /dev/urandom | base64 > ~/.pi/agent/pi-android.token
+
+# 2) Termux 侧常驻连接器
+sv up pi-rpc-bridge          # 或一次性：~/bin/pi-rpc-bridge
+
+# 3) 构建 APK（需 ANDROID_JAR + aapt2/d8/apksigner，见 CONTRIBUTING.md）
+make apk
+# 或：cd app && bash build.sh --only-apk
+adb install -r app/out/pi-android.apk
+
+# 4) 首次连：设置里填 token，或 adb 投放
+TOKEN=$(cat ~/.pi/agent/pi-android.token)
+adb shell am start -n dev.pi.android/.ui.MainActivity --es token "$TOKEN"
 ```
-pi-android.apk                      Java 原生 UI · 独立包名 dev.pi.android · 官方 Pi logo
+
+也可把文本分享给 Pi（`ACTION_SEND` text/plain），或深链
+`--es ui sessions|settings|fork|models|thinking|newsession`。
+
+贡献 / 环境变量 / CI：见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
+
+## Architecture
+
+```
+pi-android.apk                      Java 原生 UI · 包名 dev.pi.android · 官方 Pi logo
    │  ws://127.0.0.1:8945  (loopback + token)
    ▼
-Termux runit: pi-rpc-bridge  →  node bridge/pi-rpc-bridge.mjs  →  pi --mode rpc
-                                                                    (stdin/stdout JSONL)
+Termux: pi-rpc-bridge  →  bridge/pi-rpc-bridge.mjs  →  pi --mode rpc
+                                                          (stdin/stdout JSONL)
    ▼
 现有 ~/.pi/agent：模型认证 / Skills / Extensions / 历史会话 全部保留
 ```
 
 APK 关闭不会销毁 Termux 里的任何东西；反过来，Termux 里的 Pi 也不用为 APK 活着。
 
-## 为什么不是 fork Pocket Pi
-
-ChatGPT 在原始对话里建议 fork [Pocket Pi](https://github.com/earendil-works/pi)（把 Termux 打包进 APK）。
-本机已经有一套可用的 Termux + Pi，再包一份 bootstrap 只是多一个要维护的运行环境；
-而 Pi 1.1.0 本身就有语言无关的官方集成入口（`pi --mode rpc` + `RpcClient`），
-所以「自己写一个客户端」是被上游支持的做法，不必逆向第三方 App。
-另外 fork 要接 Pocket Pi 的 MIT 署名义务并处理 Logo/商标问题，薄客户端这两件事都消失。
-
-代价要说清楚：**这是自己维护的一个客户端**，Pi 增加 RPC 命令时本仓库要跟着加，
-不像 fork 那样天然跟着上游走。好处是 upgrade 只需 `pkg upgrade` 更新 Pi，APK 通常不用动。
-
-## 仓库结构
+本仓库**不是** Pocket Pi fork：本机已有 Termux + Pi，薄客户端只走官方 `pi --mode rpc`，
+不必打包第二套 bootstrap。代价是 RPC 演进时本仓库要跟着加；好处是 `pkg upgrade` 更新 Pi
+通常不用动 APK。
 
 | 路径 | 是什么 |
 | --- | --- |
-| `bridge/pi-rpc-bridge.mjs` | WebSocket ↔ Pi RPC 的桥（Termux 侧，Node + ws） |
-| `app/src/dev/pi/android/` | APK 源码：`ui/` 界面、`bridge/` 连接层、`model/`、`util/` |
-| `app/tools/` | 替代 gradle 的四个脚本（依赖获取、依赖 R 生成、打包、AXML 包名读取） |
-| `app/build.sh` | 一键构建：`aapt2 → javac → d8 → assemble → apksigner` |
-| `app/libs/` | 依赖 AAR/JAR（**不进 git**，用 `tools/fetch-aars.py` 重建） |
-| `artwork/` | logo 原件与 adaptive / monochrome 说明 |
-| `docs/build-pipeline.md` | 无 gradle 构建链的坑目录（含 1200 条 `No package ID 7f` 的成因） |
+| `bridge/pi-rpc-bridge.mjs` | WebSocket ↔ Pi RPC 连接器（Termux / Node） |
+| `app/src/dev/pi/android/` | APK：`ui/` · `bridge/` · `model/` · `util/` |
+| `app/tools/` | 无 Gradle 脚本：`fetch-aars` / `gen-dep-r` / `assemble` / `axml-package` |
+| `app/build.sh` | `aapt2 → javac → d8 → assemble → apksigner` |
+| `app/libs/` | 依赖 AAR/JAR（**不进 git**，`make deps` 重建） |
+| `artwork/` | logo 与 adaptive / monochrome 说明 |
+| `docs/build-pipeline.md` | 构建坑目录与 CI 细节 |
+| `Makefile` | 规范命令：`deps` / `apk` / `clean` |
 | `NOTICE.md` | 商标 / logo / 许可证说明 |
 
-## 用起来
+## Build
+
+不使用 Gradle。本机或 CI 都走同一条链：
 
 ```sh
-# 1) 一次生成 token（600），APK 侧要填同一份
-umask 077; head -c 24 /dev/urandom | base64 > ~/.pi/agent/pi-android.token
+# 非 Termux 示例
+export ANDROID_HOME=/path/to/android-sdk
+export PATH="$ANDROID_HOME/build-tools/35.0.0:$PATH"
+export ANDROID_JAR="$ANDROID_HOME/platforms/android-36/android.jar"
 
-# 2) 桥常驻：runit 服务
-sv up pi-rpc-bridge          # 日志 $PREFIX/var/log/sv/pi-rpc-bridge/current
-# （一次性跑：~/bin/pi-rpc-bridge）
-
-# 3) 构建并安装 APK（本机）
-cd ~/projects/pi-android/app && bash build.sh
-adb -s <serial> install -r out/pi-android.apk
-
-# 也可从 GitHub Actions 下载：仓库 Actions → Build APK → Artifacts → pi-android
-# 详见 docs/build-pipeline.md「CI（GitHub Actions）」；手动触发：
-#   gh workflow run build-apk.yml --ref master
-
-# 4) 在虚拟屏上验证（真机主屏不要动）
-PHONE_VD_SERIAL=<serial> phone-vd-start --app dev.pi.android
-phone-screen shot.png && tesseract -l chi_sim+eng shot.png -     # OCR 取证最稳
-
-# 5) 首次连：打开 app → 设置里填 token（或用下面的一键投放）
-TOKEN=$(cat ~/.pi/agent/pi-android.token)
-adb shell am start -n dev.pi.android/.ui.MainActivity --es token "$TOKEN" --display <N>
+make deps    # fetch-aars（含 okhttp）+ axml-package
+make apk     # → app/out/pi-android.apk
 ```
 
-也可把文本直接分享给 Pi（`am start -a android.intent.action.SEND -t text/plain --es android.intent.extra.TEXT "…"`），
-这是本机自动化驱动它的正规入口。深链面板：`--es ui sessions|settings|fork|models|thinking|newsession`。
+依赖 roots 与 CI 完全一致（含 `com.squareup.okhttp3:okhttp:4.12.0`），见
+[`CONTRIBUTING.md`](CONTRIBUTING.md) 与 [`docs/build-pipeline.md`](docs/build-pipeline.md)。
 
-## 已实现 / 待办
+## Download APK
+
+不必本机编译时：
+
+1. 仓库 **Actions** → **Build APK** → 选一次成功运行
+2. 页面底部 **Artifacts** → 下载 **`pi-android`** → 解压得 `pi-android.apk`
+3. 或对 `v*` tag：在 **Releases** 直接下载
+
+```sh
+gh workflow run build-apk.yml --ref master
+gh run watch
+```
+
+签名为 CI / `build.sh` 自签 keystore，**无需**仓库 Secrets。
+
+## Status（已实现 / 待办）
 
 ### 已实现
 
-- WebSocket 连接 + token 鉴权 + 自动重连（配置签名变化才重连，避免分享 Intent 掐断流式回复）；
-- 提问与流式回复（`message_update` delta 累积，`text_end`/`message_end` 用权威文本覆写）；
-- 工具调用气泡（`tool_execution_start/update/end`）；
-- 中断（abort：顶栏菜单 / 发送钮在流式时变为停止）；
-- 新建会话、模型切换、思考档位切换；
-- `get_state` 驱动的状态芯片（模型名 · 思考档位 · 连接点）；
-- **前台 `BridgeService`**：持有 WebSocket + 常驻通知（桥状态 + 一键停止），App 进后台不丢连接；
-- **会话列表**（桥本地命令 `list_sessions` → `switch_session` → `get_messages` 重建历史）；顶栏快捷入口；
-- **Fork**（`get_fork_messages` → `fork`）；
-- **扩展 UI 子协议**：select / confirm / input / editor —— 前台用聊天流下方按钮行作答；后台走高优先级通知按钮；`notify` 落成气泡，`setStatus` / `setTitle` 反映到顶栏。不用 AlertDialog：虚拟屏上存在「对象创建成功、isShowing() 为 true、屏幕上却没有」的情况，而这几种请求会**阻塞 Pi**；
-- 首次启动空状态：无 Token / 未连接时引导进设置；
-- Adaptive launcher icon + Material You **monochrome** 层（`artwork/` 说明）。
+- WebSocket + token 鉴权 + 按配置签名重连
+- 流式回复、工具气泡、abort（菜单 / 发送钮）
+- 新建会话、模型 / 思考档位切换；`get_state` 状态芯片
+- 前台 `BridgeService`（常驻通知，后台不丢连接）
+- 会话列表（`list_sessions` → `switch_session` → `get_messages`）、Fork
+- 扩展 UI：select / confirm / input / editor（前台按钮行；后台通知；`notify` / `setStatus` / `setTitle`）
+- 首启空状态（无 Token / 未连接引导）、adaptive + monochrome 图标
+- GitHub Actions 自动打 APK
 
-### 还没做 / 已知限制
+### 已知限制 / 未做
 
-- 会话树可视化（`get_tree` 已在命令白名单，UI 未做）；
-- `setWidget` / 富编辑器大文本体验仍偏简陋（不阻塞，可忽略）；
-- 多窗口 / 折叠屏专门布局；
-- ColorOS 等厂商仍可能杀前台服务以外的进程 —— 依赖常驻通知保活，无法 100% 对抗激进清理。
+- 会话树可视化（`get_tree` 已在白名单，无 UI）
+- `setWidget` / 大文本编辑体验仍简陋
+- 多窗口 / 折叠专门布局
+- 厂商激进杀进程无法 100% 对抗（依赖前台通知保活）
+
+产品方向与大功能请先讨论，不要在本仓库默默扩 scope。
 
 ## 安全边界
 
-- 桥只绑 `127.0.0.1`，token 必填（token 文件丢失时会明确告警）。本机 loopback 不对 App 做隔离，
-  所以 token 是唯一的门槛，权限应是 `~/.pi/agent/pi-android.token` 的 600。
-- 命令白名单默认**不包含 `bash`**。开 `--allow-bash` 等于把设备的 shell 交给能连到 loopback 的 App。
-- 依赖里有 sha256 清单（`app/libs/manifest.json`），重建时核对即可。
+- 连接器只绑 `127.0.0.1`，token 必填（文件权限建议 600）
+- 命令白名单默认**不含 `bash`**；`--allow-bash` 等于把 shell 交给能连 loopback 的 App
+- 依赖 sha256 清单：`app/libs/manifest.json`（重建后核对）
 
-## 许可证
+## License
 
-本仓库代码按 MIT 许可（见 `LICENSE`）。
-Pi 的 logo 与商标不属于 MIT 授权范围，使用前请看 `NOTICE.md`。
+代码：MIT（`LICENSE`）。Pi 的 logo / 商标**不在** MIT 范围内 —— 见 `NOTICE.md`。
