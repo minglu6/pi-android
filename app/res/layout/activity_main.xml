@@ -6,7 +6,7 @@
     android:background="@color/bg_base"
     android:orientation="vertical">
 
-    <!-- Top bar: sessions · title+meta · diff · overflow -->
+    <!-- Top bar: sessions · title+meta · diff · new · overflow -->
     <LinearLayout
         android:id="@+id/top_bar"
         android:layout_width="match_parent"
@@ -75,6 +75,17 @@
                 android:paddingBottom="3dp"
                 android:textSize="10.5sp"
                 android:visibility="gone" />
+
+            <ImageButton
+                android:id="@+id/btn_new_session"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/action_new_session"
+                android:padding="10dp"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_add"
+                android:tint="@color/text_secondary" />
 
             <ImageButton
                 android:id="@+id/btn_overflow"

@@ -21,7 +21,6 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import com.google.android.material.bottomsheet.BottomSheetBehavior;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
-import com.google.android.material.button.MaterialButton;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -43,8 +42,6 @@ public final class SessionsSheet {
         @Nullable String currentSessionPath();
 
         void openSession(String path);
-
-        void newSession();
 
         void renameSession(String path, @Nullable String knownName);
 
@@ -182,11 +179,6 @@ public final class SessionsSheet {
         });
 
         root.findViewById(R.id.sessions_close).setOnClickListener(v -> dialog.dismiss());
-        MaterialButton neu = root.findViewById(R.id.sessions_new);
-        neu.setOnClickListener(v -> {
-            dialog.dismiss();
-            host.newSession();
-        });
 
         search = root.findViewById(R.id.sessions_search);
         search.addTextChangedListener(new TextWatcher() {
