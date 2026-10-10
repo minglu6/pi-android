@@ -24,13 +24,28 @@ public final class TranscriptReducer {
     private final Map<String, ChatMessage.ToolData> tools = new LinkedHashMap<>();
     private final Map<String, Integer> toolRows = new LinkedHashMap<>();
     private final Map<String, Long> toolTimes = new LinkedHashMap<>();
+    /** 协调器回填了 N 行历史后累加；此后所有绝对行号都要平移。
+        已登记的行号（assistantRow / toolRows）在 shiftRows 时一并平移。 */
+    private int rowShift = 0;
     private int assistantRow = -1;
     private long assistantTime;
     private String lastError = "";
+    /** 本轮已经在 UI 里出现过的助手正文（跨消息累积），用于 agent_end 去重补拍。 */
+    private String lastRunText = "";
+
+    /** 运行中重连回填 insertAt(0..n) 后调用：reducer 里存的绝对行号整体平移。 */
+    public void shiftRows(int inserted) {
+        if (inserted <= 0) return;
+        rowShift += inserted;
+        if (assistantRow >= 0) assistantRow += inserted;
+        for (Map.Entry<String, Integer> entry : toolRows.entrySet()) {
+            entry.setValue(entry.getValue() + inserted);
+        }
+    }
 
     public void reset() {
         textBlocks.clear(); tools.clear(); toolRows.clear(); toolTimes.clear();
-        assistantRow = -1; assistantTime = 0; lastError = "";
+        assistantRow = -1; assistantTime = 0; lastError = ""; rowShift = 0;
     }
 
     public List<Edit> accept(JSONObject event, int size) {
@@ -38,6 +53,8 @@ public final class TranscriptReducer {
         switch (event.optString("type")) {
             case "agent_start":
                 lastError = "";
+                // 新一轮开始：上一轮的补拍记忆不能延续，否则同文正文会永久消失。
+                lastRunText = "";
                 break;
             case "message_start": {
                 JSONObject message = event.optJSONObject("message");
@@ -73,13 +90,16 @@ public final class TranscriptReducer {
                 if (message == null || !"assistant".equals(message.optString("role"))) break;
                 rememberCalls(message);
                 String text = textOfMessage(message);
+                // 正文为空但流里曾出现过文字（重新连接/纯工具消息后 delta 已丢失）：
+                // 保留已渲染的正文，不让权威空消息把它抹掉。
+                if (text.isEmpty() && !joinedText().isEmpty()) text = joinedText();
                 if ("error".equals(message.optString("stopReason"))) {
-                    if (assistantRow >= 0) assistant(edits, size, joinedText(), false);
+                    if (assistantRow >= 0 || !text.isEmpty()) assistant(edits, size, text, false);
                     error(edits, size + (int) edits.stream().filter(e -> e.append).count(), message);
                 } else if (!text.isEmpty() || assistantRow >= 0) {
-                    if (text.isEmpty() && "aborted".equals(message.optString("stopReason"))) text = joinedText();
                     assistant(edits, size, text, false);
                 }
+                if (!text.isEmpty()) lastRunText += text;
                 textBlocks.clear(); assistantRow = -1; assistantTime = 0;
                 break;
             }
@@ -118,10 +138,16 @@ public final class TranscriptReducer {
             }
             case "agent_end": {
                 JSONArray messages = event.optJSONArray("messages");
+                // 新一轮开始前补拍上一轮丢掉的正文：运行中途重连时 message_start/update
+                // 已经错过，agent_end.messages 是补回正文的最后机会。
+                if (messages != null) backfillMissedText(edits, size, messages);
                 if (messages != null) for (int i = messages.length() - 1; i >= 0; i--) {
                     JSONObject message = messages.optJSONObject(i);
                     if (message != null && "assistant".equals(message.optString("role"))) {
-                        if ("error".equals(message.optString("stopReason"))) error(edits, size, message);
+                        if ("error".equals(message.optString("stopReason"))) {
+                            int appended = (int) edits.stream().filter(e -> e.append).count();
+                            error(edits, size + appended, message);
+                        }
                         break;
                     }
                 }
@@ -150,7 +176,11 @@ public final class TranscriptReducer {
 
     private void assistant(List<Edit> edits, int size, String text, boolean streaming) {
         boolean append = assistantRow < 0;
-        if (append) { assistantRow = size; if (assistantTime <= 0) assistantTime = System.currentTimeMillis(); }
+        if (append) {
+            // size 是协调器传入的当前 adapter 行数，已包含回填行，不再加 rowShift。
+            assistantRow = size;
+            if (assistantTime <= 0) assistantTime = System.currentTimeMillis();
+        }
         edits.add(new Edit(assistantRow, new ChatMessage(ChatMessage.Role.AGENT, text, assistantTime, streaming), append));
     }
 
@@ -160,6 +190,27 @@ public final class TranscriptReducer {
         if (text.isEmpty() || key.equals(lastError)) return;
         lastError = key;
         edits.add(new Edit(size, new ChatMessage(ChatMessage.Role.SYSTEM, "⚠ " + text), true));
+    }
+
+    /** 补回重连期间错过 message_start/message_end 的助手正文；已渲染过的内容不重拍。 */
+    private void backfillMissedText(List<Edit> edits, int size, JSONArray messages) {
+        int appended = 0;
+        int base = size;
+        StringBuilder streamed = new StringBuilder();
+        for (int i = 0; i < messages.length(); i++) {
+            JSONObject message = messages.optJSONObject(i);
+            if (message == null || !"assistant".equals(message.optString("role"))) continue;
+            String text = textOfMessage(message);
+            if (text.isEmpty() || "error".equals(message.optString("stopReason"))) continue;
+            // 连续助手消息的正文若本轮已在 UI 出现过就不重拍（重连后 joinedText 为空
+            // 但 message_end 已经记录进 lastRunText）。
+            streamed.append(text);
+            String seen = streamed.toString();
+            if (seen.equals(joinedText()) || seen.equals(lastRunText)) continue;
+            long ts = message.optLong("timestamp", System.currentTimeMillis());
+            edits.add(new Edit(base + appended, new ChatMessage(ChatMessage.Role.AGENT, text, ts, false), true));
+            appended++;
+        }
     }
 
     private String joinedText() {
@@ -237,6 +288,14 @@ public final class TranscriptReducer {
                         : message.optInt("exitCode", 0) == 0 ? "done" : "error";
                 result.add(ChatMessage.tool(new ChatMessage.ToolData("history-bash-" + i, "bash",
                         message.optString("command"), message.optString("output"), state, -1), timestamp));
+            } else if ("user".equals(role)) {
+                // 用户消息走结构化解析：原生 image 块变成附件缩略图，文件 metadata 尾部被剥离。
+                ChatMessage user = ChatMessage.fromUserContent(message);
+                String text = HistoryPresentation.displayText(message, user.text);
+                if (text.isEmpty() && user.attachments.isEmpty()) continue;
+                ChatMessage shown = new ChatMessage(ChatMessage.Role.USER, text, timestamp);
+                shown.attachments.addAll(user.attachments);
+                result.add(shown);
             } else {
                 String text = HistoryPresentation.displayText(message, textOfMessage(message));
                 if ("assistant".equals(role) && "error".equals(message.optString("stopReason"))) {
@@ -246,8 +305,8 @@ public final class TranscriptReducer {
                     continue;
                 }
                 if (text.isEmpty()) continue;
-                ChatMessage.Role displayRole = "user".equals(role) ? ChatMessage.Role.USER
-                        : "assistant".equals(role) ? ChatMessage.Role.AGENT : ChatMessage.Role.SYSTEM;
+                ChatMessage.Role displayRole = "assistant".equals(role) ? ChatMessage.Role.AGENT
+                        : ChatMessage.Role.SYSTEM;
                 result.add(new ChatMessage(displayRole, text, timestamp));
             }
         }

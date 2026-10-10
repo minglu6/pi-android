@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const logFile = process.env.PI_BRIDGE_TEST_LOG;
 let buffer = '';
 let name = '';
+let model = {id: 'fixture-vision', input: ['text', 'image']};
 const dialogs = new Map();
 function output(record) { process.stdout.write(JSON.stringify(record) + '\n'); }
 function success(record, data) {
@@ -48,14 +49,32 @@ function handle(record) {
     success(record, {cancelled: !!record.fixtureCancel});
     return;
   }
+  if (record.type === 'set_model') {
+    model = {id: record.modelId, input: record.modelId === 'fixture-text' ? ['text'] : ['text', 'image']};
+    success(record, model);
+    return;
+  }
+  if (record.type === 'prompt') {
+    output({type: 'agent_start'});
+    output({type: 'message_end', message: {role: 'user',
+      content: [{type: 'text', text: record.message}, ...(record.images || [])], timestamp: 1}});
+    success(record, {disposition: 'started'});
+    output({type: 'agent_end', messages: [], willRetry: false});
+    output({type: 'agent_settled', aborted: false});
+    return;
+  }
   const respond = () => {
     if (record.type === 'get_state') success(record, {
       ...(name ? {sessionName: name} : {}), fixtureArgs: process.argv.slice(2),
+      ...(process.env.PI_BRIDGE_FAKE_UNKNOWN_MODEL ? {} : {model}),
     });
     else if (record.type === 'get_messages') success(record, {tag: record.fixtureTag || '', messages: []});
     else success(record, {});
   };
-  if (record.fixtureDelay) setTimeout(respond, record.fixtureDelay);
+  const delay = record.fixtureDelay || (record.type === 'get_state' ? Number(process.env.PI_BRIDGE_FAKE_STATE_DELAY || 0) : 0);
+  if (record.type === 'get_state' && process.env.PI_BRIDGE_FAKE_STATE_FAIL) {
+    output({type: 'response', id: record.id, command: record.type, success: false, error: 'synthetic state failure'});
+  } else if (delay) setTimeout(respond, delay);
   else respond();
 }
 process.stdin.setEncoding('utf8');

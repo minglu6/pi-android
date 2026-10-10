@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="attachment_chat_surface">#EDF5FA</color>
+    <color name="attachment_chat_stroke">#B6CBD9</color>
+    <color name="attachment_chat_primary">#1A1F27</color>
+    <color name="attachment_chat_secondary">#445B6C</color>
+    <string name="attachment_chat_file_name">文件</string>
+    <string name="attachment_chat_image_name">图片</string>
+    <string name="attachment_chat_image_unavailable">暂无图片预览</string>
+    <string name="attachment_chat_more">另有 %1$d 个附件</string>
+</resources>

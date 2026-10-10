@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="attachment_chat_surface">#19334C</color>
+    <color name="attachment_chat_stroke">#4C6A86</color>
+    <color name="attachment_chat_primary">#F0F3F6</color>
+    <color name="attachment_chat_secondary">#BDCFDF</color>
+</resources>

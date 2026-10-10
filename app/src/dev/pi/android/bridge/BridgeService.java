@@ -105,6 +105,12 @@ public class BridgeService extends Service {
     private final Map<String, ExtensionUi.AnswerSink> asks = new LinkedHashMap<>();
     private Ask pendingAsk;
 
+    /** 附件上传不依赖 Activity 的存活；响应由服务按 id 一次性交付。 */
+    public interface RpcCallback {
+        void onResponse(boolean ok, @Nullable JSONObject data, @Nullable String error);
+    }
+    private final Map<String, RpcCallback> uploadCallbacks = new LinkedHashMap<>();
+
     private BridgeConnection bridge;
     private final ModelRpc.SyncGuard modelSync = new ModelRpc.SyncGuard();
     private ExtensionUi extUi;
@@ -130,6 +136,7 @@ public class BridgeService extends Service {
             public void onStatus(String state, @Nullable String error) {
                 dbg("status " + state);
                 AgentState.get().setStatus(state);
+                if (!bridge.isConnected()) failUploadCallbacks("连接已断开，附件草稿已保留");
                 if (!"online".equals(state)) modelSync.reset();
                 // starting 也可发送：桥的 online 仅表示鉴权，不保证 Pi 已启动。
                 if (("online".equals(state) || "starting".equals(state)) && bridge.isConnected()) {
@@ -147,6 +154,13 @@ public class BridgeService extends Service {
             @Override
             public void onResponse(String id, boolean ok, String command, @Nullable JSONObject data, @Nullable String error) {
                 dbg("resp " + command + " ok=" + ok);
+                RpcCallback upload = uploadCallbacks.remove(id);
+                if (upload != null) {
+                    upload.onResponse(ok, data, error);
+                    return;
+                }
+                // 超时/取消后的迟到上传响应不能进入普通聊天的错误或 busy 状态。
+                if (command.startsWith("upload_")) return;
                 AgentState st = AgentState.get();
                 if ("get_state".equals(command)) {
                     if (!bridge.isConnected() || !modelSync.acceptState(id)) return;
@@ -207,6 +221,7 @@ public class BridgeService extends Service {
             @Override
             public void onFailure(@Nullable Throwable t) {
                 dbg("failure " + (t == null ? "?" : t.getMessage()));
+                failUploadCallbacks("连接已断开，附件草稿已保留");
                 for (UiHost h : hosts) {
                     try {
                         h.onFailure(t);
@@ -363,6 +378,40 @@ public class BridgeService extends Service {
         return id;
     }
 
+    /** 仅主线程调用；上传命令不改变模型/会话同步世代。 */
+    public String uploadRpc(String command, @Nullable JSONObject params, RpcCallback callback) {
+        if (!"upload_begin".equals(command) && !"upload_chunk".equals(command)
+                && !"upload_finish".equals(command) && !"upload_abort".equals(command)) {
+            throw new IllegalArgumentException("Not an upload command");
+        }
+        if (!isConnected()) {
+            callback.onResponse(false, null, "连接已断开，附件草稿已保留");
+            return "";
+        }
+        String id = bridge.rpc(command, params);
+        uploadCallbacks.put(id, callback);
+        return id;
+    }
+
+    public void forgetUploadCallback(String id) {
+        uploadCallbacks.remove(id);
+    }
+
+    private void failUploadCallbacks(String error) {
+        java.util.ArrayList<RpcCallback> callbacks = new java.util.ArrayList<>(uploadCallbacks.values());
+        uploadCallbacks.clear();
+        for (RpcCallback callback : callbacks) callback.onResponse(false, null, error);
+    }
+
+    @Override public void onDestroy() {
+        failUploadCallbacks("连接已停止，附件草稿已保留");
+        if (extUi != null) extUi.cancelPending();
+        if (bridge != null) bridge.disconnect();
+        hosts.clear();
+        host = null;
+        super.onDestroy();
+    }
+
     public boolean isConnected() {
         return bridge != null && bridge.isConnected();
     }
@@ -373,6 +422,7 @@ public class BridgeService extends Service {
     }
 
     private void connectWithSaved() {
+        failUploadCallbacks("连接已更换，附件草稿已保留");
         modelSync.reset();
         AgentState.get().setStatus("connecting");
         bridge.configure(SettingsActivity.host(this), SettingsActivity.port(this), SettingsActivity.token(this));

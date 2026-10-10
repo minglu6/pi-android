@@ -85,6 +85,11 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private RecyclerView list;
     private EditText composer;
     private ImageButton send;
+    private ImageButton attach;
+    private View attachmentScroller;
+    private LinearLayout attachmentRow;
+    private AttachmentController attachmentsCtl;
+    private String pendingPromptRpcId = "";
     private TextView statusText;
     private TextView generationStatus;
     private View statusDot;
@@ -156,6 +161,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         generationStatus = findViewById(R.id.generation_status);
         composer = findViewById(R.id.composer);
         send = findViewById(R.id.send);
+        attach = findViewById(R.id.btn_attach);
+        attachmentScroller = findViewById(R.id.attachment_scroller);
+        attachmentRow = findViewById(R.id.attachment_row);
+        attachmentsCtl = AttachmentController.get(this);
         emptyState = findViewById(R.id.empty_state);
         emptyTitle = findViewById(R.id.empty_title);
         emptyBody = findViewById(R.id.empty_body);
@@ -242,9 +251,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         ContextCompat.startForegroundService(this, svc);
         bindService(svc, svcConn, Context.BIND_AUTO_CREATE);
         askNotificationPermission();
+        if (attachmentsCtl != null) attachmentsCtl.setListener(draftListener);
 
         send.setOnClickListener(v -> onSendOrStop());
+        if (attach != null) attach.setOnClickListener(v -> launchAttachmentPicker());
         send.setEnabled(false);
+        renderAttachmentDrafts();
         send.setAlpha(0.45f);
         composer.setOnEditorActionListener((v, actionId, event) -> {
             if (!streaming && actionId == EditorInfo.IME_ACTION_SEND && event == null
@@ -471,6 +483,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     @Override
     protected void onDestroy() {
+        if (attachmentsCtl != null) {
+            attachmentsCtl.clearListener(draftListener);
+            attachmentsCtl.cancelUpload();
+        }
         main.removeCallbacks(thinkingTimeout);
         main.removeCallbacks(settleAfterAgentEnd);
         flushTranscriptPaint();
@@ -572,11 +588,119 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private void updateSendEnabled() {
         if (send == null || composer == null) return;
         boolean connected = isConnected();
+        boolean hasAttach = attachmentsCtl != null && attachmentsCtl.hasAttachments();
+        boolean busyAttach = attachmentsCtl != null
+                && (attachmentsCtl.isPreparing() || attachmentsCtl.isUploading());
         composer.setEnabled(connected || streaming);
         composer.setHint(getString(connected || streaming ? R.string.hint_message : R.string.hint_disconnected));
-        boolean canSend = streaming || (connected && composer.getText().toString().trim().length() > 0);
+        if (attach != null) {
+            attach.setEnabled(connected && !streaming && !busyAttach);
+            attach.setAlpha(connected && !streaming && !busyAttach ? 1f : 0.4f);
+        }
+        boolean canSend = streaming || (connected && !busyAttach
+                && (composer.getText().toString().trim().length() > 0 || hasAttach));
         send.setEnabled(canSend);
         send.setAlpha(canSend ? 1f : 0.45f);
+    }
+
+    // ---------- 附件 ----------
+
+    private final androidx.activity.result.ActivityResultLauncher<Intent> attachmentPicker =
+            registerForActivityResult(new androidx.activity.result.contract.ActivityResultContracts
+                    .StartActivityForResult(), result -> {
+                if (result.getResultCode() != RESULT_OK || result.getData() == null
+                        || attachmentsCtl == null) return;
+                Intent data = result.getData();
+                java.util.List<android.net.Uri> uris = new java.util.ArrayList<>();
+                if (data.getClipData() != null) {
+                    for (int i = 0; i < data.getClipData().getItemCount(); i++) {
+                        uris.add(data.getClipData().getItemAt(i).getUri());
+                    }
+                } else if (data.getData() != null) {
+                    uris.add(data.getData());
+                }
+                if (!uris.isEmpty()) attachmentsCtl.addUris(uris, false);
+            });
+
+    private void launchAttachmentPicker() {
+        if (!isConnected() || streaming) {
+            Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"image/*", "*/*"});
+        attachmentPicker.launch(Intent.createChooser(intent, getString(R.string.attach_picker_title)));
+    }
+
+    private final AttachmentController.Listener draftListener = new AttachmentController.Listener() {
+        @Override public void onChanged() {
+            renderAttachmentDrafts();
+            // 上传进行中把进度放到状态 chip；结束由 ready/error 回调恢复模型状态。
+            if (attachmentsCtl != null && attachmentsCtl.isUploading()) {
+                setConnectionVisual("online", attachmentsCtl.status());
+            }
+        }
+        @Override public void onError(String message) {
+            Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
+        }
+    };
+
+    private void renderAttachmentDrafts() {
+        if (attachmentRow == null || attachmentsCtl == null) return;
+        attachmentRow.removeAllViews();
+        java.util.List<AttachmentController.Item> items = attachmentsCtl.items();
+        attachmentScroller.setVisibility(items.isEmpty() ? View.GONE : View.VISIBLE);
+        float d = getResources().getDisplayMetrics().density;
+        for (AttachmentController.Item item : items) {
+            LinearLayout chip = new LinearLayout(this);
+            chip.setOrientation(LinearLayout.HORIZONTAL);
+            chip.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            chip.setBackgroundResource(R.drawable.bg_suggest_chip);
+            int padH = Math.round(10 * d), padV = Math.round(6 * d);
+            chip.setPadding(padH, padV, Math.round(4 * d), padV);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp.setMarginEnd(Math.round(8 * d));
+            chip.setLayoutParams(lp);
+
+            if ("image".equals(item.kind) && !item.thumbnailBase64.isEmpty()) {
+                android.widget.ImageView thumb = new android.widget.ImageView(this);
+                try {
+                    byte[] bytes = android.util.Base64.decode(item.thumbnailBase64,
+                            android.util.Base64.DEFAULT);
+                    thumb.setImageBitmap(android.graphics.BitmapFactory.decodeByteArray(
+                            bytes, 0, bytes.length));
+                } catch (Exception ignored) { }
+                int s = Math.round(36 * d);
+                LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(s, s);
+                tp.setMarginEnd(Math.round(6 * d));
+                thumb.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
+                chip.addView(thumb, tp);
+            }
+
+            TextView name = new TextView(this);
+            name.setText(("image".equals(item.kind) ? "🖼 " : "📎 ") + item.name);
+            name.setTextColor(ContextCompat.getColor(this, R.color.text_primary));
+            name.setTextSize(13f);
+            name.setMaxWidth(Math.round(160 * d));
+            name.setMaxLines(1);
+            name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            chip.addView(name);
+
+            ImageButton remove = new ImageButton(this);
+            remove.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
+            remove.setColorFilter(ContextCompat.getColor(this, R.color.text_muted));
+            remove.setBackground(null);
+            remove.setContentDescription(getString(R.string.attach_remove_cd) + " " + item.name);
+            int rs = Math.round(28 * d);
+            chip.addView(remove, new LinearLayout.LayoutParams(rs, rs));
+            remove.setOnClickListener(v -> attachmentsCtl.remove(item.id));
+            attachmentRow.addView(chip);
+        }
+        updateSendEnabled();
     }
 
     private void updateStickToBottom() {
@@ -748,9 +872,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     private void submit() {
         String text = composer.getText().toString().trim();
-        if (text.isEmpty()) return;
+        boolean hasAttach = attachmentsCtl != null && attachmentsCtl.hasAttachments();
+        if (text.isEmpty() && !hasAttach) return;
         // 完整匹配已知斜杠命令 → App 动作或 prompt /name
-        if (slashStore != null && text.startsWith("/")) {
+        if (slashStore != null && text.startsWith("/") && !hasAttach) {
             for (SlashCommand c : slashStore.current()) {
                 if (c.name.equalsIgnoreCase(text)) {
                     applySlashCommand(c);
@@ -763,22 +888,82 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             refreshEmptyState();
             return;
         }
-        composer.setText("");
+        if (attachmentsCtl != null && attachmentsCtl.isPreparing()) {
+            Toast.makeText(this, R.string.attach_preparing, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (text.isEmpty()) text = getString(R.string.attach_view_prompt);
+        final String finalText = text;
         hideSlashSuggestions();
+        if (!hasAttach) {
+            dispatchPrompt(finalText, null, null);
+            return;
+        }
+        // 附件先整体上传；只有 prompt 被 Pi 接受才清草稿，任何失败原文原样保留。
+        setConnectionVisual("online", getString(R.string.attach_uploading, 1,
+                attachmentsCtl.items().size()));
+        updateSendEnabled();
+        attachmentsCtl.upload(service, new AttachmentController.ReadyCallback() {
+            @Override
+            public void onReady(java.util.List<AttachmentController.Item> submitted, JSONArray attachmentIds) {
+                restoreStatusChip();
+                dispatchPrompt(finalText, submitted, attachmentIds);
+            }
+
+            @Override
+            public void onError(String message) {
+                restoreStatusChip();
+                Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
+                updateSendEnabled();
+            }
+        });
+    }
+
+    private void dispatchPrompt(String text,
+                                @Nullable java.util.List<AttachmentController.Item> submitted,
+                                @Nullable JSONArray attachmentIds) {
+        composer.setText("");
         resetTranscript();
-        adapter.add(new ChatMessage(ChatMessage.Role.USER, text));
+        ChatMessage user = new ChatMessage(ChatMessage.Role.USER, text);
+        if (submitted != null) {
+            for (AttachmentController.Item item : submitted) {
+                user.attachments.add(new ChatMessage.AttachmentData(item.name, item.mimeType,
+                        item.kind, item.size, "", item.thumbnailBase64));
+            }
+        }
+        adapter.add(user);
         historyRequest = "";
         setStreaming(true);
         JSONObject params = new JSONObject();
         try {
             params.put("message", text);
+            if (attachmentIds != null && attachmentIds.length() > 0) {
+                params.put("attachmentIds", attachmentIds);
+            }
         } catch (Exception e) {
             throw new IllegalStateException("prompt params", e);
         }
-        rpc("prompt", params);
+        pendingPromptRpcId = rpc("prompt", params);
+        pendingSubmitted = submitted;
+        pendingComposerText = text;
         setConnectionVisual("online", getString(R.string.status_thinking));
         stickToBottom = true;
         maybeScrollToBottom(true);
+    }
+
+    private java.util.List<AttachmentController.Item> pendingSubmitted;
+    private String pendingComposerText = "";
+
+    /** prompt 被桥/Pi 拒绝：把正文放回输入框，附件草稿本来就没清，直接可重发。 */
+    private void restoreFailedPrompt() {
+        if (!pendingComposerText.isEmpty() && composer != null
+                && composer.getText().toString().isEmpty()) {
+            composer.setText(pendingComposerText);
+        }
+        pendingComposerText = "";
+        pendingSubmitted = null;
+        pendingPromptRpcId = "";
+        updateSendEnabled();
     }
 
     private void setConnectionVisual(String state, String label) {
@@ -992,6 +1177,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
             if ("prompt".equals(command) || "steer".equals(command) || "follow_up".equals(command)) {
                 // 静默 Toast 会把 UI 留在「思考中」+ stop；必须回 idle 并露出错误
+                boolean ours = id.equals(pendingPromptRpcId) && !pendingPromptRpcId.isEmpty();
+                if (ours) restoreFailedPrompt();
                 failPrompt(error != null && !error.isEmpty() ? error : getString(R.string.prompt_failed));
                 return;
             }
@@ -1008,7 +1195,18 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             return;
         }
         if ("prompt".equals(command)) {
+            // prompt 已被 Pi 接受：只有此时才清掉附件草稿与本地副本。
+            if (id.equals(pendingPromptRpcId) && !pendingPromptRpcId.isEmpty()) {
+                if (pendingSubmitted != null && attachmentsCtl != null) {
+                    attachmentsCtl.clearAccepted(pendingSubmitted);
+                }
+                pendingSubmitted = null;
+                pendingComposerText = "";
+                pendingPromptRpcId = "";
+                renderAttachmentDrafts();
+            }
             // disposition=handled：扩展立刻吃掉，不会有 agent_settled
+            //（已在上方按 pendingPromptRpcId 清理附件草稿）
             String disp = data != null ? data.optString("disposition", "started") : "started";
             if ("handled".equals(disp)) settleStreaming(false);
             return;
@@ -1066,10 +1264,15 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         if ("get_messages".equals(command)) {
             // 服务向所有 Activity 扇出响应，只接收本页最新的历史请求。
-            if (id.equals(historyRequest) && !streaming) {
+            // 空闲时整页替换（权威）；运行中只把缺失的历史行合并到现有流式行之前，
+            // 不重置 transcript——后续 text_delta 仍映射到运行开始时的 assistant 行。
+            if (id.equals(historyRequest)) {
                 historyRequest = "";
-                resetTranscript();
-                renderHistory(data);
+                if (streaming) mergeHistoryWhileStreaming(data);
+                else {
+                    resetTranscript();
+                    renderHistory(data);
+                }
             }
             return;
         }
@@ -1155,6 +1358,14 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             boolean busy = data.optBoolean("isStreaming", false) || data.optBoolean("isCompacting", false);
             if (busy) {
                 setStreaming(true);
+                // 运行中途（重）连接：错过的 message_start/text_delta 无法重发，而工具事件
+                // 仍在到达。等 agent_settled 再整页替换会让正文长时间不可见——先拉一次
+                // 完整消息把已完成的正文/工具结果补拍回来，流事件继续在其后追加。
+                // transcript 不 reset：正在运行的同一会话，快照消息与事件互不冲突。
+                if (historyNeedsSync) {
+                    historyNeedsSync = false;
+                    historyRequest = rpc("get_messages", null);
+                }
             } else {
                 if (streaming) settleStreaming(false);
                 if (historyNeedsSync) {
@@ -1409,6 +1620,45 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 });
     }
 
+    /** 运行中回填：完整快照里比当前 UI 多的历史行（正文/工具结果）补拍到现有行之前。 */
+    private void mergeHistoryWhileStreaming(JSONObject data) {
+        java.util.List<ChatMessage> history = TranscriptReducer.history(data);
+        if (history.isEmpty() || adapter == null) return;
+        java.util.List<ChatMessage> live = adapter.snapshot();
+        if (history.size() <= live.size()) return; // 没有缺失内容，流式区照常
+        int missing = history.size() - live.size();
+        // 快照末尾可能与流式区重叠（同一条助手消息的完整版 / 同一工具的运行中版）。
+        // 从对齐点开始逐对比较：快照行若是当前对应行的同一条（id 相同或文本是其前缀），
+        // 说明它属于流式区，不算缺失；遇到真正不同的行为止。
+        int liveIndex = 0;
+        while (missing > 0 && liveIndex < live.size()) {
+            ChatMessage snapRow = history.get(missing);
+            ChatMessage liveRow = live.get(liveIndex);
+            if (!sameStreamingRow(snapRow, liveRow)) break;
+            missing--;
+            liveIndex++;
+        }
+        if (missing <= 0) return;
+        for (int i = 0; i < missing; i++) adapter.insertAt(i, history.get(i));
+        // reducer 里保存的 assistant/tool 绝对行号整体平移，后续 delta 仍落到正确行。
+        transcript.shiftRows(missing);
+        refreshEmptyState();
+        snapshotChat();
+    }
+
+    private static boolean sameStreamingRow(ChatMessage snapshotRow, ChatMessage liveRow) {
+        if (snapshotRow.role != liveRow.role) return false;
+        if (liveRow.role == ChatMessage.Role.TOOL) {
+            return liveRow.tool != null && snapshotRow.tool != null
+                    && liveRow.tool.id.equals(snapshotRow.tool.id);
+        }
+        if (liveRow.role == ChatMessage.Role.USER || liveRow.role == ChatMessage.Role.SYSTEM) {
+            return snapshotRow.text.equals(liveRow.text);
+        }
+        // 流式助手行是快照同条消息的前缀；空 live 文本（纯工具消息）无法安全对齐，不算同一条。
+        return !liveRow.text.isEmpty() && snapshotRow.text.startsWith(liveRow.text);
+    }
+
     private void renderHistory(JSONObject data) {
         List<ChatMessage> history = TranscriptReducer.history(data);
         if (history.isEmpty()) {
@@ -1450,7 +1700,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         for (TranscriptReducer.Edit edit : transcript.accept(event, adapter.size())) {
             if (edit.append) {
                 flushTranscriptPaint();
-                adapter.add(edit.message);
+                // 回填后 rowShift 已含在 reducer 的行号里；追加语义按位置落到正确位置。
+                if (edit.row < adapter.size()) adapter.insertAt(edit.row, edit.message);
+                else adapter.add(edit.message);
             } else {
                 pendingRows.put(edit.row, edit.message);
             }

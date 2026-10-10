@@ -3,10 +3,20 @@ package dev.pi.android.ui;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.os.Handler;
+import android.os.Looper;
+import android.text.TextUtils;
+import android.util.Base64;
+import android.util.LruCache;
+import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.HorizontalScrollView;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -15,6 +25,9 @@ import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
+import java.lang.ref.WeakReference;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.text.DateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -22,6 +35,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import dev.pi.android.R;
 import dev.pi.android.model.ChatMessage;
@@ -45,6 +63,20 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
 
     /** 输出预览行数（pi-pocket SHELL_LINES 的移动端收缩版）。 */
     private static final int PREVIEW_LINES = 6;
+
+    // 单线程、有界队列：历史里的原生图片绝不在主线程做 base64/摘要/Bitmap 解码。
+    private static final int THUMB_EDGE = 256;
+    private static final Handler THUMB_MAIN = new Handler(Looper.getMainLooper());
+    private static final ThreadPoolExecutor THUMB_WORKER = new ThreadPoolExecutor(
+            1, 1, 30, TimeUnit.SECONDS, new ArrayBlockingQueue<>(32), runnable -> {
+                Thread thread = new Thread(runnable, "attachment-chat-thumbnail");
+                thread.setDaemon(true);
+                return thread;
+            });
+    private static final LruCache<String, Bitmap> THUMB_CACHE = new LruCache<String, Bitmap>(4 * 1024 * 1024) {
+        @Override protected int sizeOf(String key, Bitmap value) { return value.getByteCount(); }
+    };
+    private static final LruCache<String, Boolean> THUMB_FAILURES = new LruCache<>(32);
 
     public interface OnMessageChanged {
         void onChanged(int size);
@@ -110,9 +142,18 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
         return items.size();
     }
 
+    /** 运行中重连回填：把快照里缺失的历史行插到流式区之前。 */
+    public void insertAt(int position, ChatMessage message) {
+        items.add(position, message);
+        notifyItemInserted(position);
+        if (listener != null) listener.onChanged(items.size());
+    }
+
     /** 主题/旋转重建时写入 AgentState 的不可变快照。 */
     public List<ChatMessage> snapshot() {
-        return new ArrayList<>(items);
+        List<ChatMessage> copy = new ArrayList<>();
+        for (ChatMessage message : items) copy.add(message.copy());
+        return copy;
     }
 
     /** 对话是否为空：系统 chip 不算「有内容」。 */
@@ -167,14 +208,71 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
     }
 
     @Override
+    public void onViewRecycled(@NonNull VH holder) {
+        holder.cancelThumbnails();
+        if (holder.attachmentItems != null) holder.attachmentItems.removeAllViews();
+        super.onViewRecycled(holder);
+    }
+
+    @Override
     public int getItemCount() {
         return items.size();
+    }
+
+    /** 仅在后台调用；缓存只存小 Bitmap 和摘要，不持有大 base64 作为 key。 */
+    private static Bitmap thumbnail(String data) {
+        String key = null;
+        try {
+            if (Thread.currentThread().isInterrupted()) return null;
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(data.getBytes(StandardCharsets.US_ASCII));
+            StringBuilder hex = new StringBuilder(64);
+            for (byte b : digest) hex.append(String.format(Locale.US, "%02x", b & 255));
+            key = hex.toString();
+            Bitmap cached = THUMB_CACHE.get(key);
+            if (cached != null) return cached;
+            if (THUMB_FAILURES.get(key) != null || Thread.currentThread().isInterrupted()) return null;
+            byte[] encoded = Base64.decode(data, Base64.DEFAULT);
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inJustDecodeBounds = true;
+            BitmapFactory.decodeByteArray(encoded, 0, encoded.length, options);
+            if (options.outWidth <= 0 || options.outHeight <= 0 || options.outWidth > 32768
+                    || options.outHeight > 32768 || (long) options.outWidth * options.outHeight > 100_000_000) {
+                THUMB_FAILURES.put(key, true);
+                return null;
+            }
+            options.inSampleSize = 1;
+            while (Math.max(options.outWidth, options.outHeight) / options.inSampleSize > THUMB_EDGE) {
+                options.inSampleSize *= 2;
+            }
+            if (Thread.currentThread().isInterrupted()) return null;
+            options.inJustDecodeBounds = false;
+            options.inPreferredConfig = Bitmap.Config.ARGB_8888;
+            Bitmap bitmap = BitmapFactory.decodeByteArray(encoded, 0, encoded.length, options);
+            if (bitmap == null) {
+                THUMB_FAILURES.put(key, true);
+                return null;
+            }
+            // 部分格式/解码器忽略 inSampleSize；拒收非小图，不让缓存持有大 Bitmap。
+            if (bitmap.getWidth() > THUMB_EDGE || bitmap.getHeight() > THUMB_EDGE) {
+                bitmap.recycle();
+                THUMB_FAILURES.put(key, true);
+                return null;
+            }
+            THUMB_CACHE.put(key, bitmap);
+            return bitmap;
+        } catch (Exception | OutOfMemoryError ignored) {
+            if (key != null) THUMB_FAILURES.put(key, true);
+            return null;
+        }
     }
 
     class VH extends RecyclerView.ViewHolder {
         final Context ctx;
         final int type;
         final TextView text;
+        LinearLayout attachmentItems;
+        Object attachmentBinding = new Object();
+        final List<Future<?>> thumbnailTasks = new ArrayList<>();
 
         // 工具卡片视图（仅 TYPE_TOOL 时非空）
         View toolStateBar;
@@ -196,6 +294,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
             this.ctx = itemView.getContext();
             this.type = type;
             this.text = itemView.findViewById(R.id.text);
+            if (type == TYPE_USER) attachmentItems = itemView.findViewById(R.id.attachment_chat_items);
             if (type == TYPE_TOOL) {
                 toolStateBar = itemView.findViewById(R.id.tool_state_bar);
                 toolHeader = itemView.findViewById(R.id.tool_header);
@@ -219,6 +318,8 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
             switch (type) {
                 case TYPE_USER:
                     text.setText(msg.text);
+                    text.setVisibility(msg.text.isEmpty() ? View.GONE : View.VISIBLE);
+                    bindAttachments(msg);
                     break;
                 case TYPE_TOOL:
                     bindTool(msg);
@@ -248,6 +349,122 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                 return true;
             });
         }
+
+        void cancelThumbnails() {
+            attachmentBinding = new Object();
+            for (Future<?> task : thumbnailTasks) task.cancel(true);
+            thumbnailTasks.clear();
+            THUMB_WORKER.purge();
+        }
+
+        private void bindAttachments(ChatMessage message) {
+            cancelThumbnails();
+            attachmentItems.removeAllViews();
+            int count = Math.min(ChatMessage.MAX_ATTACHMENTS, message.attachments.size());
+            attachmentItems.setVisibility(count == 0 ? View.GONE : View.VISIBLE);
+            for (int i = 0; i < count; i++) {
+                ChatMessage.AttachmentData attachment = message.attachments.get(i);
+                if (attachment == null) continue;
+                View card = "image".equals(attachment.kind) ? imageCard(attachment) : fileChip(attachment);
+                LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                        Math.max(dp(64), Math.min(dp(232), ctx.getResources().getDisplayMetrics().widthPixels - dp(96))),
+                        ViewGroup.LayoutParams.WRAP_CONTENT);
+                params.topMargin = i == 0 && message.text.isEmpty() ? 0 : dp(8);
+                attachmentItems.addView(card, params);
+            }
+            if (message.attachments.size() > count) {
+                TextView more = attachmentLabel(ctx.getString(R.string.attachment_chat_more,
+                        message.attachments.size() - count), 12, R.color.attachment_chat_secondary);
+                more.setPadding(0, dp(8), 0, 0);
+                attachmentItems.addView(more);
+            }
+        }
+
+        private TextView attachmentLabel(String label, int sp, int color) {
+            TextView view = new TextView(ctx);
+            view.setText(label);
+            view.setTextSize(sp);
+            view.setTextColor(ContextCompat.getColor(ctx, color));
+            view.setMaxLines(2);
+            view.setEllipsize(TextUtils.TruncateAt.END);
+            return view;
+        }
+
+        private View fileChip(ChatMessage.AttachmentData attachment) {
+            LinearLayout row = new LinearLayout(ctx);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(10), dp(8), dp(10), dp(8));
+            row.setBackgroundResource(R.drawable.attachment_chat_card);
+            ImageView icon = new ImageView(ctx);
+            icon.setImageResource(R.drawable.attachment_chat_file);
+            row.addView(icon, new LinearLayout.LayoutParams(dp(24), dp(28)));
+            LinearLayout labels = new LinearLayout(ctx);
+            labels.setOrientation(LinearLayout.VERTICAL);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
+            lp.setMarginStart(dp(8));
+            row.addView(labels, lp);
+            String name = attachment.name.isEmpty() ? ctx.getString(R.string.attachment_chat_file_name) : attachment.name;
+            labels.addView(attachmentLabel(name, 14, R.color.attachment_chat_primary));
+            labels.addView(attachmentLabel(fileSize(attachment.size), 12, R.color.attachment_chat_secondary));
+            // 故意没有点击处理器：附件描述中的 path 不是可执行或可打开的 URI。
+            row.setContentDescription(name + "，" + fileSize(attachment.size));
+            return row;
+        }
+
+        private View imageCard(ChatMessage.AttachmentData attachment) {
+            LinearLayout card = new LinearLayout(ctx);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setBackgroundResource(R.drawable.attachment_chat_card);
+            FrameLayout preview = new FrameLayout(ctx);
+            card.addView(preview, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(156)));
+            TextView placeholder = attachmentLabel(ctx.getString(R.string.attachment_chat_image_unavailable),
+                    12, R.color.attachment_chat_secondary);
+            placeholder.setGravity(Gravity.CENTER);
+            preview.addView(placeholder, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            ImageView image = new ImageView(ctx);
+            image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            image.setPadding(dp(4), dp(4), dp(4), dp(4));
+            String name = attachment.name.isEmpty() ? ctx.getString(R.string.attachment_chat_image_name) : attachment.name;
+            image.setContentDescription(name);
+            preview.addView(image, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            TextView caption = attachmentLabel(name, 12, R.color.attachment_chat_primary);
+            caption.setPadding(dp(8), dp(4), dp(8), dp(6));
+            card.addView(caption);
+            String data = attachment.imageData;
+            if (data == null || data.isEmpty() || data.length() > ChatMessage.MAX_IMAGE_DATA_CHARS) return card;
+            Object binding = attachmentBinding;
+            WeakReference<VH> holderRef = new WeakReference<>(this);
+            WeakReference<ImageView> imageRef = new WeakReference<>(image);
+            WeakReference<TextView> placeholderRef = new WeakReference<>(placeholder);
+            try {
+                thumbnailTasks.add(THUMB_WORKER.submit(() -> {
+                    Bitmap bitmap = thumbnail(data);
+                    if (Thread.currentThread().isInterrupted() || bitmap == null) return;
+                    THUMB_MAIN.post(() -> {
+                        VH holder = holderRef.get();
+                        ImageView target = imageRef.get();
+                        TextView label = placeholderRef.get();
+                        if (holder == null || holder.attachmentBinding != binding || target == null) return;
+                        target.setImageBitmap(bitmap);
+                        if (label != null) label.setVisibility(View.GONE);
+                    });
+                }));
+            } catch (RejectedExecutionException ignored) {
+                // 快速滚动/恶意历史超过队列上限时保留小占位卡片，不阻塞 UI。
+            }
+            return card;
+        }
+
+        private String fileSize(long bytes) {
+            if (bytes < 1024) return bytes + " B";
+            if (bytes < 1024 * 1024) return String.format(Locale.getDefault(), "%.1f KB", bytes / 1024.0);
+            if (bytes < 1024L * 1024 * 1024) return String.format(Locale.getDefault(), "%.1f MB", bytes / (1024.0 * 1024));
+            return String.format(Locale.getDefault(), "%.1f GB", bytes / (1024.0 * 1024 * 1024));
+        }
+
+        private int dp(int value) { return Math.round(value * ctx.getResources().getDisplayMetrics().density); }
 
         /**
          * 工具卡片绑定。结构化 ToolData 直接使用；legacy 文本消息

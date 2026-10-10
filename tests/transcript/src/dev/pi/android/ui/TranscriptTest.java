@@ -17,8 +17,11 @@ public final class TranscriptTest {
     }
     void event(JSONObject event) {
         for (TranscriptReducer.Edit edit : reducer.accept(event, rows.size())) {
-            if (edit.append) { equal(rows.size(), edit.row); rows.add(edit.message); }
-            else rows.set(edit.row, edit.message);
+            if (edit.append) {
+                // 与 MainActivity.applyTranscriptEvent 一致：回填后追加位置可能在中间。
+                if (edit.row < rows.size()) rows.add(edit.row, edit.message);
+                else { equal(rows.size(), edit.row); rows.add(edit.message); }
+            } else rows.set(edit.row, edit.message);
         }
     }
     void event(String source) { event(json(source)); }
@@ -91,8 +94,61 @@ public final class TranscriptTest {
         equal(2, errors.size()); equal(ChatMessage.Role.SYSTEM, errors.get(0).role); equal("⚠ NO_KEY", errors.get(0).text);
         equal("cancelled", errors.get(1).tool.state); equal("partial", errors.get(1).tool.output);
     }
+    void reconnectBackfill() {
+        // 运行中途重连：错过 message_start 和全部 delta，只有 tool_execution_* 还在来。
+        tool("tool_execution_start", "r1", null);
+        equal(1, rows.size());
+        tool("tool_execution_end", "r1", "out");
+        // agent_end 携带完整 run 消息：正文必须补拍回来，顺序在工具卡之前的事件来源处不保证，
+        // 但绝不能整条丢掉。
+        event(new JSONObject().put("type", "agent_end").put("willRetry", false).put("messages", new JSONArray()
+                .put(json("{\"role\":\"assistant\",\"timestamp\":100,\"stopReason\":\"toolUse\",\"content\":[{\"type\":\"text\",\"text\":\"前半正文\"},{\"type\":\"toolCall\",\"id\":\"r1\",\"name\":\"bash\",\"arguments\":{\"command\":\"x\"}}]}"))
+                .put(json("{\"role\":\"toolResult\",\"toolCallId\":\"r1\",\"content\":[{\"type\":\"text\",\"text\":\"out\"}]}"))
+                .put(json("{\"role\":\"assistant\",\"timestamp\":200,\"stopReason\":\"stop\",\"content\":[{\"type\":\"text\",\"text\":\"后半正文\"}]}"))));
+        boolean hasFirst = false, hasSecond = false;
+        for (ChatMessage row : rows) {
+            if ("前半正文".equals(row.text)) hasFirst = true;
+            if ("后半正文".equals(row.text)) hasSecond = true;
+        }
+        equal(true, hasFirst); equal(true, hasSecond);
+        // 已有正文的消息不重拍：agent_end 内容与 joinedText 相同。
+        reducer.reset(); rows.clear();
+        event("{\"type\":\"message_start\",\"message\":{\"role\":\"assistant\"}}");
+        delta(0, "same");
+        event("{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"same\"}],\"stopReason\":\"stop\"}}");
+        event(new JSONObject().put("type", "agent_end").put("messages", new JSONArray()
+                .put(json("{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"same\"}],\"stopReason\":\"stop\"}"))));
+        equal(1, rows.size()); equal("same", rows.get(0).text);
+    }
+    void mergeThenShift() {
+        // 运行中重连 + get_messages 回填：UI 插入了 2 行历史（用户消息 + 已完成正文），
+        // 协调器调用 shiftRows(2) 后，后续事件行号必须整体平移，不回填到历史位置。
+        tool("tool_execution_start", "s1", null);
+        equal(0, rows.get(0).tool.id.equals("s1") ? 0 : 1);
+        // 模拟协调器：adapter.insertAt × 2 + transcript.shiftRows(2)
+        rows.add(0, new ChatMessage(ChatMessage.Role.USER, "旧问题"));
+        rows.add(1, new ChatMessage(ChatMessage.Role.AGENT, "旧正文"));
+        reducer.shiftRows(2);
+        // 运行中工具更新仍命中平移后的同一行，不覆盖历史行。
+        tool("tool_execution_update", "s1", "partial");
+        equal("partial", rows.get(2).tool.output); equal("旧问题", rows.get(0).text);
+        // 新助手消息从流式区末尾追加，不回填到行 0。
+        event("{\"type\":\"message_start\",\"message\":{\"role\":\"assistant\"}}");
+        delta(0, "新正文");
+        equal(4, rows.size()); equal("新正文", rows.get(3).text);
+        delta(0, "加长");
+        equal("新正文加长", rows.get(3).text); equal(4, rows.size());
+        event("{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"新正文加长（终）\"}],\"stopReason\":\"stop\"}}");
+        equal("新正文加长（终）", rows.get(3).text);
+        // 新工具行同样平移追加。
+        tool("tool_execution_start", "s2", null);
+        equal(5, rows.size()); equal("s2", rows.get(4).tool.id);
+        // 再确认历史行没有被覆盖。
+        equal("旧问题", rows.get(0).text); equal("旧正文", rows.get(1).text);
+    }
     public static void main(String[] args) {
         new TranscriptTest().textDeltas(); new TranscriptTest().toolDeltas(); new TranscriptTest().errorsAndAbort(); history();
+        new TranscriptTest().reconnectBackfill(); new TranscriptTest().mergeThenShift();
         System.out.println("TranscriptTest: " + assertions + " assertions passed");
     }
 }

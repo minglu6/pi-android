@@ -31,6 +31,7 @@ import { WebSocketServer } from "ws";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import {AttachmentStore, prepareAttachments, prepareInlineImages} from "./attachment-store.mjs";
 
 const argv = process.argv.slice(2);
 const arg = (name, def) => {
@@ -112,6 +113,9 @@ function authenticates(value) {
   );
 }
 
+// 延迟创建上传目录：未鉴权客户端不能在磁盘创建文件。
+const uploads = new AttachmentStore();
+const UPLOAD_COMMANDS = new Set(["upload_begin", "upload_chunk", "upload_finish", "upload_abort"]);
 const wss = new WebSocketServer({ host: HOST, port: PORT, maxPayload: 8 * 1024 * 1024 });
 /** @type {{ws: import('ws').WebSocket, authed: boolean}[]} */
 const clients = [];
@@ -200,6 +204,7 @@ function ensurePi() {
     if (child !== pi) return;
     log(error);
     for (const entry of pendingReqs.values()) {
+      clearTimeout(entry.timer);
       respond(entry.ws, entry.clientId, false, entry.command, null, error);
     }
     pendingReqs.clear();
@@ -241,6 +246,7 @@ function routeRecord(rec) {
     const entry = typeof rec.id === "string" ? pendingReqs.get(rec.id) : null;
     if (!entry) return;
     pendingReqs.delete(rec.id);
+    clearTimeout(entry.timer);
     if (rec.command !== entry.piCommand) {
       respond(entry.ws, entry.clientId, false, entry.command, null, "Pi 响应命令不匹配");
       return;
@@ -251,6 +257,10 @@ function routeRecord(rec) {
     if (rec.success && !rec.data?.cancelled &&
         ["new_session", "switch_session", "fork", "clone"].includes(entry.command)) {
       currentSessionName = "";
+    }
+    if (entry.onResponse) {
+      entry.onResponse(rec);
+      return;
     }
     const data = rec.success && entry.command === "get_session_name"
       ? { name: currentSessionName } : rec.data;
@@ -469,6 +479,19 @@ function writeCommand(id, ws, command, params) {
     return;
   }
   // 连接器本地命令：不进 Pi 的 stdin，直接由本进程回答
+  if (UPLOAD_COMMANDS.has(command)) {
+    try {
+      const method = command.slice("upload_".length);
+      respond(ws, id, true, command, uploads[method](ws, params), null);
+    } catch (e) {
+      respond(ws, id, false, command, null, e.message);
+    }
+    return;
+  }
+  if (Object.hasOwn(params, "attachmentIds") && command !== "prompt") {
+    respond(ws, id, false, command, null, "attachmentIds 仅用于 prompt");
+    return;
+  }
   if (command === "list_sessions") {
     const t0 = Date.now();
     let items = [];
@@ -520,6 +543,62 @@ function writeCommand(id, ws, command, params) {
     }
     return;
   }
+  if (command === "prompt" && (Object.hasOwn(params, "attachmentIds") || Object.hasOwn(params, "images"))) {
+    try {
+      const prepared = Object.hasOwn(params, "attachmentIds")
+        ? prepareAttachments(uploads, params) : prepareInlineImages(uploads, params);
+      if (prepared.imageItems.length || prepared.inlineImages?.length) {
+        promptWithImages(id, ws, prepared);
+        return;
+      }
+      params = prepared.params;
+    } catch (e) {
+      respond(ws, id, false, command, null, e.message);
+      return;
+    }
+  }
+  forwardCommand(id, ws, command, params);
+}
+
+/** 图片只经官方 images 通道；当前模型声明仅 text 时拒绝，不让 Pi 静默丢图。 */
+function promptWithImages(id, ws, prepared) {
+  const pi = ensurePi();
+  if (!pi || pi.stdin.destroyed || pi.stdin.writableEnded) {
+    respond(ws, id, false, "prompt", null, "Pi 正在退出，请稍后重试");
+    return;
+  }
+  const internalId = `bridge-${++rpcSeq}`;
+  const timer = setTimeout(() => {
+    if (!pendingReqs.delete(internalId)) return;
+    respond(ws, id, false, "prompt", null, "查询图片模型能力超时；未发送 prompt");
+  }, 10000);
+  timer.unref();
+  pendingReqs.set(internalId, {ws, clientId: id, command: "prompt", piCommand: "get_state", timer,
+    onResponse: (rec) => {
+      if (!rec.success) {
+        respond(ws, id, false, "prompt", null, "无法查询图片模型能力；未发送 prompt");
+        return;
+      }
+      const input = rec.data?.model?.input;
+      if (Array.isArray(input) && !input.includes("image")) {
+        respond(ws, id, false, "prompt", null, "当前模型不支持图片，请切换支持图片的模型");
+        return;
+      }
+      try {
+        const images = prepared.inlineImages || prepared.imageItems.map(item => ({type: "image",
+          data: uploads.readVerified(item, true), mimeType: item.attachment.mimeType}));
+        forwardCommand(id, ws, "prompt", {...prepared.params, images});
+      } catch (e) { respond(ws, id, false, "prompt", null, e.message); }
+    },
+  });
+  try { pi.stdin.write(JSON.stringify({id: internalId, type: "get_state"}) + "\n"); }
+  catch (e) {
+    clearTimeout(timer); pendingReqs.delete(internalId);
+    respond(ws, id, false, "prompt", null, e.message);
+  }
+}
+
+function forwardCommand(id, ws, command, params) {
   const pi = ensurePi();
   if (!pi || pi.stdin.destroyed || pi.stdin.writableEnded) {
     respond(ws, id, false, command, null, "Pi 正在退出，请稍后重试");
@@ -618,8 +697,9 @@ wss.on("connection", (ws, req) => {
   ws.on("close", () => {
     const i = clients.indexOf(c);
     if (i >= 0) clients.splice(i, 1);
+    uploads.disconnect(ws);
     for (const [id, entry] of pendingReqs) {
-      if (entry.ws === ws) pendingReqs.delete(id);
+      if (entry.ws === ws) { clearTimeout(entry.timer); pendingReqs.delete(id); }
     }
     // 未鉴权连接不能阻止取消无人能回答的对话框。
     if (!clients.some((client) => client.authed)) releaseStuckDialogs("所有已鉴权客户端已断开");
@@ -630,12 +710,15 @@ wss.on("connection", (ws, req) => {
   safeSend(ws, JSON.stringify({ v: 1, kind: "status", state: c.authed ? piState() : "offline" }));
 });
 
+process.on("exit", () => uploads.close());
 process.on("SIGTERM", () => {
+  uploads.close();
   stopPi("SIGTERM");
   wss.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 3000);
 });
 process.on("SIGINT", () => {
+  uploads.close();
   stopPi("SIGINT");
   wss.close(() => process.exit(0));
 });

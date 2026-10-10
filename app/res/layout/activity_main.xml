@@ -317,17 +317,49 @@
         android:elevation="6dp"
         android:gravity="bottom"
         android:orientation="horizontal"
-        android:paddingStart="12dp"
+        android:paddingStart="8dp"
         android:paddingTop="10dp"
         android:paddingEnd="10dp"
         android:paddingBottom="10dp">
 
-        <EditText
-            android:id="@+id/composer"
-            style="@style/ComposerText"
+        <ImageButton
+            android:id="@+id/btn_attach"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginEnd="6dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/action_attach"
+            android:padding="10dp"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_attach"
+            android:tint="@color/text_secondary" />
+
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
+            android:orientation="vertical">
+
+            <HorizontalScrollView
+                android:id="@+id/attachment_scroller"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                android:scrollbars="none"
+                android:visibility="gone">
+
+                <LinearLayout
+                    android:id="@+id/attachment_row"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal" />
+            </HorizontalScrollView>
+
+        <EditText
+            android:id="@+id/composer"
+            style="@style/ComposerText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
             android:background="@drawable/bg_composer"
             android:hint="@string/hint_message"
             android:imeOptions="actionNone|flagNoExtractUi"
@@ -338,6 +370,7 @@
             android:paddingTop="12dp"
             android:paddingEnd="16dp"
             android:paddingBottom="12dp" />
+        </LinearLayout>
 
         <ImageButton
             android:id="@+id/send"
