@@ -3,13 +3,16 @@ package dev.pi.android.ui;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.IBinder;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.InputDevice;
+import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
@@ -17,14 +20,18 @@ import android.view.inputmethod.BaseInputConnection;
 import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
-import android.widget.PopupMenu;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.annotation.DrawableRes;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.annotation.StringRes;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.view.menu.MenuBuilder;
+import androidx.appcompat.widget.PopupMenu;
 import androidx.core.content.ContextCompat;
+import androidx.core.graphics.drawable.DrawableCompat;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
@@ -1117,17 +1124,33 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private void showOverflowMenu(View anchor) {
-        PopupMenu menu = new PopupMenu(this, anchor);
+        PopupMenu menu = new PopupMenu(this, anchor, Gravity.END);
+        Menu m = menu.getMenu();
+        // AppCompat menus hide icons unless optional-icons are enabled.
+        if (m instanceof MenuBuilder) {
+            ((MenuBuilder) m).setOptionalIconsVisible(true);
+        }
         // 新建会话 is the dedicated top-bar + button — not duplicated here.
-        menu.getMenu().add(0, 1, 0, R.string.menu_settings);
-        menu.getMenu().add(0, 3, 1, R.string.menu_reload);
-        menu.getMenu().add(0, 4, 2, R.string.menu_fork);
-        menu.getMenu().add(0, 5, 3, R.string.menu_find);
-        menu.getMenu().add(0, 6, 4, R.string.menu_export);
-        menu.getMenu().add(0, 7, 5, R.string.menu_files);
-        menu.getMenu().add(0, 8, 6, R.string.menu_changes);
+        addOverflowItem(m, 1, 0, R.string.menu_settings, R.drawable.ic_menu_settings);
+        addOverflowItem(m, 3, 1, R.string.menu_reload, R.drawable.ic_menu_reconnect);
+        addOverflowItem(m, 4, 2, R.string.menu_fork, R.drawable.ic_menu_fork);
+        addOverflowItem(m, 5, 3, R.string.menu_find, R.drawable.ic_menu_find);
+        addOverflowItem(m, 6, 4, R.string.menu_export, R.drawable.ic_menu_export);
+        addOverflowItem(m, 7, 5, R.string.menu_files, R.drawable.ic_menu_files);
+        addOverflowItem(m, 8, 6, R.string.menu_changes, R.drawable.ic_menu_changes);
         menu.setOnMenuItemClickListener(this::onOverflowItem);
         menu.show();
+    }
+
+    private void addOverflowItem(Menu menu, int id, int order,
+                                 @StringRes int titleRes, @DrawableRes int iconRes) {
+        MenuItem item = menu.add(0, id, order, titleRes);
+        Drawable icon = ContextCompat.getDrawable(this, iconRes);
+        if (icon != null) {
+            icon = DrawableCompat.wrap(icon.mutate());
+            DrawableCompat.setTint(icon, ContextCompat.getColor(this, R.color.text_secondary));
+            item.setIcon(icon);
+        }
     }
 
     private boolean onOverflowItem(MenuItem item) {
