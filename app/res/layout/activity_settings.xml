@@ -154,11 +154,15 @@
                 android:background="@drawable/bg_settings_card"
                 android:orientation="vertical">
 
+                <!-- Read-only status; switch via composer model chip only. -->
                 <LinearLayout
                     android:id="@+id/pref_model"
                     style="@style/SettingsPrefRow"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content">
+                    android:layout_height="wrap_content"
+                    android:background="@null"
+                    android:clickable="false"
+                    android:focusable="false">
 
                     <LinearLayout
                         android:layout_width="0dp"
@@ -169,7 +173,7 @@
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="@string/action_model"
+                            android:text="@string/settings_model_label"
                             android:textColor="@color/text_primary"
                             android:textSize="15.5sp" />
 
@@ -194,7 +198,10 @@
                     android:id="@+id/pref_thinking"
                     style="@style/SettingsPrefRow"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content">
+                    android:layout_height="wrap_content"
+                    android:background="@null"
+                    android:clickable="false"
+                    android:focusable="false">
 
                     <LinearLayout
                         android:layout_width="0dp"
@@ -205,7 +212,7 @@
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="@string/action_thinking"
+                            android:text="@string/settings_thinking_label"
                             android:textColor="@color/text_primary"
                             android:textSize="15.5sp" />
 

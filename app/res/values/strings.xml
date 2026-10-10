@@ -25,6 +25,9 @@
     <string name="action_new_session">新建会话</string>
     <string name="action_reload">重新连接</string>
     <string name="status_starting_pi">运行中</string>
+    <string name="notif_connector_title">Pi 连接器</string>
+    <string name="notif_connector_disconnected">已断开</string>
+    <string name="notif_connector_tap_suffix"> · 点一下打开对话</string>
     <string name="status_idle">就绪</string>
     <string name="status_offline_with">未连接</string>
     <string name="status_thinking">思考中…</string>
@@ -44,6 +47,8 @@
     <string name="settings_back">返回</string>
     <string name="settings_section_connector">连接器</string>
     <string name="settings_section_model">模型与思考</string>
+    <string name="settings_model_label">模型</string>
+    <string name="settings_thinking_label">思考</string>
     <string name="settings_section_appearance">外观</string>
     <string name="settings_section_about">关于</string>
     <string name="settings_host_label">地址</string>
