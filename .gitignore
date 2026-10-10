@@ -1,8 +1,28 @@
+# App build outputs (no-Gradle pipeline)
 app/libs/
 app/build/
 app/out/
 app/*.jks
 app/tools/__pycache__/
+**/__pycache__/
+*.pyc
+
+# Local Android / IDE (not used by build.sh, but keep trees clean)
+android-sdk/
+local.properties
+*.iml
+.idea/
+.vscode/
+*.keystore
+*.jks
+!**/fixtures/**/*.jks
+
+# Bridge
 bridge/node_modules/
 bridge/run/
+
+# Misc
 *.log
+.DS_Store
+*.apk
+!**/fixtures/**/*.apk
