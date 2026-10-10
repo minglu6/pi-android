@@ -349,6 +349,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         resumed = true;
         reconnectIfConfigured();
         if (serviceBound && service != null) service.takePendingAsk();
+        if (isConnected()) refreshSlashCommands();
         refreshEmptyState();
     }
 
