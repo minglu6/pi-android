@@ -133,10 +133,13 @@
     <string name="rpc_unsupported">连接器不支持此操作</string>
     <string name="sessions_actions_title">会话操作</string>
     <string name="session_delete_hint">删除本地会话文件</string>
-    <string name="thinking_desc_off">不使用扩展思考</string>
-    <string name="thinking_desc_low">轻量推理，更快响应</string>
+    <string name="thinking_desc_off">关闭扩展思考</string>
+    <string name="thinking_desc_minimal">极短思考，几乎不额外推理</string>
+    <string name="thinking_desc_low">轻量推理，优先速度</string>
     <string name="thinking_desc_medium">平衡速度与深度</string>
     <string name="thinking_desc_high">更充分推理，适合难题</string>
+    <string name="thinking_desc_xhigh">更长推理链，复杂任务</string>
+    <string name="thinking_desc_max">最深思考，最慢也最稳</string>
     <string name="thinking_desc_generic">切换到此思考档位</string>
     <string name="settings_theme_system_desc">跟随系统浅色 / 深色</string>
     <string name="settings_theme_light_desc">始终使用浅色界面</string>

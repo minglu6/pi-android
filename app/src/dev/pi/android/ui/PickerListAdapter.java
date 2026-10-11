@@ -12,8 +12,11 @@ import androidx.recyclerview.widget.RecyclerView;
 import java.util.ArrayList;
 import java.util.List;
 
+import android.graphics.Typeface;
+
 import dev.pi.android.R;
 import dev.pi.android.model.PickerItem;
+import dev.pi.android.util.AppFonts;
 
 public class PickerListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
@@ -100,11 +103,15 @@ public class PickerListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHol
         }
 
         void bind(PickerItem item, Listener listener) {
+            // Model ids / thinking level names: user mono (MesloNerd or system mono).
+            // Chinese subtitles stay on default sans (CJK via system / AppFonts fallback elsewhere).
+            title.setTypeface(AppFonts.mono(itemView.getContext(), false));
             title.setText(item.title);
             if (item.subtitle == null || item.subtitle.isEmpty()) {
                 subtitle.setVisibility(View.GONE);
             } else {
                 subtitle.setVisibility(View.VISIBLE);
+                subtitle.setTypeface(Typeface.SANS_SERIF);
                 subtitle.setText(item.subtitle);
             }
             check.setVisibility(item.selected ? View.VISIBLE : View.GONE);
