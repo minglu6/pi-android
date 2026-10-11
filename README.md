@@ -193,6 +193,7 @@ gh run watch
 - 日用聊天打磨：Markdown/代码块、时间戳、断线横幅、粘底滚动、会话重命名/删除
 - Tokyo Night 风格聊天 UI（简洁顶栏 / 无气泡消息 / 工具时间线 / 卡片输入框）；MesloLGLDZ Nerd Font Mono
 - 多连接配置（本机 Termux / Tailscale 远程）、测速、按配置记忆模型与会话；`--tailscale` 远程桥
+- 空态建议 chip：`get_suggestions`（会话 todo / 中断续写 / until·定时 / git 改动；旧连接器自动兜底）
 
 ### 已知限制 / 未做
 
@@ -206,7 +207,7 @@ gh run watch
 ## 安全边界
 
 - 默认只绑 `127.0.0.1`；远程用 `--tailscale` 或 `--host <100.x>`，**拒绝** `0.0.0.0`/`::`。token 必填（文件权限建议 600）
-- 命令白名单**始终**包含官方 `bash` / `abort_bash`（Pocket `!shell` / `!!shell`）；`--allow-bash` 仍为同义词。若 App 仍报 `命令不允许: bash`，说明 Termux 还在跑旧 bridge —— `sv restart pi-rpc-bridge`。该白名单不限制 prompt 驱动的 agent 工具。桥本地另有 `list_project_files` / `read_project_file` / `git_*`（非 Pi RPC）
+- 命令白名单**始终**包含官方 `bash` / `abort_bash`（Pocket `!shell` / `!!shell`）；`--allow-bash` 仍为同义词。若 App 仍报 `命令不允许: bash`，说明 Termux 还在跑旧 bridge —— `sv restart pi-rpc-bridge`。该白名单不限制 prompt 驱动的 agent 工具。桥本地另有 `list_project_files` / `read_project_file` / `git_*` / `get_suggestions`（非 Pi RPC）
 - 依赖 sha256 清单：`app/libs/manifest.json`（重建后核对）
 
 ## License

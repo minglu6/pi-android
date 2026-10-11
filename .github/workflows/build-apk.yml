@@ -101,7 +101,7 @@ jobs:
           bash tests/extension-ui/run.sh
           bash tests/ansi/run.sh
           python3 tests/test_build_failures.py
-          node --test bridge/tests/pi-rpc-bridge.test.mjs
+          node --test bridge/tests/pi-rpc-bridge.test.mjs bridge/tests/suggestions.test.mjs
 
       - name: Verify toolchain
         run: |
