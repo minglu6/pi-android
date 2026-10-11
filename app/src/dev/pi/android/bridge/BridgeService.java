@@ -11,8 +11,10 @@ import android.os.Binder;
 import android.os.Build;
 import android.os.IBinder;
 import android.text.TextUtils;
+import android.util.Log;
 import android.widget.Toast;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 
@@ -39,6 +41,8 @@ import dev.pi.android.util.RecentModels;
  * 存活率高得多。代价是常驻一条通知，所以通知里放了「停止连接器」。
  */
 public class BridgeService extends Service {
+
+    private static final String TAG = "BridgeService";
 
     public static final String ACTION_ANSWER = "dev.pi.android.ANSWER";
     public static final String ACTION_STOP = "dev.pi.android.STOP";
@@ -329,6 +333,46 @@ public class BridgeService extends Service {
         }
         if (!bridge.isConnected()) connectWithSaved();
         return START_STICKY;
+    }
+
+    /**
+     * API 34+: {@code dataSync} FGS has a system time limit. If we ignore this,
+     * the platform raises {@code ForegroundServiceDidNotStopInTimeException} and
+     * can kill the process. Demote + disconnect cleanly instead.
+     */
+    @Override
+    public void onTimeout(int startId) {
+        handleDataSyncTimeout("onTimeout(startId=" + startId + ")");
+    }
+
+    /** API 35+ overload with foreground-service type. */
+    @Override
+    public void onTimeout(int startId, int fgsType) {
+        handleDataSyncTimeout("onTimeout(startId=" + startId + ", fgsType=" + fgsType + ")");
+    }
+
+    private void handleDataSyncTimeout(@NonNull String reason) {
+        Log.w(TAG, "dataSync FGS timed out by system — " + reason
+                + "; stopping foreground, disconnecting bridge, stopSelf (no hard kill)");
+        dbg("fgs timeout " + reason);
+        try {
+            if (extUi != null) extUi.cancelPending();
+        } catch (Exception e) {
+            Log.w(TAG, "cancelPending during FGS timeout", e);
+        }
+        try {
+            if (bridge != null) bridge.disconnect();
+        } catch (Exception e) {
+            Log.w(TAG, "bridge.disconnect during FGS timeout", e);
+        }
+        try {
+            stopForeground(Service.STOP_FOREGROUND_REMOVE);
+        } catch (Exception e) {
+            Log.w(TAG, "stopForeground during FGS timeout", e);
+        }
+        // Bound Activities may keep the Service instance alive until unbind;
+        // stopSelf still clears the start sticky / FGS obligation promptly.
+        stopSelf();
     }
 
     @Nullable
