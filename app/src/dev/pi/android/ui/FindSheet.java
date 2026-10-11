@@ -49,6 +49,7 @@ public final class FindSheet {
         if (dialog == null) {
             dialog = new BottomSheetDialog(activity, R.style.PickerBottomSheet);
             View root = LayoutInflater.from(activity).inflate(R.layout.sheet_find, null, false);
+            dev.pi.android.util.AppFonts.applyTree(root);
             dialog.setContentView(root);
             EditText query = root.findViewById(R.id.find_query);
             count = root.findViewById(R.id.find_count);

@@ -1,5 +1,6 @@
 package dev.pi.android.util;
 
+import android.app.Activity;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Typeface;
@@ -7,8 +8,12 @@ import android.graphics.fonts.Font;
 import android.graphics.fonts.FontFamily;
 import android.os.Build;
 import android.util.Log;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.core.content.res.ResourcesCompat;
 
 import java.io.IOException;
@@ -16,12 +21,16 @@ import java.io.IOException;
 import dev.pi.android.R;
 
 /**
- * 终端 / 代码块字体：默认 MesloLGLDZ Nerd Font Mono（大行距、点状 0），
- * 可选系统等宽。CJK 缺字走系统 sans 回退（API 29+ CustomFallbackBuilder）。
+ * App-wide UI / terminal / code font: default MesloLGLDZ Nerd Font Mono
+ * (large line gap, dotted 0), optional system monospace. CJK glyphs fall back
+ * to system sans (API 29+ {@link Typeface.CustomFallbackBuilder}).
  *
- * <p>Nerd Font 文件约 2+ MB：{@link Typeface} 必须进程内静态缓存。
- * MessageAdapter / 代码块每次 bind 都会调 {@link #mono} / {@link #code}，
- * 绝不能在每次调用时 {@code new Font.Builder(...).build()}。
+ * <p>Nerd Font ~2+ MB: {@link Typeface} is process-wide static-cached once.
+ * Never call {@code new Font.Builder(...).build()} on every bind.
+ *
+ * <p>Theme XML uses {@code @font/meslo_lgldz_nf}; {@link #beforeContentView}
+ * switches to {@code AppTheme.System} when the user picks system mono.
+ * {@link #applyTree} covers programmatic / missed TextViews.
  */
 public final class AppFonts {
     private static final String TAG = "AppFonts";
@@ -61,6 +70,45 @@ public final class AppFonts {
         prefs(ctx).edit().putFloat(K_SIZE_SP, clamped).apply();
     }
 
+    /** Signature for Activity recreate when font prefs change. */
+    @NonNull
+    public static String signature(@NonNull Context ctx) {
+        return family(ctx) + ":" + sizeSp(ctx);
+    }
+
+    /**
+     * Call after {@code super.onCreate}, before {@code setContentView}.
+     * Applies {@code AppTheme.System} when the user chose system mono.
+     */
+    public static void beforeContentView(@NonNull Activity activity) {
+        if (FAMILY_SYSTEM.equals(family(activity))) {
+            activity.setTheme(R.style.AppTheme_System);
+        }
+    }
+
+    /** After {@code setContentView} / sheet inflate: stamp all TextViews. */
+    public static void afterContentView(@NonNull Activity activity) {
+        View root = activity.findViewById(android.R.id.content);
+        if (root != null) applyTree(root);
+    }
+
+    /** Apply cached UI typeface to every TextView under {@code root}. */
+    public static void applyTree(@Nullable View root) {
+        if (root == null) return;
+        if (root instanceof TextView) {
+            TextView tv = (TextView) root;
+            Typeface current = tv.getTypeface();
+            boolean bold = current != null && current.isBold();
+            tv.setTypeface(mono(root.getContext(), bold));
+        }
+        if (root instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) root;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                applyTree(g.getChildAt(i));
+            }
+        }
+    }
+
     @NonNull
     public static Typeface mono(@NonNull Context ctx, boolean bold) {
         if (FAMILY_SYSTEM.equals(family(ctx))) {
@@ -69,7 +117,7 @@ public final class AppFonts {
         return nerdWithCjkFallback(ctx.getApplicationContext(), bold);
     }
 
-    /** 聊天代码块：同样跟随设置。 */
+    /** 聊天代码块 / UI：同样跟随设置。 */
     @NonNull
     public static Typeface code(@NonNull Context ctx) {
         return mono(ctx, false);

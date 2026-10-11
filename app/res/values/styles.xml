@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Default app-wide MesloLGLDZ Nerd (+ bold via font-family XML). CJK via AppFonts runtime fallback. -->
     <style name="AppTheme" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="colorPrimary">@color/md_theme_primary</item>
         <item name="colorOnPrimary">@color/md_theme_onPrimary</item>
@@ -15,6 +16,82 @@
         <item name="android:textColorSecondary">@color/text_secondary</item>
         <item name="popupMenuBackground">@color/bg_elevated</item>
         <item name="android:windowLightStatusBar">true</item>
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
+        <item name="fontFamily">@font/meslo_lgldz_nf</item>
+        <item name="android:textViewStyle">@style/Widget.Pi.TextView</item>
+        <item name="editTextStyle">@style/Widget.Pi.EditText</item>
+        <item name="materialButtonStyle">@style/Widget.Pi.Button</item>
+        <item name="borderlessButtonStyle">@style/Widget.Pi.Button.Text</item>
+        <item name="materialAlertDialogTheme">@style/PiMaterialAlertDialog</item>
+        <item name="textAppearanceBodyLarge">@style/TextAppearance.Pi.BodyLarge</item>
+        <item name="textAppearanceBodyMedium">@style/TextAppearance.Pi.BodyMedium</item>
+        <item name="textAppearanceBodySmall">@style/TextAppearance.Pi.BodySmall</item>
+        <item name="textAppearanceLabelLarge">@style/TextAppearance.Pi.LabelLarge</item>
+        <item name="textAppearanceLabelMedium">@style/TextAppearance.Pi.LabelMedium</item>
+        <item name="textAppearanceLabelSmall">@style/TextAppearance.Pi.LabelSmall</item>
+        <item name="textAppearanceTitleLarge">@style/TextAppearance.Pi.TitleLarge</item>
+        <item name="textAppearanceTitleMedium">@style/TextAppearance.Pi.TitleMedium</item>
+        <item name="textAppearanceTitleSmall">@style/TextAppearance.Pi.TitleSmall</item>
+    </style>
+
+    <!-- Settings → 系统等宽: same colors, system monospace (no Nerd glyphs). -->
+    <style name="AppTheme.System" parent="AppTheme">
+        <item name="android:fontFamily">monospace</item>
+        <item name="fontFamily">monospace</item>
+    </style>
+
+    <style name="Widget.Pi.TextView" parent="@android:style/Widget.TextView">
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
+    </style>
+
+    <style name="Widget.Pi.EditText" parent="Widget.AppCompat.EditText">
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
+    </style>
+
+    <style name="Widget.Pi.Button" parent="Widget.Material3.Button">
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
+        <item name="android:textAppearance">@style/TextAppearance.Pi.LabelLarge</item>
+    </style>
+
+    <style name="Widget.Pi.Button.Text" parent="Widget.Material3.Button.TextButton">
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
+    </style>
+
+    <style name="TextAppearance.Pi.BodyLarge" parent="TextAppearance.Material3.BodyLarge">
+        <item name="fontFamily">@font/meslo_lgldz_nf</item>
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
+    </style>
+    <style name="TextAppearance.Pi.BodyMedium" parent="TextAppearance.Material3.BodyMedium">
+        <item name="fontFamily">@font/meslo_lgldz_nf</item>
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
+    </style>
+    <style name="TextAppearance.Pi.BodySmall" parent="TextAppearance.Material3.BodySmall">
+        <item name="fontFamily">@font/meslo_lgldz_nf</item>
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
+    </style>
+    <style name="TextAppearance.Pi.LabelLarge" parent="TextAppearance.Material3.LabelLarge">
+        <item name="fontFamily">@font/meslo_lgldz_nf</item>
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
+    </style>
+    <style name="TextAppearance.Pi.LabelMedium" parent="TextAppearance.Material3.LabelMedium">
+        <item name="fontFamily">@font/meslo_lgldz_nf</item>
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
+    </style>
+    <style name="TextAppearance.Pi.LabelSmall" parent="TextAppearance.Material3.LabelSmall">
+        <item name="fontFamily">@font/meslo_lgldz_nf</item>
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
+    </style>
+    <style name="TextAppearance.Pi.TitleLarge" parent="TextAppearance.Material3.TitleLarge">
+        <item name="fontFamily">@font/meslo_lgldz_nf</item>
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
+    </style>
+    <style name="TextAppearance.Pi.TitleMedium" parent="TextAppearance.Material3.TitleMedium">
+        <item name="fontFamily">@font/meslo_lgldz_nf</item>
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
+    </style>
+    <style name="TextAppearance.Pi.TitleSmall" parent="TextAppearance.Material3.TitleSmall">
+        <item name="fontFamily">@font/meslo_lgldz_nf</item>
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
     </style>
 
     <style name="SessionsBottomSheet" parent="ThemeOverlay.Material3.BottomSheetDialog">
@@ -23,6 +100,8 @@
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@color/bg_base</item>
         <item name="android:windowBackground">@color/bg_base</item>
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
+        <item name="fontFamily">@font/meslo_lgldz_nf</item>
     </style>
 
     <style name="SessionsBottomSheetStyle" parent="Widget.Material3.BottomSheet">
@@ -40,6 +119,8 @@
         <item name="android:windowIsFloating">false</item>
         <item name="android:navigationBarColor">@color/bg_elevated</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
+        <item name="fontFamily">@font/meslo_lgldz_nf</item>
     </style>
 
     <style name="PickerBottomSheetStyle" parent="Widget.Material3.BottomSheet.Modal">
@@ -58,9 +139,16 @@
     <style name="PiMaterialAlertDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
         <item name="colorPrimary">@color/md_theme_primary</item>
         <item name="colorOnPrimary">@color/md_theme_onPrimary</item>
+        <!-- Keep secondary off lavender so dialogs match Tokyo Night chrome. -->
+        <item name="colorSecondary">@color/md_theme_primary</item>
+        <item name="colorOnSecondary">@color/md_theme_onPrimary</item>
         <item name="colorSurface">@color/bg_elevated</item>
         <item name="colorOnSurface">@color/text_primary</item>
         <item name="android:colorBackground">@color/bg_elevated</item>
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
+        <item name="fontFamily">@font/meslo_lgldz_nf</item>
+        <item name="buttonBarPositiveButtonStyle">@style/Widget.Pi.Button.Text</item>
+        <item name="buttonBarNegativeButtonStyle">@style/Widget.Pi.Button.Text</item>
         <item name="materialAlertDialogTitleTextStyle">@style/PiAlertTitle</item>
         <item name="materialAlertDialogBodyTextStyle">@style/PiAlertBody</item>
         <item name="shapeAppearanceOverlay">@style/PiAlertShape</item>
@@ -70,12 +158,16 @@
         <item name="android:textColor">@color/text_primary</item>
         <item name="android:textSize">20sp</item>
         <item name="android:textStyle">bold</item>
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
+        <item name="fontFamily">@font/meslo_lgldz_nf</item>
     </style>
 
     <style name="PiAlertBody" parent="MaterialAlertDialog.Material3.Body.Text">
         <item name="android:textColor">@color/text_secondary</item>
         <item name="android:textSize">15sp</item>
         <item name="android:lineSpacingMultiplier">1.25</item>
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
+        <item name="fontFamily">@font/meslo_lgldz_nf</item>
     </style>
 
     <style name="PiAlertShape" parent="">
@@ -84,6 +176,7 @@
     </style>
 
     <style name="ComposerText">
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
         <item name="android:textColor">@color/text_primary</item>
         <item name="android:textColorHint">@color/text_muted</item>
         <item name="android:textSize">14sp</item>
@@ -91,6 +184,7 @@
     </style>
 
     <style name="ToolbarTitle">
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
         <item name="android:textColor">@color/text_primary</item>
         <item name="android:textSize">14.5sp</item>
         <item name="android:textStyle">bold</item>
@@ -100,6 +194,7 @@
     </style>
 
     <style name="StatusChipText">
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
         <item name="android:textColor">@color/text_secondary</item>
         <item name="android:textSize">11sp</item>
         <item name="android:maxLines">1</item>
@@ -108,7 +203,7 @@
 
     <!-- Typography only — never force maxLines here (clips notice/code/tool bodies). -->
     <style name="MonoMetaText">
-        <item name="android:fontFamily">@font/meslo_lgldz_nf_regular</item>
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
         <item name="android:textSize">11sp</item>
         <item name="android:textColor">@color/text_muted</item>
     </style>
@@ -120,29 +215,34 @@
     </style>
 
     <style name="MessageActionText">
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
         <item name="android:textColor">@color/text_muted</item>
         <item name="android:textSize">11.5sp</item>
     </style>
 
     <style name="AgentBodyText">
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
         <item name="android:textColor">@color/text_primary</item>
         <item name="android:textSize">14sp</item>
         <item name="android:lineSpacingMultiplier">1.35</item>
     </style>
 
     <style name="UserBubbleText">
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
         <item name="android:textColor">@color/text_primary</item>
         <item name="android:textSize">14sp</item>
         <item name="android:lineSpacingMultiplier">1.3</item>
     </style>
 
     <style name="SystemChipText">
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
         <item name="android:textColor">@color/text_muted</item>
         <item name="android:textSize">12.5sp</item>
         <item name="android:gravity">center</item>
     </style>
 
     <style name="SettingsLabel">
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
         <item name="android:textColor">@color/text_secondary</item>
         <item name="android:textSize">13sp</item>
         <item name="android:paddingTop">12dp</item>
@@ -150,6 +250,7 @@
     </style>
 
     <style name="SettingsField">
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
         <item name="android:textColor">@color/text_primary</item>
         <item name="android:textColorHint">@color/text_muted</item>
         <item name="android:textSize">15sp</item>
@@ -159,6 +260,7 @@
     </style>
 
     <style name="SettingsSectionHeader">
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
         <item name="android:textColor">@color/text_secondary</item>
         <item name="android:textSize">13sp</item>
         <item name="android:textStyle">bold</item>

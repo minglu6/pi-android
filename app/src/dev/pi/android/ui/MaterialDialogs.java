@@ -13,6 +13,7 @@ import androidx.annotation.StringRes;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
 import dev.pi.android.R;
+import dev.pi.android.util.AppFonts;
 
 /** Material 3 风格确认 / 输入对话框（圆角 28dp，跟随应用主题）。 */
 public final class MaterialDialogs {
@@ -35,10 +36,13 @@ public final class MaterialDialogs {
                                @StringRes int positiveRes, @NonNull ConfirmListener ok) {
         MaterialAlertDialogBuilder b = new MaterialAlertDialogBuilder(ctx, R.style.PiMaterialAlertDialog);
         if (titleRes != 0) b.setTitle(titleRes);
-        b.setMessage(messageRes)
+        android.app.Dialog dialog = b.setMessage(messageRes)
                 .setPositiveButton(positiveRes, (d, w) -> ok.onConfirm())
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
+        android.view.View root = dialog.getWindow() != null
+                ? dialog.getWindow().getDecorView() : null;
+        if (root != null) AppFonts.applyTree(root);
     }
 
     public static void promptText(@NonNull Context ctx, @StringRes int titleRes, @StringRes int hintRes,
@@ -60,6 +64,7 @@ public final class MaterialDialogs {
         float density = ctx.getResources().getDisplayMetrics().density;
         int pad = Math.round(24 * density);
         EditText input = new EditText(ctx);
+        input.setTypeface(AppFonts.mono(ctx, false));
         input.setInputType(inputType);
         input.setHint(hintRes);
         input.setText(prefill == null ? "" : prefill);
@@ -74,12 +79,15 @@ public final class MaterialDialogs {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.setMargins(pad, Math.round(8 * density), pad, 0);
         wrap.addView(input, lp);
-        new MaterialAlertDialogBuilder(ctx, R.style.PiMaterialAlertDialog)
+        android.app.Dialog dialog = new MaterialAlertDialogBuilder(ctx, R.style.PiMaterialAlertDialog)
                 .setTitle(titleRes)
                 .setView(wrap)
                 .setPositiveButton(android.R.string.ok, (d, w) ->
                         ok.onSubmit(input.getText().toString().trim()))
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
+        android.view.View root = dialog.getWindow() != null
+                ? dialog.getWindow().getDecorView() : null;
+        if (root != null) AppFonts.applyTree(root);
     }
 }

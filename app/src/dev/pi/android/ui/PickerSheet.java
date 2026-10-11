@@ -63,6 +63,7 @@ public final class PickerSheet {
         this.activity = activity;
         dialog = new BottomSheetDialog(activity, R.style.PickerBottomSheet);
         View root = LayoutInflater.from(activity).inflate(R.layout.sheet_picker, null, false);
+        dev.pi.android.util.AppFonts.applyTree(root);
         dialog.setContentView(root);
 
         TextView title = root.findViewById(R.id.picker_title);
@@ -147,6 +148,11 @@ public final class PickerSheet {
             footerAction.setText(label);
             footerAction.setVisibility(View.VISIBLE);
         }
+    }
+
+    /** Override the centered empty-list message (e.g. input history). */
+    public void setEmptyMessage(@NonNull CharSequence message) {
+        if (empty != null) empty.setText(message);
     }
 
     public void setItems(@NonNull List<PickerItem> items) {

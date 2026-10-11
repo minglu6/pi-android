@@ -251,14 +251,17 @@ public final class Pickers {
             case "none":
                 return ctx.getString(R.string.thinking_desc_off);
             case "minimal":
+                return ctx.getString(R.string.thinking_desc_minimal);
             case "low":
                 return ctx.getString(R.string.thinking_desc_low);
             case "medium":
                 return ctx.getString(R.string.thinking_desc_medium);
             case "high":
-            case "xhigh":
-            case "max":
                 return ctx.getString(R.string.thinking_desc_high);
+            case "xhigh":
+                return ctx.getString(R.string.thinking_desc_xhigh);
+            case "max":
+                return ctx.getString(R.string.thinking_desc_max);
             default:
                 return ctx.getString(R.string.thinking_desc_generic);
         }

@@ -172,7 +172,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private String pendingScheduleRpc = "";
     private String pendingScheduleListRpc = "";
     private String pendingScheduleCancelRpc = "";
-    @Nullable private PickerSheet schedulesSheet;
+    @Nullable private SchedulesSheet schedulesSheet;
     private String lastMentionQuery = "";
     private long lastMentionAt;
     private int pasteGuard;
@@ -211,6 +211,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private String historyRequest = "";
     private String pendingPrompt;
     private String lastConfig;
+    private String lastFontSig = "";
     private String currentSessionPath = "";
     private String currentSessionName = "";
     private final java.util.List<CharSequence> modelLabels = new java.util.ArrayList<>();
@@ -241,9 +242,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     protected void onCreate(Bundle savedInstanceState) {
         SettingsActivity.applySavedTheme(this);
         super.onCreate(savedInstanceState);
+        AppFonts.beforeContentView(this);
         AgentState.get().loadCache(this);
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         setContentView(R.layout.activity_main);
+        AppFonts.afterContentView(this);
+        lastFontSig = AppFonts.signature(this);
 
         statusText = findViewById(R.id.status_text);
         extWidgetView = findViewById(R.id.ext_widget);
@@ -739,6 +743,13 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     protected void onResume() {
         super.onResume();
         resumed = true;
+        String fontSig = AppFonts.signature(this);
+        if (lastFontSig != null && !lastFontSig.isEmpty() && !fontSig.equals(lastFontSig)) {
+            lastFontSig = fontSig;
+            recreate();
+            return;
+        }
+        lastFontSig = fontSig;
         restoreFromAgentState();
         if (serviceBound && service != null) {
             service.setHost(this);
@@ -1368,10 +1379,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     private void openInputHistorySheet() {
         java.util.List<String> list = InputHistory.list(this);
-        if (list.isEmpty()) {
-            Toast.makeText(this, R.string.input_history_empty, Toast.LENGTH_LONG).show();
-            return;
-        }
         java.util.List<PickerItem> items = new java.util.ArrayList<>();
         // Newest first for the sheet.
         for (int i = list.size() - 1; i >= 0; i--) {
@@ -1393,8 +1400,20 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
             updateSendEnabled();
         });
+        sheet.setEmptyMessage(getString(R.string.input_history_empty_body));
         sheet.setItems(items);
         sheet.show();
+    }
+
+    /** Prefill composer (schedules drafts, etc.) without sending. */
+    private void prefillComposer(@NonNull String text) {
+        if (composer == null) return;
+        historyBrowseIndex = -1;
+        historyBrowseDraft = null;
+        composer.setText(text);
+        composer.setSelection(composer.getText().length());
+        composer.requestFocus();
+        updateSendEnabled();
     }
 
     private void applySessionStats(@Nullable JSONObject data) {
@@ -2529,12 +2548,18 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private void showInstructionsEditor() {
-        MaterialDialogs.promptText(this, R.string.instructions_title, R.string.instructions_hint,
-                sessionInstructions,
-                android.text.InputType.TYPE_CLASS_TEXT
-                        | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
-                        | android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES,
-                this::saveInstructions);
+        new EditorSheet(this, R.string.instructions_title, R.string.instructions_hint,
+                sessionInstructions, new EditorSheet.Listener() {
+            @Override
+            public void onSave(@NonNull String text) {
+                saveInstructions(text);
+            }
+
+            @Override
+            public void onClear() {
+                saveInstructions("");
+            }
+        }).show();
     }
 
     private void saveInstructions(@NonNull String text) {
@@ -3202,22 +3227,24 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
             return;
         }
-        schedulesSheet = new PickerSheet(this, R.string.schedules_title, false, item -> {
-            if (!(item.payload instanceof String)) return;
-            String sid = (String) item.payload;
-            MaterialDialogs.confirm(this, R.string.schedules_cancel, R.string.schedules_cancel,
-                    android.R.string.ok, () -> {
-                        JSONObject params = new JSONObject();
-                        try {
-                            params.put("scheduleId", sid);
-                        } catch (Exception e) {
-                            throw new IllegalStateException("cancel_schedule", e);
-                        }
-                        pendingScheduleCancelRpc = rpc("cancel_schedule", params);
-                    });
+        schedulesSheet = new SchedulesSheet(this, new SchedulesSheet.Listener() {
+            @Override
+            public void onCancel(@NonNull String scheduleId) {
+                JSONObject params = new JSONObject();
+                try {
+                    params.put("scheduleId", scheduleId);
+                } catch (Exception e) {
+                    throw new IllegalStateException("cancel_schedule", e);
+                }
+                pendingScheduleCancelRpc = rpc("cancel_schedule", params);
+            }
+
+            @Override
+            public void onComposeDraft(@NonNull String draft) {
+                prefillComposer(draft);
+            }
         });
-        schedulesSheet.setItems(java.util.Collections.singletonList(
-                PickerItem.row(getString(R.string.schedules_loading), null, "", false)));
+        schedulesSheet.setLoading();
         schedulesSheet.show();
         pendingScheduleListRpc = rpc("list_schedules", null);
     }
@@ -3225,7 +3252,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private void showSchedulesData(@Nullable JSONObject data) {
         if (schedulesSheet == null || data == null) return;
         org.json.JSONArray arr = data.optJSONArray("schedules");
-        java.util.List<PickerItem> items = new java.util.ArrayList<>();
+        java.util.List<SchedulesSheet.Row> items = new java.util.ArrayList<>();
         if (arr != null) {
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject s = arr.optJSONObject(i);
@@ -3235,15 +3262,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 String text = s.optString("text", "");
                 String when = s.optString("nextLabel", "");
                 String every = s.optString("everyLabel", "");
-                String title = when.isEmpty() ? text : when + " · " + text;
-                String sub = every.isEmpty() ? getString(R.string.schedules_cancel) : every;
-                items.add(PickerItem.row(title, sub, id, false));
+                items.add(new SchedulesSheet.Row(id, when, text, every.isEmpty() ? null : every));
             }
         }
-        if (items.isEmpty()) {
-            items.add(PickerItem.row(getString(R.string.schedules_empty), null, "", false));
-        }
-        schedulesSheet.setItems(items);
+        schedulesSheet.setSchedules(items);
     }
 
     // ---------- Pocket ports: @ / !shell / paste / Files / Changes / git ----------
@@ -3896,7 +3918,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         Toast.makeText(this, getString(R.string.mention_insert, path), Toast.LENGTH_SHORT).show();
         // Offer optional contents attach for small text files
-        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.PiMaterialAlertDialog)
+        android.app.Dialog mentionDlg =
+                new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.PiMaterialAlertDialog)
                 .setTitle("@" + path)
                 .setItems(new CharSequence[]{
                         getString(R.string.mention_path_only),
@@ -3905,6 +3928,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                     if (which == 1) attachMentionContents(path);
                 })
                 .show();
+        if (mentionDlg.getWindow() != null) {
+            AppFonts.applyTree(mentionDlg.getWindow().getDecorView());
+        }
     }
 
     private void attachMentionContents(String path) {
@@ -3945,11 +3971,15 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         tv.setTextColor(ContextCompat.getColor(this, R.color.text_primary));
         tv.setText(body == null ? "" : body);
         scroll.addView(tv);
-        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.PiMaterialAlertDialog)
+        android.app.Dialog viewer =
+                new com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.PiMaterialAlertDialog)
                 .setTitle(title)
                 .setView(scroll)
                 .setPositiveButton(android.R.string.ok, null)
                 .show();
+        if (viewer.getWindow() != null) {
+            AppFonts.applyTree(viewer.getWindow().getDecorView());
+        }
     }
 
     private void showImageFullscreen(ChatMessage.AttachmentData attachment) {

@@ -17,7 +17,7 @@
         android:layout_height="wrap_content"
         android:layout_marginEnd="12dp"
         android:ellipsize="end"
-        android:fontFamily="monospace"
+        android:fontFamily="@font/meslo_lgldz_nf"
         android:maxWidth="160dp"
         android:maxLines="1"
         android:textColor="@color/pi_blue"

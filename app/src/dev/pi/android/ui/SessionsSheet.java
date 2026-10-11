@@ -176,6 +176,7 @@ public final class SessionsSheet {
         if (dialog != null) return;
         dialog = new BottomSheetDialog(activity, R.style.SessionsBottomSheet);
         View root = LayoutInflater.from(activity).inflate(R.layout.sheet_sessions, null, false);
+        dev.pi.android.util.AppFonts.applyTree(root);
         dialog.setContentView(root);
 
         ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {

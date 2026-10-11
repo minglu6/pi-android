@@ -14,6 +14,7 @@ import java.util.List;
 
 import dev.pi.android.R;
 import dev.pi.android.model.PickerItem;
+import dev.pi.android.util.AppFonts;
 
 public class PickerListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
@@ -100,11 +101,14 @@ public class PickerListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHol
         }
 
         void bind(PickerItem item, Listener listener) {
+            // Titles + Chinese subtitles: AppFonts (Meslo+CJK fallback, or system mono).
+            title.setTypeface(AppFonts.mono(itemView.getContext(), false));
             title.setText(item.title);
             if (item.subtitle == null || item.subtitle.isEmpty()) {
                 subtitle.setVisibility(View.GONE);
             } else {
                 subtitle.setVisibility(View.VISIBLE);
+                subtitle.setTypeface(AppFonts.mono(itemView.getContext(), false));
                 subtitle.setText(item.subtitle);
             }
             check.setVisibility(item.selected ? View.VISIBLE : View.GONE);

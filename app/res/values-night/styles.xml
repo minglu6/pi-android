@@ -15,5 +15,22 @@
         <item name="android:textColorSecondary">@color/text_secondary</item>
         <item name="popupMenuBackground">@color/bg_elevated</item>
         <item name="android:windowLightStatusBar">false</item>
+        <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
+        <item name="fontFamily">@font/meslo_lgldz_nf</item>
+        <item name="android:textViewStyle">@style/Widget.Pi.TextView</item>
+        <item name="editTextStyle">@style/Widget.Pi.EditText</item>
+        <item name="materialButtonStyle">@style/Widget.Pi.Button</item>
+        <item name="borderlessButtonStyle">@style/Widget.Pi.Button.Text</item>
+        <item name="materialAlertDialogTheme">@style/PiMaterialAlertDialog</item>
+        <item name="textAppearanceBodyLarge">@style/TextAppearance.Pi.BodyLarge</item>
+        <item name="textAppearanceBodyMedium">@style/TextAppearance.Pi.BodyMedium</item>
+        <item name="textAppearanceBodySmall">@style/TextAppearance.Pi.BodySmall</item>
+        <item name="textAppearanceLabelLarge">@style/TextAppearance.Pi.LabelLarge</item>
+        <item name="textAppearanceLabelMedium">@style/TextAppearance.Pi.LabelMedium</item>
+        <item name="textAppearanceLabelSmall">@style/TextAppearance.Pi.LabelSmall</item>
+        <item name="textAppearanceTitleLarge">@style/TextAppearance.Pi.TitleLarge</item>
+        <item name="textAppearanceTitleMedium">@style/TextAppearance.Pi.TitleMedium</item>
+        <item name="textAppearanceTitleSmall">@style/TextAppearance.Pi.TitleSmall</item>
     </style>
 </resources>
+
