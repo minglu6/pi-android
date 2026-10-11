@@ -60,6 +60,7 @@ import dev.pi.android.model.ChatMessage;
 import dev.pi.android.model.PickerItem;
 import dev.pi.android.model.SlashCommand;
 import dev.pi.android.util.AppFonts;
+import dev.pi.android.util.InputHistory;
 import dev.pi.android.util.SlashCommandStore;
 
 /**
@@ -163,6 +164,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private String pendingInstructionsRpc = "";
     private String sessionInstructions = "";
     private boolean instructionsEditorPending;
+    /** Composer ↑/↓ browse index into InputHistory; -1 = not browsing. */
+    private int historyBrowseIndex = -1;
+    /** Draft text saved when starting ↑ browse. */
+    @Nullable private String historyBrowseDraft;
     private String pendingUntilRpc = "";
     private String pendingScheduleRpc = "";
     private String pendingScheduleListRpc = "";
@@ -478,12 +483,20 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             return false;
         });
         composer.setOnKeyListener((v, keyCode, event) -> {
+            if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
             InputDevice device = event.getDevice();
             boolean physicalKeyboard = device != null && !device.isVirtual()
                     && device.getKeyboardType() == InputDevice.KEYBOARD_TYPE_ALPHABETIC;
             if (!streaming && physicalKeyboard && keyCode == KeyEvent.KEYCODE_ENTER
-                    && event.getAction() == KeyEvent.ACTION_DOWN && !event.isShiftPressed()
-                    && BaseInputConnection.getComposingSpanStart(composer.getText()) < 0) return submitComposer();
+                    && !event.isShiftPressed()
+                    && BaseInputConnection.getComposingSpanStart(composer.getText()) < 0) {
+                return submitComposer();
+            }
+            // Pocket: ↑/↓ browse what this device sent before (DPAD or arrow keys).
+            if ((keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN)
+                    && browseComposerHistory(keyCode == KeyEvent.KEYCODE_DPAD_UP)) {
+                return true;
+            }
             return false;
         });
         composer.addTextChangedListener(new TextWatcher() {
@@ -625,12 +638,69 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         return true;
     }
 
+    /** Remember sent text and reset ↑ browse state. */
+    private void noteComposerHistory(@Nullable String text) {
+        if (text == null || text.trim().isEmpty()) return;
+        InputHistory.remember(this, text);
+        historyBrowseIndex = -1;
+        historyBrowseDraft = null;
+    }
+
+    private void clearComposerRemembering(@Nullable String text) {
+        noteComposerHistory(text);
+        if (composer != null) composer.setText("");
+    }
+
+    /**
+     * Pocket history browse: ↑ at start/empty goes back through sent messages;
+     * ↓ while browsing goes forward, then restores the draft.
+     * @return true if the key was consumed
+     */
+    private boolean browseComposerHistory(boolean up) {
+        if (composer == null) return false;
+        Editable ed = composer.getText();
+        String text = ed == null ? "" : ed.toString();
+        int start = composer.getSelectionStart();
+        int end = composer.getSelectionEnd();
+        if (start != end) return false;
+        java.util.List<String> list = InputHistory.list(this);
+        if (list.isEmpty()) return false;
+        if (up) {
+            boolean atStart = text.isEmpty() || start <= 0
+                    || (historyBrowseIndex >= 0 && !text.substring(0, Math.min(start, text.length())).contains("\n"));
+            if (!atStart) return false;
+            int index = (historyBrowseIndex < 0 ? list.size() : historyBrowseIndex) - 1;
+            if (index < 0) return false;
+            if (historyBrowseIndex < 0) historyBrowseDraft = text;
+            historyBrowseIndex = index;
+            composer.setText(list.get(index));
+            composer.setSelection(composer.getText().length());
+            return true;
+        }
+        // Down
+        if (historyBrowseIndex < 0) return false;
+        if (end < text.length() && text.substring(end).contains("\n")) return false;
+        int index = historyBrowseIndex + 1;
+        if (index < list.size()) {
+            historyBrowseIndex = index;
+            composer.setText(list.get(index));
+            composer.setSelection(composer.getText().length());
+        } else {
+            String draft = historyBrowseDraft == null ? "" : historyBrowseDraft;
+            historyBrowseIndex = -1;
+            historyBrowseDraft = null;
+            composer.setText(draft);
+            composer.setSelection(composer.getText().length());
+        }
+        return true;
+    }
+
     private void requestSend(String text) {
         android.util.Log.i(TAG, "requestSend len=" + text.length());
         pendingPrompt = text;
         if (isConnected()) {
             pendingPrompt = null;
-            composer.setText("");
+            clearComposerRemembering(text);
             resetTranscript();
             adapter.add(new ChatMessage(ChatMessage.Role.USER, text));
             historyRequest = "";
@@ -1249,6 +1319,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         addOverflowItem(m, 8, 4, R.string.menu_changes, R.drawable.ic_menu_changes);
         addOverflowItem(m, 9, 5, R.string.menu_schedules, R.drawable.ic_menu_schedules);
         addOverflowItem(m, 10, 6, R.string.menu_instructions, R.drawable.ic_menu_instructions);
+        addOverflowItem(m, 11, 7, R.string.menu_input_history, R.drawable.ic_menu_history);
         menu.setOnMenuItemClickListener(this::onOverflowItem);
         menu.show();
     }
@@ -1287,9 +1358,43 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             case 10:
                 openInstructionsEditor();
                 return true;
+            case 11:
+                openInputHistorySheet();
+                return true;
             default:
                 return false;
         }
+    }
+
+    private void openInputHistorySheet() {
+        java.util.List<String> list = InputHistory.list(this);
+        if (list.isEmpty()) {
+            Toast.makeText(this, R.string.input_history_empty, Toast.LENGTH_LONG).show();
+            return;
+        }
+        java.util.List<PickerItem> items = new java.util.ArrayList<>();
+        // Newest first for the sheet.
+        for (int i = list.size() - 1; i >= 0; i--) {
+            String s = list.get(i);
+            String title = s.length() > 80 ? s.substring(0, 80) + "…" : s;
+            String oneLine = title.replace('\n', ' ');
+            items.add(PickerItem.row(oneLine, null, s, false));
+        }
+        PickerSheet sheet = new PickerSheet(this, R.string.input_history_title, true, item -> {
+            Object p = item.payload;
+            if (!(p instanceof String)) return;
+            String value = (String) p;
+            if (composer != null) {
+                historyBrowseIndex = -1;
+                historyBrowseDraft = null;
+                composer.setText(value);
+                composer.setSelection(composer.getText().length());
+                composer.requestFocus();
+            }
+            updateSendEnabled();
+        });
+        sheet.setItems(items);
+        sheet.show();
     }
 
     private void applySessionStats(@Nullable JSONObject data) {
@@ -1549,7 +1654,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             return;
         }
         hideSlashSuggestions();
-        composer.setText("");
+        clearComposerRemembering(text);
         adapter.add(new ChatMessage(ChatMessage.Role.USER, text));
         JSONObject params = new JSONObject();
         try {
@@ -1728,14 +1833,14 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             String cmd = text.substring(exclude ? 2 : 1).trim();
             if (!cmd.isEmpty()) {
                 runShellCommand(cmd, exclude);
-                composer.setText("");
+                clearComposerRemembering(text);
                 return;
             }
         }
         // Pocket plan mode: /plan
         if (!hasAttach && text.equalsIgnoreCase("/plan")) {
             hideSlashSuggestions();
-            composer.setText("");
+            clearComposerRemembering(text);
             togglePlanMode();
             return;
         }
@@ -1747,7 +1852,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 return;
             }
             hideSlashSuggestions();
-            composer.setText("");
+            clearComposerRemembering(text);
             String arg = text.length() > 13 ? text.substring(13).trim() : "";
             if (arg.isEmpty()) {
                 openInstructionsEditor();
@@ -1765,7 +1870,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
             String arg = text.length() > 9 ? text.substring(9).trim() : "";
             hideSlashSuggestions();
-            composer.setText("");
+            clearComposerRemembering(text);
             if (arg.isEmpty()) {
                 openSchedulesSheet();
                 return;
@@ -1794,7 +1899,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 return;
             }
             hideSlashSuggestions();
-            composer.setText("");
+            clearComposerRemembering(text);
             JSONObject params = new JSONObject();
             try {
                 params.put("command", check);
@@ -1854,7 +1959,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private void dispatchPrompt(String text,
                                 @Nullable java.util.List<AttachmentController.Item> submitted,
                                 @Nullable JSONArray attachmentIds) {
-        composer.setText("");
+        clearComposerRemembering(text);
         resetTranscript();
         ChatMessage user = new ChatMessage(ChatMessage.Role.USER, text);
         if (submitted != null) {
