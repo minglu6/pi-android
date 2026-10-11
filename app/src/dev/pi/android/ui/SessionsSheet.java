@@ -30,7 +30,15 @@ import java.util.Calendar;
 import java.util.List;
 
 import dev.pi.android.R;
+import android.widget.Toast;
+
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+
 import dev.pi.android.model.SessionEntry;
+import dev.pi.android.util.SessionPins;
 import dev.pi.android.util.SessionText;
 
 /**
@@ -226,6 +234,11 @@ public final class SessionsSheet {
             public void onLongPress(SessionEntry entry, View anchor) {
                 showActions(entry, anchor);
             }
+
+            @Override
+            public void onPinChanged() {
+                applyFilter();
+            }
         });
         list.setAdapter(adapter);
 
@@ -309,7 +322,7 @@ public final class SessionsSheet {
                     .toLowerCase(java.util.Locale.ROOT);
             if (hay.contains(q)) filtered.add(e);
         }
-        List<SessionEntry> withHeaders = withDateHeaders(filtered);
+        List<SessionEntry> withHeaders = withPinnedAndDateHeaders(filtered);
         if (adapter != null) adapter.replaceAll(withHeaders);
         boolean empty = filtered.isEmpty();
         if (emptyView != null) {
@@ -324,6 +337,35 @@ public final class SessionsSheet {
                 }
             }
         }
+    }
+
+    /** Pinned first (pin order), then date buckets for the rest. */
+    private List<SessionEntry> withPinnedAndDateHeaders(List<SessionEntry> sessions) {
+        List<String> pinOrder = SessionPins.list(activity);
+        Map<String, SessionEntry> byPath = new HashMap<>();
+        for (SessionEntry e : sessions) {
+            if (e.path != null) byPath.put(e.path, e);
+        }
+        List<SessionEntry> pinned = new ArrayList<>();
+        Set<String> pinnedPaths = new HashSet<>();
+        for (String path : pinOrder) {
+            SessionEntry e = byPath.get(path);
+            if (e != null) {
+                pinned.add(e);
+                pinnedPaths.add(path);
+            }
+        }
+        List<SessionEntry> rest = new ArrayList<>();
+        for (SessionEntry e : sessions) {
+            if (e.path == null || !pinnedPaths.contains(e.path)) rest.add(e);
+        }
+        List<SessionEntry> out = new ArrayList<>();
+        if (!pinned.isEmpty()) {
+            out.add(SessionEntry.header(activity.getString(R.string.session_pinned_header)));
+            out.addAll(pinned);
+        }
+        out.addAll(withDateHeaders(rest));
+        return out;
     }
 
     private static List<SessionEntry> withDateHeaders(List<SessionEntry> sessions) {
@@ -358,9 +400,11 @@ public final class SessionsSheet {
     }
 
     private void showActions(SessionEntry entry, View anchor) {
+        boolean pinned = entry.path != null && SessionPins.isPinned(activity, entry.path);
         Pickers.showSessionActions(activity,
                 host.supportsRename() && entry.current,
                 host.supportsDelete(),
+                pinned,
                 new Pickers.ActionListener() {
                     @Override public void onOpen() {
                         dialog.dismiss();
@@ -371,6 +415,14 @@ public final class SessionsSheet {
                     }
                     @Override public void onDelete() {
                         confirmDelete(entry);
+                    }
+                    @Override public void onTogglePin() {
+                        if (entry.path == null) return;
+                        boolean now = SessionPins.toggle(activity, entry.path);
+                        Toast.makeText(activity,
+                                now ? R.string.session_pinned_toast : R.string.session_unpinned_toast,
+                                Toast.LENGTH_SHORT).show();
+                        applyFilter();
                     }
                 });
     }

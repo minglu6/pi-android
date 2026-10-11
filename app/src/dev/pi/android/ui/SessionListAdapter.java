@@ -15,9 +15,12 @@ import java.util.Calendar;
 import java.util.List;
 import java.util.Locale;
 
+import android.widget.Toast;
+
 import dev.pi.android.R;
 import dev.pi.android.model.SessionEntry;
 import dev.pi.android.util.AppFonts;
+import dev.pi.android.util.SessionPins;
 
 /** 会话列表：分组头 + 紧凑行。 */
 public class SessionListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
@@ -26,6 +29,9 @@ public class SessionListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
         void onOpen(SessionEntry entry);
 
         void onLongPress(SessionEntry entry, View anchor);
+
+        /** Optional: refresh list after pin toggle. */
+        default void onPinChanged() {}
     }
 
     private static final int TYPE_HEADER = 0;
@@ -121,6 +127,7 @@ public class SessionListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
         final View card;
         final View dot;
         final TextView title;
+        final TextView pinMark;
         final View previewRow;
         final TextView preview;
         final TextView time;
@@ -132,6 +139,7 @@ public class SessionListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
             card = itemView.findViewById(R.id.session_card);
             dot = itemView.findViewById(R.id.session_dot);
             title = itemView.findViewById(R.id.session_title);
+            pinMark = itemView.findViewById(R.id.session_pin_mark);
             previewRow = itemView.findViewById(R.id.session_preview_row);
             preview = itemView.findViewById(R.id.session_preview);
             time = itemView.findViewById(R.id.session_time);
@@ -183,6 +191,11 @@ public class SessionListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
                     msgCount.setVisibility(View.GONE);
                 }
             }
+            boolean pinned = entry.path != null
+                    && SessionPins.isPinned(itemView.getContext(), entry.path);
+            if (pinMark != null) {
+                pinMark.setVisibility(pinned ? View.VISIBLE : View.GONE);
+            }
             card.setBackgroundResource(entry.current
                     ? R.drawable.bg_session_item_current
                     : R.drawable.bg_session_item);
@@ -191,6 +204,7 @@ public class SessionListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
                 shape.setShape(GradientDrawable.OVAL);
                 shape.setColor(ContextCompat.getColor(itemView.getContext(),
                         entry.current ? R.color.pi_blue
+                                : pinned ? R.color.pi_amber
                                 : entry.archived ? R.color.role_pi : R.color.text_muted));
                 dot.setBackground(shape);
             }
@@ -201,6 +215,16 @@ public class SessionListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
                 if (listener != null) listener.onLongPress(entry, v);
                 return true;
             });
+            if (pinMark != null) {
+                pinMark.setOnClickListener(v -> {
+                    if (entry.path == null) return;
+                    boolean now = SessionPins.toggle(itemView.getContext(), entry.path);
+                    Toast.makeText(itemView.getContext(),
+                            now ? R.string.session_pinned_toast : R.string.session_unpinned_toast,
+                            Toast.LENGTH_SHORT).show();
+                    if (listener != null) listener.onPinChanged();
+                });
+            }
         }
     }
 }

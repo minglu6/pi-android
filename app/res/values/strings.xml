@@ -277,4 +277,10 @@
     <string name="rich_svg_broken">无法绘制此 SVG</string>
     <string name="rich_image_missing">无法加载图片</string>
     <string name="rich_html_title">HTML 预览</string>
+    <string name="session_pin">置顶</string>
+    <string name="session_unpin">取消置顶</string>
+    <string name="session_pinned_header">置顶</string>
+    <string name="session_pin_mark">◆</string>
+    <string name="session_pinned_toast">已置顶</string>
+    <string name="session_unpinned_toast">已取消置顶</string>
 </resources>

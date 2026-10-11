@@ -40,6 +40,8 @@ public final class Pickers {
         void onOpen();
         void onRename();
         void onDelete();
+        /** Optional: pin/unpin session in local list. Default no-op. */
+        default void onTogglePin() {}
     }
 
     public static void showModel(@NonNull Activity activity,
@@ -213,8 +215,16 @@ public final class Pickers {
 
     public static void showSessionActions(@NonNull Activity activity, boolean canRename, boolean canDelete,
                                           @NonNull ActionListener listener) {
+        showSessionActions(activity, canRename, canDelete, false, listener);
+    }
+
+    public static void showSessionActions(@NonNull Activity activity, boolean canRename, boolean canDelete,
+                                          boolean pinned, @NonNull ActionListener listener) {
         List<PickerItem> items = new ArrayList<>();
         items.add(PickerItem.row(activity.getString(R.string.session_open), null, "open", false));
+        items.add(PickerItem.row(
+                activity.getString(pinned ? R.string.session_unpin : R.string.session_pin),
+                null, "pin", false));
         if (canRename) {
             items.add(PickerItem.row(activity.getString(R.string.session_rename), null, "rename", false));
         }
@@ -225,6 +235,7 @@ public final class Pickers {
         PickerSheet sheet = new PickerSheet(activity, R.string.sessions_actions_title, false, item -> {
             Object p = item.payload;
             if ("open".equals(p)) listener.onOpen();
+            else if ("pin".equals(p)) listener.onTogglePin();
             else if ("rename".equals(p)) listener.onRename();
             else if ("delete".equals(p)) listener.onDelete();
         });
