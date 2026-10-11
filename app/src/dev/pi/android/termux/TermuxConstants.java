@@ -25,6 +25,8 @@ public final class TermuxConstants {
 
     /** Termux prefix path used in RUN_COMMAND_PATH. */
     public static final String PREFIX_BASH = "/data/data/com.termux/files/usr/bin/bash";
+    /** Default Termux home — set as RUN_COMMAND_WORKDIR so $HOME resolves. */
+    public static final String TERMUX_HOME = "/data/data/com.termux/files/home";
 
     private TermuxConstants() {}
 }

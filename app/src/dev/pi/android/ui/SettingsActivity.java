@@ -61,6 +61,7 @@ public class SettingsActivity extends AppCompatActivity {
     private SwitchCompat autoStartSwitch;
     private TextView connectorVersionView;
     @Nullable private ConnectorProgressSheet updateSheet;
+    @Nullable private ConnectorProgressSheet diagnoseSheet;
     @Nullable private TermuxSetupSheet setupSheet;
     private final ConnectorController.Listener connectorListener = new ConnectorController.Listener() {
         @Override public void onAutoStartBegan() {}
@@ -74,6 +75,11 @@ public class SettingsActivity extends AppCompatActivity {
             runOnUiThread(() -> finishUpdateSheet(ok, exitCode, stdout, stderr, errmsg));
         }
         @Override public void requestReconnect(@NonNull String reason) {}
+        @Override
+        public void onDiagnoseFinished(boolean ok, int exitCode, @Nullable String stdout,
+                                       @Nullable String stderr, @Nullable String errmsg) {
+            runOnUiThread(() -> finishDiagnoseSheet(ok, exitCode, stdout, stderr, errmsg));
+        }
     };
 
     public static String host(Context ctx) {
@@ -227,6 +233,10 @@ public class SettingsActivity extends AppCompatActivity {
                 setupSheet.show();
             });
         }
+        View prefDiagnose = findViewById(R.id.pref_diagnose_connector);
+        if (prefDiagnose != null) {
+            prefDiagnose.setOnClickListener(v -> startConnectorDiagnose());
+        }
         TextView profilesValue = findViewById(R.id.pref_profiles_value);
         refreshProfilesLabel(profilesValue);
         View prefProfiles = findViewById(R.id.pref_profiles);
@@ -309,6 +319,39 @@ public class SettingsActivity extends AppCompatActivity {
         if (!ConnectorController.beginUpdate(this)) {
             updateSheet.append(getString(R.string.connector_autostart_fail, "无法启动 Termux 命令"));
         }
+    }
+
+    private void startConnectorDiagnose() {
+        diagnoseSheet = new ConnectorProgressSheet(this, getString(R.string.connector_diagnose_title));
+        diagnoseSheet.show();
+        java.util.List<String> pre = ConnectorController.beginDiagnose(this);
+        for (String line : pre) diagnoseSheet.append(line);
+        diagnoseSheet.append("---");
+        diagnoseSheet.append(dev.pi.android.termux.ConnectorDebugLog.readTail(this, 4000));
+    }
+
+    private void finishDiagnoseSheet(boolean ok, int exitCode, @Nullable String stdout,
+                                     @Nullable String stderr, @Nullable String errmsg) {
+        if (diagnoseSheet == null) {
+            diagnoseSheet = new ConnectorProgressSheet(this, getString(R.string.connector_diagnose_title));
+            diagnoseSheet.show();
+        }
+        if (stdout != null && !stdout.isEmpty()) diagnoseSheet.append(stdout.trim());
+        if (stderr != null && !stderr.isEmpty()) diagnoseSheet.append(stderr.trim());
+        if (errmsg != null && !errmsg.isEmpty()) {
+            String e = errmsg;
+            if (ConnectorController.isResultTimeoutDetail(e)) {
+                e = e.substring(ConnectorController.DETAIL_RESULT_TIMEOUT.length());
+                diagnoseSheet.append(e);
+                diagnoseSheet.append(getString(R.string.action_open_termux) + " → "
+                        + (TermuxRunCommand.openTermuxApp(this) ? "已打开" : "打开失败"));
+            } else {
+                diagnoseSheet.append(e);
+            }
+        }
+        diagnoseSheet.setSubtitle(ok ? "诊断完成" : ("诊断异常 exit=" + exitCode));
+        diagnoseSheet.append("--- log ---");
+        diagnoseSheet.append(dev.pi.android.termux.ConnectorDebugLog.readTail(this, 6000));
     }
 
     private void finishUpdateSheet(boolean ok, int exitCode, @Nullable String stdout,

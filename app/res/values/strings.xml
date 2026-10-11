@@ -68,6 +68,10 @@
     <string name="settings_connector_version">连接器版本：%1$s</string>
     <string name="settings_termux_setup">连接器一键配置</string>
     <string name="settings_termux_setup_desc">检查 Termux / RUN_COMMAND / allow-external-apps</string>
+    <string name="settings_diagnose_connector">诊断连接器</string>
+    <string name="settings_diagnose_connector_desc">检查权限、Token、RUN_COMMAND 与监听端口</string>
+    <string name="connector_diagnose_title">连接器诊断</string>
+    <string name="action_open_termux">打开 Termux</string>
 
     <string name="connector_update_title">更新连接器</string>
     <string name="connector_update_running">正在通过 Termux RUN_COMMAND 下载并重启…</string>

@@ -30,6 +30,9 @@ public final class TermuxPluginResultReceiver extends BroadcastReceiver {
         int err = result != null ? result.getInt(TermuxConstants.EXTRA_ERR, 0) : 0;
         Log.i(TAG, "op=" + op + " exit=" + exitCode + " err=" + err
                 + " stdoutLen=" + (stdout == null ? 0 : stdout.length()));
+        ConnectorDebugLog.log(context, "PendingIntent result op=" + op
+                + " exit=" + exitCode + " err=" + err
+                + " errmsg=" + (errmsg == null ? "" : errmsg));
         ConnectorController.onTermuxResult(context.getApplicationContext(),
                 op, exitCode, err, errmsg, stdout, stderr);
     }
