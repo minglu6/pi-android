@@ -39,12 +39,13 @@
     <string name="action_fork">从消息 Fork…</string>
     <string name="action_fork_short">分叉</string>
     <string name="empty_title">今天想聊点什么？</string>
-    <string name="empty_body">连上 Termux 里的连接器后即可开始。</string>
     <string name="empty_need_token_title">先配置 Token</string>
     <string name="empty_need_token_body">在设置里填入 ~/.pi/agent/pi-android.token，或用 adb --es token 投放。</string>
     <string name="empty_open_settings">打开设置</string>
-    <string name="empty_offline_title">连接器未连接</string>
-    <string name="empty_offline_body">确认 Termux 里 pi-rpc-bridge 已运行，然后点重新连接。</string>
+    <string name="suggest_fallback_project">看看这个项目是做什么的</string>
+    <string name="suggest_fallback_git">git status 有哪些改动</string>
+    <string name="suggest_fallback_project_prompt">这个项目是做什么的？请看 README / 目录结构，用几句话总结。</string>
+    <string name="suggest_fallback_git_prompt">运行 git status，总结当前未提交改动，并建议下一步。</string>
     <string name="settings_title">设置</string>
     <string name="settings_back">返回</string>
     <string name="settings_section_connector">连接器</string>
@@ -169,9 +170,6 @@
     <string name="set_model_failed">切换模型失败：%1$s</string>
     <string name="model_ref_invalid">模型参数无效，请重新选择</string>
     <string name="streaming_marker"> ▍</string>
-    <string name="suggest_explain">解释这段代码</string>
-    <string name="suggest_plan">帮我订个计划</string>
-    <string name="suggest_debug">排查一个错误</string>
     <string name="slash_hint_title">命令</string>
     <string name="slash_no_desc">无说明</string>
     <string name="picker_search_hint">搜索…</string>

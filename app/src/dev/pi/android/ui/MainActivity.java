@@ -267,6 +267,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private boolean profilePrefsPending;
     private String historyRequest = "";
     private String pendingPrompt;
+    private String pendingSuggestionsRpc = "";
+    /** After switch_session from a suggestion chip, send this prompt. */
+    @Nullable private String pendingSuggestPrompt;
+    private boolean suggestGitRepo;
     private String lastConfig;
     private String lastFontSig = "";
     private String currentSessionPath = "";
@@ -397,7 +401,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         actionsButtons = findViewById(R.id.actions_buttons);
 
         applyWindowInsets();
-        setupSuggestChips();
         setupSlashCommands();
 
         list = findViewById(R.id.messages);
@@ -2372,27 +2375,37 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         updateSendEnabled();
         if (!show) return;
 
-        if (suggestRow != null) {
-            suggestRow.setVisibility(View.GONE);
-        }
+        if (suggestRow != null) suggestRow.setVisibility(View.GONE);
+        if (emptyAction != null) emptyAction.setVisibility(View.GONE);
+        if (emptyTitle != null) emptyTitle.setVisibility(View.GONE);
+        if (emptyBody != null) emptyBody.setVisibility(View.GONE);
+
         if (!SettingsActivity.hasToken(this)) {
-            emptyTitle.setText(R.string.empty_need_token_title);
-            emptyBody.setText(R.string.empty_need_token_body);
-            emptyAction.setVisibility(View.VISIBLE);
-            emptyAction.setText(R.string.empty_open_settings);
-            emptyAction.setOnClickListener(v ->
-                    startActivity(new Intent(this, SettingsActivity.class)));
+            if (emptyTitle != null) {
+                emptyTitle.setVisibility(View.VISIBLE);
+                emptyTitle.setText(R.string.empty_need_token_title);
+            }
+            if (emptyBody != null) {
+                emptyBody.setVisibility(View.VISIBLE);
+                emptyBody.setText(R.string.empty_need_token_body);
+            }
+            if (emptyAction != null) {
+                emptyAction.setVisibility(View.VISIBLE);
+                emptyAction.setText(R.string.empty_open_settings);
+                emptyAction.setOnClickListener(v ->
+                        startActivity(new Intent(this, SettingsActivity.class)));
+            }
         } else if (!isConnected()) {
-            emptyTitle.setText(R.string.empty_offline_title);
-            emptyBody.setText(R.string.empty_offline_body);
-            emptyAction.setVisibility(View.VISIBLE);
-            emptyAction.setText(R.string.reconnect_action);
-            emptyAction.setOnClickListener(v -> userReconnect());
+            // Disconnected: logo only — no hint text (ui-guidelines).
         } else {
-            emptyTitle.setText(R.string.empty_title);
-            emptyBody.setText(R.string.empty_body);
-            emptyAction.setVisibility(View.GONE);
-            if (suggestRow != null) suggestRow.setVisibility(View.VISIBLE);
+            if (emptyTitle != null) {
+                emptyTitle.setVisibility(View.VISIBLE);
+                emptyTitle.setText(R.string.empty_title);
+            }
+            if (suggestRow != null && suggestRow.getChildCount() > 0) {
+                suggestRow.setVisibility(View.VISIBLE);
+            }
+            requestSuggestions();
         }
     }
 
@@ -2429,17 +2442,51 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         ViewCompat.requestApplyInsets(root);
     }
 
-    private void setupSuggestChips() {
-        if (suggestRow == null) return;
-        suggestRow.removeAllViews();
-        addSuggestChip(R.string.suggest_explain);
-        addSuggestChip(R.string.suggest_plan);
-        addSuggestChip(R.string.suggest_debug);
+    private void requestSuggestions() {
+        if (!isConnected()) return;
+        if (emptyState == null || emptyState.getVisibility() != View.VISIBLE) return;
+        pendingSuggestionsRpc = rpc("get_suggestions", null);
     }
 
-    private void addSuggestChip(int labelRes) {
+    private void applySuggestions(@Nullable JSONObject data) {
+        if (suggestRow == null) return;
+        suggestRow.removeAllViews();
+        suggestGitRepo = data != null && data.optBoolean("gitRepo", false);
+        JSONArray arr = data != null ? data.optJSONArray("suggestions") : null;
+        int n = 0;
+        if (arr != null) {
+            for (int i = 0; i < arr.length() && n < 3; i++) {
+                JSONObject item = arr.optJSONObject(i);
+                if (item == null) continue;
+                String title = item.optString("title", "").trim();
+                String prompt = item.optString("prompt", "").trim();
+                if (title.isEmpty() || prompt.isEmpty()) continue;
+                String sessionPath = item.optString("sessionPath", "");
+                if (sessionPath != null && sessionPath.isEmpty()) sessionPath = null;
+                addSuggestChip(title, prompt, sessionPath);
+                n++;
+            }
+        }
+        if (n == 0) {
+            addSuggestChip(getString(R.string.suggest_fallback_project),
+                    getString(R.string.suggest_fallback_project_prompt), null);
+            if (suggestGitRepo) {
+                addSuggestChip(getString(R.string.suggest_fallback_git),
+                        getString(R.string.suggest_fallback_git_prompt), null);
+            }
+        }
+        if (emptyState != null && emptyState.getVisibility() == View.VISIBLE
+                && isConnected() && SettingsActivity.hasToken(this)
+                && suggestRow.getChildCount() > 0) {
+            suggestRow.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void addSuggestChip(@NonNull String title, @NonNull String prompt,
+                                @Nullable String sessionPath) {
         TextView chip = new TextView(this);
-        chip.setText(labelRes);
+        chip.setText(title);
+        chip.setTypeface(AppFonts.mono(this, false));
         chip.setTextColor(ContextCompat.getColor(this, R.color.text_secondary));
         chip.setTextSize(14f);
         chip.setBackgroundResource(R.drawable.bg_suggest_chip);
@@ -2450,16 +2497,30 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.topMargin = (int) (8 * getResources().getDisplayMetrics().density);
         chip.setLayoutParams(lp);
-        chip.setOnClickListener(v -> {
-            if (!isConnected()) {
-                showConnectionBanner(getString(R.string.bridge_not_connected), true);
+        chip.setOnClickListener(v -> onSuggestChip(prompt, sessionPath));
+        suggestRow.addView(chip);
+    }
+
+    private void onSuggestChip(@NonNull String prompt, @Nullable String sessionPath) {
+        if (!isConnected()) {
+            showConnectionBanner(getString(R.string.bridge_not_connected), true);
+            return;
+        }
+        if (sessionPath != null && !sessionPath.isEmpty()
+                && !sessionPath.equals(currentSessionPath)) {
+            pendingSuggestPrompt = prompt;
+            JSONObject params = new JSONObject();
+            try {
+                params.put("sessionPath", sessionPath);
+            } catch (Exception e) {
+                pendingSuggestPrompt = null;
+                dispatchPrompt(prompt, null, null);
                 return;
             }
-            composer.setText(getString(labelRes));
-            composer.setSelection(composer.getText().length());
-            onSendOrStop();
-        });
-        suggestRow.addView(chip);
+            rpc("switch_session", params);
+            return;
+        }
+        dispatchPrompt(prompt, null, null);
     }
 
     /** 连接/可选命令错误走横幅，不污染聊天流。 */
@@ -2505,7 +2566,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 || "approve_plan".equals(command)
                 || "get_instructions".equals(command)
                 || "set_instructions".equals(command)
-                || "get_version".equals(command);
+                || "get_version".equals(command)
+                || "get_suggestions".equals(command);
     }
 
     private static String friendlyConnectionError(@Nullable Throwable t) {
@@ -2539,6 +2601,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 rpc("get_version", null);
                 refreshSlashCommands();
                 refreshEmptyState();
+                requestSuggestions();
                 if (pendingUiTarget != null) {
                     String target = pendingUiTarget;
                     pendingUiTarget = null;
@@ -2578,6 +2641,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         if (!ok) {
             android.util.Log.w(TAG, "rpc fail " + command + ": " + error);
             if (handlePocketRpcFailure(id, command, error)) return;
+            if ("get_suggestions".equals(command)) {
+                pendingSuggestionsRpc = "";
+                // Old connector: fall back to cwd chips.
+                applySuggestions(null);
+                return;
+            }
             if (isOptionalRpc(command)) return;
             if ("list_sessions".equals(command)) {
                 ensureSessionsSheet().showError(error);
@@ -2672,9 +2741,24 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         if ("switch_session".equals(command) && data != null) {
             if (data.optBoolean("cancelled", false)) {
+                pendingSuggestPrompt = null;
                 Toast.makeText(this, R.string.rpc_failed, Toast.LENGTH_SHORT).show();
             } else {
                 syncSessionAfterChange();
+                if (pendingSuggestPrompt != null && !pendingSuggestPrompt.isEmpty()) {
+                    String cont = pendingSuggestPrompt;
+                    pendingSuggestPrompt = null;
+                    main.postDelayed(() -> {
+                        if (isConnected()) dispatchPrompt(cont, null, null);
+                    }, 400);
+                }
+            }
+            return;
+        }
+        if ("get_suggestions".equals(command)) {
+            if (id.equals(pendingSuggestionsRpc) || pendingSuggestionsRpc.isEmpty()) {
+                pendingSuggestionsRpc = "";
+                applySuggestions(data);
             }
             return;
         }

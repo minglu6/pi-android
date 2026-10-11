@@ -303,7 +303,8 @@
                 android:text="@string/empty_title"
                 android:textColor="@color/text_primary"
                 android:textSize="17sp"
-                android:textStyle="bold" />
+                android:textStyle="bold"
+                android:visibility="gone" />
 
             <TextView
                 android:id="@+id/empty_body"
@@ -312,9 +313,9 @@
                 android:layout_marginTop="6dp"
                 android:gravity="center"
                 android:lineSpacingMultiplier="1.25"
-                android:text="@string/empty_body"
                 android:textColor="@color/text_secondary"
-                android:textSize="13sp" />
+                android:textSize="13sp"
+                android:visibility="gone" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/empty_action"
@@ -332,7 +333,8 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="20dp"
                 android:gravity="center"
-                android:orientation="vertical" />
+                android:orientation="vertical"
+                android:visibility="gone" />
         </LinearLayout>
     </FrameLayout>
 

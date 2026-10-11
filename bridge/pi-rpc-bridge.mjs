@@ -36,6 +36,7 @@ import {AttachmentStore, prepareAttachments, prepareInlineImages} from "./attach
 import {
   parseWhen, nextRepeat, describeMoment, describeRepeat, WHEN_HELP, knownZone,
 } from "./schedule-when.mjs";
+import { buildSuggestions } from "./suggestions.mjs";
 
 /** Stamped by the App「更新并重启连接器」script (sed); get_version returns these. */
 const CONNECTOR_SHA = "unknown";
@@ -1395,6 +1396,22 @@ function writeCommand(id, ws, command, params) {
     log(`local list_sessions -> ${items.length} 项 (${Date.now() - t0}ms)`);
     respond(ws, id, true, "list_sessions",
       err ? { sessions: [], error: err } : { sessions: items, dir: SESSIONS_DIR }, err);
+    return;
+  }
+  // Empty-state chips: cheap session/git/until/schedule heuristics (no LLM).
+  if (command === "get_suggestions") {
+    try {
+      const data = buildSuggestions({
+        cwd: resolveProjectCwd(),
+        sessionsDir: SESSIONS_DIR,
+        untilGoal,
+        schedules: listSchedulesPublic(),
+        limit: Number((params || {}).limit) || 12,
+      });
+      respond(ws, id, true, "get_suggestions", data, null);
+    } catch (e) {
+      respond(ws, id, false, "get_suggestions", null, e.message);
+    }
     return;
   }
   // Pocket: working directory — no Pi set_cwd RPC; bridge-local + Pi respawn.
