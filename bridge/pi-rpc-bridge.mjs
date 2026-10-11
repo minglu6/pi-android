@@ -1485,15 +1485,27 @@ function writeCommand(id, ws, command, params) {
       try { n = fs.readSync(fd, buf, 0, buf.length, 0); } finally { fs.closeSync(fd); }
       const truncated = n > max || st.size > max;
       const slice = buf.subarray(0, Math.min(n, max));
-      // Reject obvious binary (NUL in first chunk)
-      if (slice.includes(0)) throw new Error("二进制文件，无法预览");
-      respond(ws, id, true, "read_project_file", {
-        path: rel.replace(/\\/g, "/"),
-        content: slice.toString("utf8"),
-        bytes: st.size,
-        truncated,
-        cwd: resolveProjectCwd(),
-      }, null);
+      const wantBase64 = String((params || {}).encoding || "").toLowerCase() === "base64"
+          || (params || {}).asImage === true;
+      // Reject obvious binary (NUL) unless caller asked for base64 (inline images).
+      if (!wantBase64 && slice.includes(0)) throw new Error("二进制文件，无法预览");
+      if (wantBase64) {
+        respond(ws, id, true, "read_project_file", {
+          path: rel.replace(/\\/g, "/"),
+          contentBase64: slice.toString("base64"),
+          bytes: st.size,
+          truncated,
+          cwd: resolveProjectCwd(),
+        }, null);
+      } else {
+        respond(ws, id, true, "read_project_file", {
+          path: rel.replace(/\\/g, "/"),
+          content: slice.toString("utf8"),
+          bytes: st.size,
+          truncated,
+          cwd: resolveProjectCwd(),
+        }, null);
+      }
     } catch (e) {
       respond(ws, id, false, "read_project_file", null, e.message);
     }

@@ -270,4 +270,11 @@
     <string name="instructions_saved">已保存会话说明</string>
     <string name="instructions_cleared">已清空会话说明</string>
     <string name="instructions_connector_required">当前连接器不支持会话说明，请更新 Termux 侧连接器</string>
+    <string name="rich_tab_preview">预览</string>
+    <string name="rich_tab_image">图像</string>
+    <string name="rich_tab_code">代码</string>
+    <string name="rich_tab_diff">差异</string>
+    <string name="rich_svg_broken">无法绘制此 SVG</string>
+    <string name="rich_image_missing">无法加载图片</string>
+    <string name="rich_html_title">HTML 预览</string>
 </resources>
