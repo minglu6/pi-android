@@ -61,6 +61,8 @@ import dev.pi.android.model.PickerItem;
 import dev.pi.android.model.SlashCommand;
 import dev.pi.android.termux.ConnectorController;
 import dev.pi.android.util.AppFonts;
+import dev.pi.android.util.ConnectionProfile;
+import dev.pi.android.util.ConnectionProfiles;
 import dev.pi.android.util.InputHistory;
 import dev.pi.android.util.SlashCommandStore;
 
@@ -113,6 +115,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private TextView sessionTitle;
     private TextView sessionMeta;
     private TextView modelChip;
+    private TextView profileChip;
+    @Nullable private ProfilesSheet profilesSheet;
     private TextView cwdChip;
     /** Bridge supports get_cwd/set_cwd/list_cwd_entries (or get_state injects cwd). */
     private boolean cwdSupported;
@@ -249,6 +253,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         if (streaming) rpc("get_state", null);
     };
     private boolean historyNeedsSync = true;
+    /** One-shot: restore last model/session for the active profile after connect. */
+    private boolean profilePrefsPending;
     private String historyRequest = "";
     private String pendingPrompt;
     private String lastConfig;
@@ -325,6 +331,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         sessionTitle = findViewById(R.id.session_title);
         sessionMeta = findViewById(R.id.session_meta);
         modelChip = findViewById(R.id.model_chip);
+        profileChip = findViewById(R.id.profile_chip);
         cwdChip = findViewById(R.id.cwd_chip);
         footerStats = findViewById(R.id.footer_stats);
         footerSep = findViewById(R.id.footer_sep);
@@ -338,6 +345,11 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         steerModeQueue = findViewById(R.id.steer_mode_queue);
         if (sessionMeta != null) sessionMeta.setTypeface(AppFonts.mono(this, false));
         if (modelChip != null) modelChip.setTypeface(AppFonts.mono(this, false));
+        if (profileChip != null) {
+            profileChip.setTypeface(AppFonts.mono(this, false));
+            profileChip.setOnClickListener(v -> openProfilesSheet());
+            refreshProfileChip();
+        }
         if (cwdChip != null) {
             cwdChip.setTypeface(AppFonts.mono(this, false));
             cwdChip.setVisibility(View.GONE);
@@ -505,14 +517,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         emptyAction.setOnClickListener(v ->
                 startActivity(new Intent(this, SettingsActivity.class)));
         if (scrollBottom != null) scrollBottom.setVisibility(View.GONE);
-        reconnectBtn.setOnClickListener(v -> {
-            if (!SettingsActivity.hasToken(this)) {
-                startActivity(new Intent(this, SettingsActivity.class));
-            } else {
-                setConnectionVisual("connecting", getString(R.string.status_reconnecting));
-                reconnect();
-            }
-        });
+        bindDefaultReconnectAction();
 
         Intent svc = new Intent(this, BridgeService.class);
         ContextCompat.startForegroundService(this, svc);
@@ -816,6 +821,14 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     private void reconnect() {
         lastConfig = SettingsActivity.configSignature(this);
+        ConnectionProfile active = ConnectionProfiles.active(this);
+        profilePrefsPending = true;
+        if (!active.isLocalLoopback() && !SettingsActivity.hasToken(this)) {
+            setConnectionVisual("offline", getString(R.string.profiles_remote_need_token));
+            showConnectionBanner(getString(R.string.profiles_remote_need_token), true);
+            refreshEmptyState();
+            return;
+        }
         if (!SettingsActivity.hasToken(this)) {
             setConnectionVisual("offline", getString(R.string.bridge_missing_token));
             refreshEmptyState();
@@ -823,6 +836,131 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         setConnectionVisual("connecting", getString(R.string.status_connecting));
         if (service != null) service.reconnect();
+        // Optional per-profile cwd after reconnect settles.
+        if (active.cwd != null && !active.cwd.isEmpty()) {
+            main.postDelayed(() -> {
+                if (!isConnected()) return;
+                JSONObject params = new JSONObject();
+                try { params.put("path", active.cwd); } catch (Exception e) {
+                    throw new IllegalStateException("set_cwd", e);
+                }
+                rpc("set_cwd", params);
+            }, 800);
+        }
+    }
+
+    private void openProfilesSheet() {
+        if (profilesSheet == null) {
+            profilesSheet = new ProfilesSheet(this, profile -> {
+                refreshProfileChip();
+                // Clear transcript — remote host has different sessions.
+                resetTranscript();
+                historyNeedsSync = true;
+                currentSessionPath = "";
+                currentSessionName = "";
+                setConnectionVisual("connecting", getString(R.string.status_connecting));
+                reconnect();
+            });
+        }
+        profilesSheet.show();
+    }
+
+    private void refreshProfileChip() {
+        if (profileChip == null) return;
+        ConnectionProfile p = ConnectionProfiles.active(this);
+        profileChip.setText(p.name);
+    }
+
+    private void bindDefaultReconnectAction() {
+        if (reconnectBtn == null) return;
+        reconnectBtn.setOnClickListener(v -> {
+            if (!SettingsActivity.hasToken(this)) {
+                startActivity(new Intent(this, SettingsActivity.class));
+            } else {
+                setConnectionVisual("connecting", getString(R.string.status_reconnecting));
+                reconnect();
+            }
+        });
+    }
+
+    private void maybeShowTailscaleHint(@Nullable Throwable t) {
+        ConnectionProfile p = ConnectionProfiles.active(this);
+        if (!p.isTailscaleHost()) return;
+        if (t != null && !ConnectorController.isRefusedOrTimeout(t)) {
+            String msg = t.getMessage() == null ? "" : t.getMessage().toLowerCase();
+            if (!msg.contains("unreachable") && !msg.contains("failed to connect")
+                    && !msg.contains("network") && !msg.contains("refused")
+                    && !msg.contains("timed out") && !msg.contains("timeout")) {
+                return;
+            }
+        }
+        showConnectionBanner(getString(R.string.tailscale_hint_body), false);
+        if (reconnectBtn != null) {
+            reconnectBtn.setText(R.string.tailscale_hint_open);
+            reconnectBtn.setOnClickListener(v -> {
+                Intent launch = getPackageManager().getLaunchIntentForPackage("com.tailscale.ipn");
+                if (launch != null) {
+                    launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(launch);
+                } else {
+                    try {
+                        startActivity(new Intent(Intent.ACTION_VIEW,
+                                android.net.Uri.parse("market://details?id=com.tailscale.ipn")));
+                    } catch (Exception e) {
+                        startActivity(new Intent(Intent.ACTION_VIEW,
+                                android.net.Uri.parse("https://tailscale.com/download/android")));
+                    }
+                }
+            });
+        }
+    }
+
+    /** Persist last model / session onto the active connection profile. */
+    private void persistProfileState(@Nullable String modelId, @Nullable String sessionPath) {
+        ConnectionProfile p = ConnectionProfiles.active(this);
+        boolean dirty = false;
+        if (modelId != null && !modelId.isEmpty() && !modelId.equals(p.lastModelId)) {
+            p.lastModelId = modelId;
+            dirty = true;
+        }
+        if (sessionPath != null && !sessionPath.isEmpty()
+                && !sessionPath.equals(p.lastSessionPath)) {
+            p.lastSessionPath = sessionPath;
+            dirty = true;
+        }
+        if (dirty) ConnectionProfiles.save(this, p);
+    }
+
+    /** After connect: restore preferred model and last session for this profile. */
+    private void restoreProfilePreferences() {
+        if (!isConnected()) return;
+        ConnectionProfile p = ConnectionProfiles.active(this);
+        if (p.lastModelId != null && !p.lastModelId.isEmpty()
+                && !p.lastModelId.equals(currentModelId)) {
+            if (modelRefs.isEmpty()) {
+                // Models catalog not ready yet — retry once after list arrives.
+                profilePrefsPending = true;
+            } else {
+                for (String[] ref : modelRefs) {
+                    if (ref != null && ref.length >= 2 && p.lastModelId.equals(ref[1])) {
+                        JSONObject params = ModelRpc.setModelParams(ref[0], ref[1]);
+                        if (params != null) rpc("set_model", params);
+                        break;
+                    }
+                }
+            }
+        }
+        if (p.lastSessionPath != null && !p.lastSessionPath.isEmpty()
+                && !p.lastSessionPath.equals(currentSessionPath)
+                && !streaming) {
+            JSONObject params = new JSONObject();
+            try {
+                params.put("sessionPath", p.lastSessionPath);
+            } catch (Exception e) {
+                return;
+            }
+            rpc("switch_session", params);
+        }
     }
 
     private String rpc(String command, @Nullable JSONObject params) {
@@ -2278,6 +2416,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         if (reconnectBtn != null) {
             reconnectBtn.setText(goSettings ? R.string.go_settings : R.string.reconnect_action);
             reconnectBtn.setVisibility(View.VISIBLE);
+            if (goSettings) {
+                reconnectBtn.setOnClickListener(v ->
+                        startActivity(new Intent(this, SettingsActivity.class)));
+            } else {
+                bindDefaultReconnectAction();
+            }
         }
     }
 
@@ -2551,6 +2695,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             modelRefs.clear();
             modelLabels.addAll(cat.labels);
             modelRefs.addAll(cat.refs);
+            if (profilePrefsPending && isConnected()) {
+                profilePrefsPending = false;
+                main.post(this::restoreProfilePreferences);
+            }
             return;
         }
         if ("get_available_thinking_levels".equals(command) && data != null) {
@@ -2578,6 +2726,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
             currentSessionPath = path;
             currentSessionName = data.optString("sessionName", "");
+            persistProfileState(currentModelId, currentSessionPath);
             refreshSessionChrome();
             boolean busy = data.optBoolean("isStreaming", false) || data.optBoolean("isCompacting", false);
             if (busy) {
@@ -2600,6 +2749,14 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             rpc("get_available_models", null);
             rpc("get_available_thinking_levels", null);
             maybeRequestSessionStats();
+            // Model restore waits for get_available_models; session-only restore here.
+            if (profilePrefsPending && !busy) {
+                ConnectionProfile pref = ConnectionProfiles.active(this);
+                if (pref.lastModelId == null || pref.lastModelId.isEmpty()) {
+                    profilePrefsPending = false;
+                    main.postDelayed(this::restoreProfilePreferences, 400);
+                }
+            }
         }
     }
 
@@ -2607,6 +2764,11 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private void applySetModelSuccess(@Nullable JSONObject data) {
         applyGetStateModel(null);
         ModelRpc.Applied applied = ModelRpc.fromModelObject(data);
+        if (applied != null && applied.modelId != null) {
+            persistProfileState(applied.modelId, null);
+        } else if (!currentModelId.isEmpty()) {
+            persistProfileState(currentModelId, null);
+        }
         if (resumed && applied != null) Toast.makeText(this, applied.label, Toast.LENGTH_SHORT).show();
     }
 
@@ -2913,7 +3075,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         friendlyConnectionError(t); // maps known patterns; raw never shown
         showConnectionBanner(msg, false);
         refreshEmptyState();
+        maybeShowTailscaleHint(t);
         if (SettingsActivity.hasToken(this) && SettingsActivity.autoStartConnector(this)
+                && ConnectionProfiles.autoStartAllowed(this)
                 && ConnectorController.isRefusedOrTimeout(t)) {
             ConnectorController.onConnectFailure(this, t);
         }

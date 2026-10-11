@@ -37,10 +37,23 @@ public final class SecureTokenStore {
 
     private SecureTokenStore() {}
 
+    /** Active-profile token (legacy single-slot + migration). */
     @NonNull
     public static String get(@NonNull Context ctx) {
+        ConnectionProfiles.ensureMigrated(ctx);
+        return getForProfile(ctx, ConnectionProfiles.active(ctx).id);
+    }
+
+    public static void set(@NonNull Context ctx, @Nullable String value) {
+        ConnectionProfiles.ensureMigrated(ctx);
+        setForProfile(ctx, ConnectionProfiles.active(ctx).id, value);
+    }
+
+    @NonNull
+    public static String getForProfile(@NonNull Context ctx, @NonNull String profileId) {
         SharedPreferences prefs = prefs(ctx);
-        String enc = prefs.getString(K_ENC, null);
+        String key = encKey(profileId);
+        String enc = prefs.getString(key, null);
         if (enc != null && !enc.isEmpty()) {
             try {
                 String plain = decrypt(enc);
@@ -50,31 +63,53 @@ public final class SecureTokenStore {
                 return "";
             }
         }
-        String legacy = prefs.getString(K_PLAIN, "");
-        if (legacy == null) legacy = "";
-        if (!legacy.isEmpty()) {
-            // Transparent migrate: encrypt then scrub plaintext.
-            set(ctx, legacy);
-            return legacy;
+        // Legacy single-slot (pre-profiles) — only for default local id.
+        if (ConnectionProfiles.DEFAULT_ID.equals(profileId)) {
+            String legacyEnc = prefs.getString(K_ENC, null);
+            if (legacyEnc != null && !legacyEnc.isEmpty()) {
+                try {
+                    String plain = decrypt(legacyEnc);
+                    if (plain != null && !plain.isEmpty()) {
+                        setForProfile(ctx, profileId, plain);
+                        prefs.edit().remove(K_ENC).remove(K_PLAIN).apply();
+                        return plain;
+                    }
+                } catch (Exception e) {
+                    Log.w(TAG, "legacy token decrypt failed");
+                }
+            }
+            String legacy = prefs.getString(K_PLAIN, "");
+            if (legacy == null) legacy = "";
+            if (!legacy.isEmpty()) {
+                setForProfile(ctx, profileId, legacy);
+                prefs.edit().remove(K_PLAIN).apply();
+                return legacy;
+            }
         }
         return "";
     }
 
-    public static void set(@NonNull Context ctx, @Nullable String value) {
+    public static void setForProfile(@NonNull Context ctx, @NonNull String profileId,
+                                     @Nullable String value) {
         String v = value == null ? "" : value.trim();
         SharedPreferences prefs = prefs(ctx);
+        String key = encKey(profileId);
         if (v.isEmpty()) {
-            prefs.edit().remove(K_ENC).remove(K_PLAIN).apply();
+            prefs.edit().remove(key).apply();
             return;
         }
         try {
             String packed = encrypt(v);
-            prefs.edit().putString(K_ENC, packed).remove(K_PLAIN).apply();
+            prefs.edit().putString(key, packed).apply();
         } catch (Exception e) {
-            // Last-resort: keep connector usable if Keystore is broken on a device.
             Log.w(TAG, "token encrypt failed; falling back to prefs (no value logged)");
-            prefs.edit().putString(K_PLAIN, v).remove(K_ENC).apply();
+            prefs.edit().putString(key + "_plain", v).apply();
         }
+    }
+
+    @NonNull
+    private static String encKey(@NonNull String profileId) {
+        return K_ENC + "_" + profileId;
     }
 
     private static SharedPreferences prefs(Context ctx) {

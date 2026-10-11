@@ -57,6 +57,54 @@ sv restart pi-rpc-bridge     # runit；一次性进程则 Ctrl-C 后重新 ~/bin
 也可把文本分享给 Pi（`ACTION_SEND` text/plain），或深链
 `--es ui sessions|settings|fork|models|thinking|newsession`。
 
+### Tailscale 远程连接
+
+不嵌 Tailscale SDK：手机装官方 [Tailscale Android](https://tailscale.com/download/android)，
+电脑与手机加入同一 tailnet。连接器只绑 Tailscale CGNAT 地址（或 MagicDNS），
+**拒绝** `0.0.0.0` / `::`；非 loopback 必须带 token。
+
+**电脑端（例：Mac Studio）**
+
+```sh
+# 1) 与本机 Termux 共用同一 token 文件
+umask 077; mkdir -p ~/.pi/agent
+# 若已有 token 可跳过生成，直接复制到本机
+head -c 24 /dev/urandom | base64 > ~/.pi/agent/pi-android.token
+
+# 2) 安装并登录 Tailscale（macOS App 或 brew）
+tailscale status   # 确认在线，记下 100.x 或 xxx.ts.net
+
+# 3) 拉仓库并装为用户常驻服务（launchd / systemd --user）
+git clone https://github.com/minglu6/pi-android.git ~/src/pi-android   # 或已有仓库
+cd ~/src/pi-android
+bash scripts/install-remote.sh
+# 默认 --tailscale（只绑 tailscale0 / `tailscale ip -4`）
+# 覆盖：PI_ANDROID_HOST=100.x.y.z bash scripts/install-remote.sh
+# 日志（macOS）：~/Library/Logs/pi-rpc-bridge*.log
+```
+
+手动前台跑亦可：
+
+```sh
+cd bridge && npm install --omit=dev
+node pi-rpc-bridge.mjs --tailscale --port 8945 --token-file ~/.pi/agent/pi-android.token
+# 或：node pi-rpc-bridge.mjs --host 100.x.y.z --port 8945 --token-file …
+```
+
+**手机端**
+
+1. 打开官方 Tailscale App 并登录同一账号 / tailnet  
+2. Pi → 顶栏配置芯片或 设置 → **连接配置** → 新建  
+   - 名称：如 `Mac Studio`  
+   - 主机：`100.x.y.z` 或 `name.ts.net`  
+   - 端口：`8945`  
+   - Token：与电脑 `~/.pi/agent/pi-android.token` 相同  
+   - 可选 cwd：远程机上的默认工作目录  
+3. 点 **测速** 看延迟；切换配置后自动重连。默认「本机 Termux」仍是 `127.0.0.1:8945`  
+4. 若连 100.x / `*.ts.net` 失败，会提示 **请先打开 Tailscale**（不内嵌 VPN）
+
+Termux **自动启动连接器** 只对 loopback 配置生效；远程配置不会触发 `RUN_COMMAND`。
+
 贡献 / 环境变量 / CI：见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 
 ## Architecture
@@ -143,6 +191,7 @@ gh run watch
 - GitHub Actions 自动打 APK
 - 日用聊天打磨：Markdown/代码块、时间戳、断线横幅、粘底滚动、会话重命名/删除
 - Tokyo Night 风格聊天 UI（简洁顶栏 / 无气泡消息 / 工具时间线 / 卡片输入框）；MesloLGLDZ Nerd Font Mono
+- 多连接配置（本机 Termux / Tailscale 远程）、测速、按配置记忆模型与会话；`--tailscale` 远程桥
 
 ### 已知限制 / 未做
 
@@ -155,7 +204,7 @@ gh run watch
 
 ## 安全边界
 
-- 连接器只绑 `127.0.0.1`，token 必填（文件权限建议 600）
+- 默认只绑 `127.0.0.1`；远程用 `--tailscale` 或 `--host <100.x>`，**拒绝** `0.0.0.0`/`::`。token 必填（文件权限建议 600）
 - 命令白名单**始终**包含官方 `bash` / `abort_bash`（Pocket `!shell` / `!!shell`）；`--allow-bash` 仍为同义词。若 App 仍报 `命令不允许: bash`，说明 Termux 还在跑旧 bridge —— `sv restart pi-rpc-bridge`。该白名单不限制 prompt 驱动的 agent 工具。桥本地另有 `list_project_files` / `read_project_file` / `git_*`（非 Pi RPC）
 - 依赖 sha256 清单：`app/libs/manifest.json`（重建后核对）
 

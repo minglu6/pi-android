@@ -58,6 +58,8 @@ public final class ConnectorController {
     /** Called from MainActivity when WebSocket fails with refused/timeout. */
     public static void onConnectFailure(@NonNull Context ctx, @Nullable Throwable t) {
         if (!SettingsActivity.autoStartConnector(ctx)) return;
+        // Termux auto-start only for local loopback profiles.
+        if (!dev.pi.android.util.ConnectionProfiles.autoStartAllowed(ctx)) return;
         if (!isRefusedOrTimeout(t)) return;
         tryAutoStart(ctx, false);
     }
@@ -76,6 +78,7 @@ public final class ConnectorController {
     public static void tryAutoStart(@NonNull Context ctx, boolean force) {
         Context app = ctx.getApplicationContext();
         if (!SettingsActivity.autoStartConnector(app)) return;
+        if (!dev.pi.android.util.ConnectionProfiles.autoStartAllowed(app)) return;
         long now = System.currentTimeMillis();
         if (!force && (startInFlight || now - lastStartAttemptAt < DEBOUNCE_MS)) {
             Log.i(TAG, "auto-start debounced");

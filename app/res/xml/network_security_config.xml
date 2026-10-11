@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext ws:// for:
+  - loopback (本机 Termux)
+  - Tailscale MagicDNS (*.ts.net)
+  Android NSC cannot express CIDR 100.64.0.0/10 for CGNAT IPs, so base-config
+  also permits cleartext; the connector still requires token, and 0.0.0.0 binds
+  are refused server-side.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">ts.net</domain>
+    </domain-config>
+</network-security-config>
