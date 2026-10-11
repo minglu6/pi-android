@@ -113,7 +113,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private View statusDot;
     private ImageView brandLogo;
     private TextView sessionTitle;
-    private TextView sessionMeta;
     private TextView modelChip;
     private TextView profileChip;
     @Nullable private ProfilesSheet profilesSheet;
@@ -343,7 +342,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         brandLogo = findViewById(R.id.brand_logo);
         sessionTitle = findViewById(R.id.session_title);
-        sessionMeta = findViewById(R.id.session_meta);
         modelChip = findViewById(R.id.model_chip);
         profileChip = findViewById(R.id.profile_chip);
         cwdChip = findViewById(R.id.cwd_chip);
@@ -357,7 +355,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         steerModePlan = findViewById(R.id.steer_mode_plan);
         steerModeSteer = findViewById(R.id.steer_mode_steer);
         steerModeQueue = findViewById(R.id.steer_mode_queue);
-        if (sessionMeta != null) sessionMeta.setTypeface(AppFonts.mono(this, false));
         if (modelChip != null) modelChip.setTypeface(AppFonts.mono(this, false));
         if (profileChip != null) {
             profileChip.setTypeface(AppFonts.mono(this, false));
@@ -1406,71 +1403,72 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     private void applySessionTitle() {
         // Brand mark is always the colorful π logo; named sessions show text beside it.
+        // No subtitle under the model chip — model lives only on the chip.
         if (brandLogo != null) brandLogo.setVisibility(View.VISIBLE);
         if (sessionTitle == null) return;
-        if (currentSessionName != null && !currentSessionName.isEmpty()) {
+        String title = displaySessionTitle(currentSessionName);
+        if (title != null) {
             sessionTitle.setVisibility(View.VISIBLE);
-            sessionTitle.setText(currentSessionName);
+            sessionTitle.setText(title);
         } else {
             sessionTitle.setVisibility(View.GONE);
             sessionTitle.setText("");
         }
     }
 
-    private void refreshSessionMeta() {
-        if (sessionMeta == null) return;
-        StringBuilder meta = new StringBuilder();
-        // Cwd lives on the composer chip when supported — avoid duplicating in meta.
-        if (!stateCwd.isEmpty() && !cwdSupported) {
-            meta.append(shortPath(stateCwd));
+    /**
+     * User-named session title only. Hide empty, path/jsonl-derived, and text that
+     * duplicates the model chip (provider / model · thinking).
+     */
+    @Nullable
+    private String displaySessionTitle(@Nullable String raw) {
+        if (raw == null) return null;
+        String name = raw.trim();
+        if (name.isEmpty()) return null;
+        if (name.endsWith(".jsonl") || name.indexOf('/') >= 0 || name.indexOf('\\') >= 0) {
+            return null;
         }
-        if (!stateBranch.isEmpty()) {
-            if (meta.length() > 0) meta.append(" · ");
-            meta.append(stateBranch);
+        String app = getString(R.string.app_name);
+        if (name.equalsIgnoreCase(app) || name.equalsIgnoreCase("Pi") || name.equals("π")) {
+            return null;
         }
-        if (meta.length() == 0) {
-            // Fallback: session file basename or model — still only if we have real data.
-            String file = shortPath(currentSessionPath);
-            if (!file.isEmpty()) meta.append(file);
-            else if (!modelStatus.isEmpty()) meta.append(modelStatus);
+        // Don't echo the model chip line (or its provider/model prefix).
+        if (!modelStatus.isEmpty()) {
+            if (name.equalsIgnoreCase(modelStatus)) return null;
+            String modelOnly = modelStatus.contains(" · ")
+                    ? modelStatus.substring(0, modelStatus.indexOf(" · ")).trim()
+                    : modelStatus;
+            if (!modelOnly.isEmpty() && name.equalsIgnoreCase(modelOnly)) return null;
         }
-        if (meta.length() == 0) {
-            sessionMeta.setVisibility(View.GONE);
-        } else {
-            sessionMeta.setVisibility(View.VISIBLE);
-            sessionMeta.setText(meta.toString());
-        }
-        if (diffBadge != null) {
-            if (stateDiffBadge.isEmpty()) {
-                diffBadge.setVisibility(View.GONE);
-            } else {
-                diffBadge.setVisibility(View.VISIBLE);
-                diffBadge.setText(stateDiffBadge);
-                int addColor = ContextCompat.getColor(this, R.color.diff_add);
-                int delColor = ContextCompat.getColor(this, R.color.diff_del);
-                // Keep plain text; colors live in badge background contrast.
-                diffBadge.setTextColor(ContextCompat.getColor(this, R.color.text_secondary));
-                // Silence unused when no spannable — still useful for future tint.
-                if (addColor == delColor) { /* no-op */ }
+        AgentState st = AgentState.get();
+        String label = st.modelLabel();
+        if (!label.isEmpty() && name.equalsIgnoreCase(label)) return null;
+        // Session file basename is not a user title.
+        if (currentSessionPath != null && !currentSessionPath.isEmpty()) {
+            String path = currentSessionPath;
+            if (path.endsWith("/") || path.endsWith("\\")) {
+                path = path.substring(0, path.length() - 1);
+            }
+            int slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+            String leaf = slash >= 0 && slash < path.length() - 1 ? path.substring(slash + 1) : path;
+            if (name.equals(leaf)) return null;
+            if (leaf.endsWith(".jsonl")) {
+                String stem = leaf.substring(0, leaf.length() - ".jsonl".length());
+                if (name.equals(stem)) return null;
             }
         }
+        return name;
     }
 
-    private static String shortPath(String path) {
-        if (path == null || path.isEmpty()) return "";
-        String p = path;
-        if (p.endsWith("/")) p = p.substring(0, p.length() - 1);
-        int slash = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
-        if (slash >= 0 && slash < p.length() - 1) {
-            String leaf = p.substring(slash + 1);
-            // Prefer parent/leaf when leaf looks like a session file.
-            int prev = Math.max(p.lastIndexOf('/', slash - 1), p.lastIndexOf('\\', slash - 1));
-            if (leaf.contains(".") && prev >= 0) {
-                return p.substring(prev + 1);
-            }
-            return leaf;
+    private void refreshDiffBadge() {
+        if (diffBadge == null) return;
+        if (stateDiffBadge.isEmpty()) {
+            diffBadge.setVisibility(View.GONE);
+        } else {
+            diffBadge.setVisibility(View.VISIBLE);
+            diffBadge.setText(stateDiffBadge);
+            diffBadge.setTextColor(ContextCompat.getColor(this, R.color.text_secondary));
         }
-        return p;
     }
 
     private void refreshModelChip() {
@@ -1518,7 +1516,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private void refreshSessionChrome() {
         applySessionTitle();
         refreshCwdChip();
-        refreshSessionMeta();
+        refreshDiffBadge();
         refreshModelChip();
     }
 
@@ -1540,7 +1538,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         cwdSupported = on;
         refreshCwdChip();
-        refreshSessionMeta();
     }
 
     private void togglePlanMode() {
