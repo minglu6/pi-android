@@ -49,14 +49,13 @@ public final class EditorSheet {
         dialog.setContentView(root);
 
         TextView title = root.findViewById(R.id.editor_title);
-        TextView hint = root.findViewById(R.id.editor_hint);
         body = root.findViewById(R.id.editor_body);
         charHint = root.findViewById(R.id.editor_char_hint);
         TextView clear = root.findViewById(R.id.editor_clear);
         TextView save = root.findViewById(R.id.editor_save);
 
         title.setText(titleRes);
-        hint.setText(hintRes);
+        // Hint lives on the EditText only — no redundant subtitle under the title.
         body.setHint(hintRes);
         body.setTypeface(AppFonts.mono(activity, false));
         if (prefill != null && !prefill.isEmpty()) {

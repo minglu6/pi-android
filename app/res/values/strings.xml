@@ -113,7 +113,6 @@
     <string name="profiles_host_required">请填写主机</string>
     <string name="profiles_port_invalid">端口无效</string>
     <string name="profiles_chip">配置</string>
-    <string name="profiles_status_hint">下拉刷新探测 · 绿=可达 · 红=失败 · 灰=检测中</string>
     <string name="profiles_status_cd">连接状态</string>
     <string name="profiles_status_checking">检测中…</string>
     <string name="profiles_status_ok">连通 · %1$d ms</string>
@@ -375,5 +374,4 @@
     <string name="menu_input_history">输入历史</string>
     <string name="input_history_title">输入历史</string>
     <string name="input_history_empty">还没有发送过消息。外接键盘在输入框按 ↑ 可回看。</string>
-    <string name="input_history_hint">点选填回输入框 · 外接键盘 ↑/↓ 浏览</string>
 </resources>
