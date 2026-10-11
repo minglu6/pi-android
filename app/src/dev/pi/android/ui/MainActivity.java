@@ -435,12 +435,14 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             steerModeSteer.setOnClickListener(v -> {
                 composerMode = 1;
                 updateSteerUi();
+                updateSendEnabled();
             });
         }
         if (steerModeQueue != null) {
             steerModeQueue.setOnClickListener(v -> {
                 composerMode = 2;
                 updateSteerUi();
+                updateSendEnabled();
             });
         }
         if (btnStop != null) {
@@ -885,8 +887,13 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             generationStatus.setVisibility(on ? View.VISIBLE : View.GONE);
             if (on && (changed || generationStatus.length() == 0)) generationStatus.setText(R.string.generation_active);
         }
-        // Plan/Steer/Queue always available for dense Pocket layout; stop only while streaming.
-        if (steerToggle != null) steerToggle.setVisibility(View.VISIBLE);
+        // Idle → only「计划」; streaming →「引导|排队」(default 引导). Animate chip swap.
+        if (changed) {
+            composerMode = 1; // always reset segment to 引导 on enter/exit stream
+            animateSteerModeSwap();
+        } else {
+            updateSteerUi();
+        }
         if (btnStop != null) btnStop.setVisibility(on ? View.VISIBLE : View.GONE);
         if (list != null) {
             list.setItemAnimator(on ? null : chatItemAnimator());
@@ -896,6 +903,24 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         if (on) main.postDelayed(thinkingTimeout, THINKING_TIMEOUT_MS);
         refreshModelChip();
         updateSendEnabled();
+    }
+
+    /** Short fade when swapping idle「计划」↔ streaming「引导|排队」. */
+    private void animateSteerModeSwap() {
+        if (steerToggle == null) {
+            updateSteerUi();
+            return;
+        }
+        steerToggle.animate().cancel();
+        steerToggle.animate()
+                .alpha(0f)
+                .setDuration(90)
+                .withEndAction(() -> {
+                    updateSteerUi();
+                    steerToggle.setAlpha(0f);
+                    steerToggle.animate().alpha(1f).setDuration(140).start();
+                })
+                .start();
     }
 
     private void settleStreaming(boolean refreshState) {
@@ -961,7 +986,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         boolean hasText = draft.length() > 0 || hasAttach;
         composer.setEnabled(connected || streaming);
         if (streaming) {
-            composer.setHint(getString(R.string.hint_message_streaming));
+            // 引导 vs 排队 hints driven by composerMode (1=steer, 2=queue).
+            composer.setHint(getString(composerMode == 2
+                    ? R.string.hint_message_queue
+                    : R.string.hint_message_streaming));
         } else {
             composer.setHint(getString(connected ? R.string.hint_message : R.string.hint_disconnected));
         }
@@ -1290,16 +1318,37 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         int on = R.drawable.bg_segmented_on;
         int onFg = ContextCompat.getColor(this, R.color.md_theme_onPrimary);
         int offFg = ContextCompat.getColor(this, R.color.text_muted);
-        // Plan chip reflects planModeOn; steer/queue reflect composerMode.
+        if (steerToggle != null) steerToggle.setVisibility(View.VISIBLE);
+
+        if (!streaming) {
+            // Idle: only「计划」toggle (off by default). Hide 引导/排队.
+            if (steerModePlan != null) {
+                steerModePlan.setVisibility(View.VISIBLE);
+                if (planModeOn) {
+                    steerModePlan.setBackgroundResource(on);
+                    steerModePlan.setTextColor(onFg);
+                } else {
+                    steerModePlan.setBackgroundResource(android.R.color.transparent);
+                    steerModePlan.setTextColor(offFg);
+                }
+            }
+            if (steerModeSteer != null) steerModeSteer.setVisibility(View.GONE);
+            if (steerModeQueue != null) steerModeQueue.setVisibility(View.GONE);
+            return;
+        }
+
+        // Streaming: 2-way 引导|排队. Compact「计划」badge only while plan mode is on.
         if (steerModePlan != null) {
             if (planModeOn) {
+                steerModePlan.setVisibility(View.VISIBLE);
                 steerModePlan.setBackgroundResource(on);
                 steerModePlan.setTextColor(onFg);
             } else {
-                steerModePlan.setBackgroundResource(android.R.color.transparent);
-                steerModePlan.setTextColor(offFg);
+                steerModePlan.setVisibility(View.GONE);
             }
         }
+        if (steerModeSteer != null) steerModeSteer.setVisibility(View.VISIBLE);
+        if (steerModeQueue != null) steerModeQueue.setVisibility(View.VISIBLE);
         TextView[] modes = {null, steerModeSteer, steerModeQueue};
         for (int i = 0; i < modes.length; i++) {
             TextView tv = modes[i];
