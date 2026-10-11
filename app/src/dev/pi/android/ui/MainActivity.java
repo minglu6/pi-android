@@ -60,6 +60,7 @@ import dev.pi.android.model.ChatMessage;
 import dev.pi.android.model.PickerItem;
 import dev.pi.android.model.SlashCommand;
 import dev.pi.android.termux.ConnectorController;
+import dev.pi.android.termux.TermuxRunCommand;
 import dev.pi.android.util.AppFonts;
 import dev.pi.android.util.ConnectionProfile;
 import dev.pi.android.util.ConnectionProfiles;
@@ -195,20 +196,35 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                     return;
                 }
                 // Always surface RUN_COMMAND / plugin errors — never fail silently.
-                String msg = detail == null || detail.isEmpty() ? "启动失败" : detail;
+                String raw = detail == null || detail.isEmpty() ? "启动失败" : detail;
+                boolean timedOut = ConnectorController.isResultTimeoutDetail(raw);
+                String msg = timedOut
+                        ? raw.substring(ConnectorController.DETAIL_RESULT_TIMEOUT.length())
+                        : raw;
                 boolean needSetup = msg.contains("allow-external-apps")
                         || msg.contains("RUN_COMMAND")
                         || msg.contains("未安装 Termux")
                         || msg.contains("缺少")
                         || msg.contains("not allowed to run")
                         || msg.contains("external apps");
-                if (needSetup) {
+                if (needSetup && !timedOut) {
                     if (termuxSetupSheet == null) {
                         termuxSetupSheet = new TermuxSetupSheet(MainActivity.this);
                     }
                     termuxSetupSheet.show();
                 }
-                showConnectionBanner(getString(R.string.connector_autostart_fail, msg), false);
+                if (timedOut) {
+                    // OEM blocked background launch — offer one-tap 打开 Termux.
+                    showConnectionBanner(getString(R.string.connector_autostart_fail, msg),
+                            getString(R.string.action_open_termux),
+                            v -> {
+                                TermuxRunCommand.openTermuxApp(MainActivity.this);
+                                // After user opens Termux, retry start shortly.
+                                main.postDelayed(() -> maybeAutoStartConnector(true), 1500);
+                            });
+                } else {
+                    showConnectionBanner(getString(R.string.connector_autostart_fail, msg), false);
+                }
             });
         }
 
@@ -2522,18 +2538,24 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     /** 连接/可选命令错误走横幅，不污染聊天流。 */
     private void showConnectionBanner(String message, boolean goSettings) {
+        if (goSettings) {
+            showConnectionBanner(message, getString(R.string.go_settings),
+                    v -> startActivity(new Intent(this, SettingsActivity.class)));
+        } else {
+            showConnectionBanner(message, getString(R.string.reconnect_action),
+                    v -> userReconnect());
+        }
+    }
+
+    private void showConnectionBanner(String message, @NonNull String actionLabel,
+                                      @NonNull View.OnClickListener action) {
         if (reconnectBanner == null) return;
         reconnectBanner.setVisibility(View.VISIBLE);
         if (reconnectText != null) reconnectText.setText(message);
         if (reconnectBtn != null) {
-            reconnectBtn.setText(goSettings ? R.string.go_settings : R.string.reconnect_action);
+            reconnectBtn.setText(actionLabel);
             reconnectBtn.setVisibility(View.VISIBLE);
-            if (goSettings) {
-                reconnectBtn.setOnClickListener(v ->
-                        startActivity(new Intent(this, SettingsActivity.class)));
-            } else {
-                bindDefaultReconnectAction();
-            }
+            reconnectBtn.setOnClickListener(action);
         }
     }
 

@@ -249,6 +249,37 @@
                 </LinearLayout>
 
                 <LinearLayout
+                    android:id="@+id/pref_diagnose_connector"
+                    style="@style/SettingsPrefRow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="0dp"
+                    android:paddingEnd="0dp">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/settings_diagnose_connector"
+                            android:textColor="@color/text_primary"
+                            android:textSize="15.5sp" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="@string/settings_diagnose_connector_desc"
+                            android:textColor="@color/text_muted"
+                            android:textSize="13sp" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <LinearLayout
                     android:id="@+id/pref_profiles"
                     style="@style/SettingsPrefRow"
                     android:layout_width="match_parent"
