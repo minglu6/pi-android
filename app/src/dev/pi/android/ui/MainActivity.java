@@ -902,9 +902,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 try {
                     byte[] bytes = android.util.Base64.decode(item.thumbnailBase64,
                             android.util.Base64.DEFAULT);
-                    thumb.setImageBitmap(android.graphics.BitmapFactory.decodeByteArray(
-                            bytes, 0, bytes.length));
-                } catch (Exception ignored) { }
+                    android.graphics.Bitmap bmp = dev.pi.android.util.Bitmaps.decodeByteArrayBounded(
+                            bytes, dev.pi.android.util.Bitmaps.THUMB_EDGE);
+                    if (bmp != null) thumb.setImageBitmap(bmp);
+                } catch (Exception | OutOfMemoryError ignored) { }
                 int s = Math.round(36 * d);
                 LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(s, s);
                 tp.setMarginEnd(Math.round(6 * d));
@@ -3266,13 +3267,14 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         image.setContentDescription(getString(R.string.image_fullscreen_cd));
         try {
             byte[] bytes = android.util.Base64.decode(data, android.util.Base64.DEFAULT);
-            android.graphics.Bitmap bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+            android.graphics.Bitmap bmp = dev.pi.android.util.Bitmaps.decodeByteArrayBounded(
+                    bytes, dev.pi.android.util.Bitmaps.VIEW_EDGE);
             if (bmp == null) {
                 Toast.makeText(this, R.string.attachment_chat_image_unavailable, Toast.LENGTH_SHORT).show();
                 return;
             }
             image.setImageBitmap(bmp);
-        } catch (Exception e) {
+        } catch (Exception | OutOfMemoryError e) {
             Toast.makeText(this, R.string.attachment_chat_image_unavailable, Toast.LENGTH_SHORT).show();
             return;
         }

@@ -4,7 +4,6 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
@@ -49,6 +48,7 @@ import java.util.concurrent.TimeUnit;
 import dev.pi.android.R;
 import dev.pi.android.model.ChatMessage;
 import dev.pi.android.util.AppFonts;
+import dev.pi.android.util.Bitmaps;
 import dev.pi.android.util.DiffLite;
 import dev.pi.android.util.MarkdownLite;
 import dev.pi.android.util.SyntaxLite;
@@ -80,7 +80,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
     private static final float CARD_SCROLL_MAX_SCREEN = 0.40f;
 
     // 单线程、有界队列：历史里的原生图片绝不在主线程做 base64/摘要/Bitmap 解码。
-    private static final int THUMB_EDGE = 256;
+    private static final int THUMB_EDGE = Bitmaps.THUMB_EDGE;
     private static final Handler THUMB_MAIN = new Handler(Looper.getMainLooper());
     private static final ThreadPoolExecutor THUMB_WORKER = new ThreadPoolExecutor(
             1, 1, 30, TimeUnit.SECONDS, new ArrayBlockingQueue<>(32), runnable -> {
@@ -383,29 +383,9 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
             if (cached != null) return cached;
             if (THUMB_FAILURES.get(key) != null || Thread.currentThread().isInterrupted()) return null;
             byte[] encoded = Base64.decode(data, Base64.DEFAULT);
-            BitmapFactory.Options options = new BitmapFactory.Options();
-            options.inJustDecodeBounds = true;
-            BitmapFactory.decodeByteArray(encoded, 0, encoded.length, options);
-            if (options.outWidth <= 0 || options.outHeight <= 0 || options.outWidth > 32768
-                    || options.outHeight > 32768 || (long) options.outWidth * options.outHeight > 100_000_000) {
-                THUMB_FAILURES.put(key, true);
-                return null;
-            }
-            options.inSampleSize = 1;
-            while (Math.max(options.outWidth, options.outHeight) / options.inSampleSize > THUMB_EDGE) {
-                options.inSampleSize *= 2;
-            }
             if (Thread.currentThread().isInterrupted()) return null;
-            options.inJustDecodeBounds = false;
-            options.inPreferredConfig = Bitmap.Config.ARGB_8888;
-            Bitmap bitmap = BitmapFactory.decodeByteArray(encoded, 0, encoded.length, options);
+            Bitmap bitmap = Bitmaps.decodeByteArrayBounded(encoded, THUMB_EDGE);
             if (bitmap == null) {
-                THUMB_FAILURES.put(key, true);
-                return null;
-            }
-            // 部分格式/解码器忽略 inSampleSize；拒收非小图，不让缓存持有大 Bitmap。
-            if (bitmap.getWidth() > THUMB_EDGE || bitmap.getHeight() > THUMB_EDGE) {
-                bitmap.recycle();
                 THUMB_FAILURES.put(key, true);
                 return null;
             }

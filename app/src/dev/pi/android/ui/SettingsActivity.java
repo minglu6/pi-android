@@ -26,6 +26,7 @@ import dev.pi.android.BuildInfo;
 import dev.pi.android.R;
 import dev.pi.android.model.PickerItem;
 import dev.pi.android.util.AppFonts;
+import dev.pi.android.util.SecureTokenStore;
 
 /**
  * 独立设置页：连接器、外观、关于。
@@ -36,7 +37,6 @@ public class SettingsActivity extends AppCompatActivity {
     private static final String PREF = "pi_bridge";
     private static final String K_HOST = "host";
     private static final String K_PORT = "port";
-    private static final String K_TOKEN = "token";
     private static final String K_THEME = "theme_mode"; // system | light | dark
 
     private EditText hostEdit;
@@ -56,8 +56,9 @@ public class SettingsActivity extends AppCompatActivity {
         return prefs(ctx).getInt(K_PORT, 8945);
     }
 
+    /** Connector auth token — Keystore AES-GCM at rest (migrates legacy plaintext). Never log. */
     public static String token(Context ctx) {
-        return prefs(ctx).getString(K_TOKEN, "");
+        return SecureTokenStore.get(ctx);
     }
 
     public static boolean hasToken(Context ctx) {
@@ -66,7 +67,7 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     public static void setToken(Context ctx, String value) {
-        prefs(ctx).edit().putString(K_TOKEN, value).apply();
+        SecureTokenStore.set(ctx, value);
     }
 
     public static void setPort(Context ctx, int value) {
@@ -200,8 +201,9 @@ public class SettingsActivity extends AppCompatActivity {
         prefs(this).edit()
                 .putString(K_HOST, hostEdit.getText().toString().trim())
                 .putInt(K_PORT, portVal)
-                .putString(K_TOKEN, tokenEdit.getText().toString().trim())
                 .apply();
+        // Token is encrypted separately; never write plaintext "token" prefs again.
+        setToken(this, tokenEdit.getText().toString().trim());
     }
 
     private void refreshThemeLabel() {
