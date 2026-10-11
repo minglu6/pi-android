@@ -28,8 +28,27 @@ TOKEN=$(cat ~/.pi/agent/pi-android.token)
 adb shell am start -n dev.pi.android/.ui.MainActivity --es token "$TOKEN"
 ```
 
-更新仓库里的 `bridge/pi-rpc-bridge.mjs` 后请在 Termux **重启连接器**，否则 APK
-会碰到旧白名单（例如 `!pwd` → `命令不允许: bash`）：
+### 从 App 自动启动 / 更新连接器（一次性前置）
+
+设置里默认开启 **「自动启动 Termux 连接器」**：WebSocket 被拒绝或超时会通过
+Termux `RUN_COMMAND` 执行 `sv up` / `sv restart`（找不到服务则回退
+`~/bin/pi-rpc-bridge` / `node …/pi-rpc-bridge.mjs`），并带退避重连。
+**「更新并重启连接器」** 会从 GitHub `master` 拉取最新 `bridge/*.mjs`，
+必要时 `npm install`，再 `sv restart`。
+
+首次使用前在设备上完成（各一次）：
+
+1. **安装官方 Termux**（F-Droid / GitHub；不要用已停更的 Play 商店版）
+2. **授予权限**：Pi 应用信息 → 其他权限 → 允许「在 Termux 中运行命令」
+   （`com.termux.permission.RUN_COMMAND`）。也可在设置 →「连接器一键配置」里申请。
+3. **允许外部应用**（在 Termux 里执行一次）：
+
+```sh
+echo 'allow-external-apps=true' >> ~/.termux/termux.properties && termux-reload-settings
+```
+
+更新仓库里的 `bridge/pi-rpc-bridge.mjs` 后也可在 App 设置点 **更新并重启连接器**，
+或在 Termux 手动：
 
 ```sh
 sv restart pi-rpc-bridge     # runit；一次性进程则 Ctrl-C 后重新 ~/bin/pi-rpc-bridge

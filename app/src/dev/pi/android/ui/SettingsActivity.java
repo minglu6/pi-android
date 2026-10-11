@@ -11,9 +11,11 @@ import android.widget.ImageButton;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.app.AppCompatDelegate;
+import androidx.appcompat.widget.SwitchCompat;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
@@ -21,10 +23,14 @@ import androidx.core.view.WindowInsetsCompat;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import dev.pi.android.BuildInfo;
 import dev.pi.android.R;
 import dev.pi.android.model.PickerItem;
+import dev.pi.android.termux.ConnectorController;
+import dev.pi.android.termux.TermuxRunCommand;
 import dev.pi.android.util.AppFonts;
 import dev.pi.android.util.SecureTokenStore;
 
@@ -38,6 +44,8 @@ public class SettingsActivity extends AppCompatActivity {
     private static final String K_HOST = "host";
     private static final String K_PORT = "port";
     private static final String K_THEME = "theme_mode"; // system | light | dark
+    private static final String K_AUTO_START = "auto_start_connector"; // default true
+    private static final Pattern VERSION_LINE = Pattern.compile("VERSION\\s+(\\S+)\\s+(\\S+)");
 
     private EditText hostEdit;
     private EditText portEdit;
@@ -47,6 +55,24 @@ public class SettingsActivity extends AppCompatActivity {
     private TextView themeValue;
     private TextView termFontValue;
     private TextView termSizeValue;
+    private TextView autoStartValue;
+    private SwitchCompat autoStartSwitch;
+    private TextView connectorVersionView;
+    @Nullable private ConnectorProgressSheet updateSheet;
+    @Nullable private TermuxSetupSheet setupSheet;
+    private final ConnectorController.Listener connectorListener = new ConnectorController.Listener() {
+        @Override public void onAutoStartBegan() {}
+        @Override public void onAutoStartFinished(boolean ok, @Nullable String detail) {}
+        @Override public void onUpdateProgress(@NonNull String line) {
+            if (updateSheet != null) updateSheet.append(line);
+        }
+        @Override
+        public void onUpdateFinished(boolean ok, int exitCode, @Nullable String stdout,
+                                     @Nullable String stderr, @Nullable String errmsg) {
+            runOnUiThread(() -> finishUpdateSheet(ok, exitCode, stdout, stderr, errmsg));
+        }
+        @Override public void requestReconnect(@NonNull String reason) {}
+    };
 
     public static String host(Context ctx) {
         return prefs(ctx).getString(K_HOST, "127.0.0.1");
@@ -80,6 +106,15 @@ public class SettingsActivity extends AppCompatActivity {
 
     public static String themeMode(Context ctx) {
         return prefs(ctx).getString(K_THEME, "system");
+    }
+
+    /** Default ON: auto-start Termux connector when WebSocket is refused/timeout. */
+    public static boolean autoStartConnector(Context ctx) {
+        return prefs(ctx).getBoolean(K_AUTO_START, true);
+    }
+
+    public static void setAutoStartConnector(Context ctx, boolean on) {
+        prefs(ctx).edit().putBoolean(K_AUTO_START, on).apply();
     }
 
     public static void applySavedTheme(Context ctx) {
@@ -157,12 +192,119 @@ public class SettingsActivity extends AppCompatActivity {
         if (prefTermSize != null) {
             prefTermSize.setOnClickListener(v -> showTermSizePicker());
         }
+
+        autoStartValue = findViewById(R.id.pref_auto_start_value);
+        autoStartSwitch = findViewById(R.id.pref_auto_start_switch);
+        connectorVersionView = findViewById(R.id.pref_connector_version);
+        refreshAutoStartLabel();
+        refreshConnectorVersionLabel();
+        if (autoStartSwitch != null) {
+            autoStartSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                setAutoStartConnector(this, isChecked);
+                refreshAutoStartLabel();
+            });
+        }
+        View prefAutoStart = findViewById(R.id.pref_auto_start);
+        if (prefAutoStart != null) {
+            prefAutoStart.setOnClickListener(v -> {
+                if (autoStartSwitch != null) autoStartSwitch.toggle();
+            });
+        }
+        View prefUpdate = findViewById(R.id.pref_update_connector);
+        if (prefUpdate != null) {
+            prefUpdate.setOnClickListener(v -> startConnectorUpdate());
+        }
+        View prefSetup = findViewById(R.id.pref_termux_setup);
+        if (prefSetup != null) {
+            prefSetup.setOnClickListener(v -> {
+                if (setupSheet == null) setupSheet = new TermuxSetupSheet(this);
+                setupSheet.show();
+            });
+        }
+        ConnectorController.addListener(connectorListener);
+    }
+
+    @Override
+    protected void onDestroy() {
+        ConnectorController.removeListener(connectorListener);
+        super.onDestroy();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
+                                           @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == TermuxSetupSheet.REQ_RUN_COMMAND && setupSheet != null) {
+            setupSheet.refresh();
+        }
     }
 
     @Override
     protected void onPause() {
         super.onPause();
         saveConnectorFields();
+    }
+
+    private void refreshAutoStartLabel() {
+        boolean on = autoStartConnector(this);
+        if (autoStartSwitch != null) autoStartSwitch.setChecked(on);
+        if (autoStartValue != null) {
+            autoStartValue.setText(on ? R.string.settings_auto_start_on : R.string.settings_auto_start_off);
+        }
+    }
+
+    private void refreshConnectorVersionLabel() {
+        if (connectorVersionView == null) return;
+        connectorVersionView.setText(getString(R.string.settings_connector_version,
+                ConnectorController.connectorVersionLabel(this)));
+    }
+
+    private void startConnectorUpdate() {
+        if (TermuxSetupSheet.needsSetup(this)
+                || !TermuxRunCommand.hasRunCommandPermission(this)) {
+            if (setupSheet == null) setupSheet = new TermuxSetupSheet(this);
+            setupSheet.show();
+            return;
+        }
+        updateSheet = new ConnectorProgressSheet(this, getString(R.string.connector_update_title));
+        updateSheet.setSubtitle(getString(R.string.settings_connector_version,
+                ConnectorController.connectorVersionLabel(this)));
+        updateSheet.append(getString(R.string.connector_update_running));
+        updateSheet.show();
+        if (!ConnectorController.beginUpdate(this)) {
+            updateSheet.append(getString(R.string.connector_autostart_fail, "无法启动 Termux 命令"));
+        }
+    }
+
+    private void finishUpdateSheet(boolean ok, int exitCode, @Nullable String stdout,
+                                   @Nullable String stderr, @Nullable String errmsg) {
+        if (updateSheet == null) {
+            updateSheet = new ConnectorProgressSheet(this, getString(R.string.connector_update_title));
+            updateSheet.show();
+        }
+        StringBuilder sb = new StringBuilder();
+        if (stdout != null && !stdout.isEmpty()) sb.append(stdout.trim()).append('\n');
+        if (stderr != null && !stderr.isEmpty()) sb.append(stderr.trim()).append('\n');
+        if (errmsg != null && !errmsg.isEmpty()) sb.append(errmsg.trim()).append('\n');
+        if (ok) {
+            Matcher m = VERSION_LINE.matcher(stdout == null ? "" : stdout);
+            if (m.find()) {
+                ConnectorController.saveConnectorVersion(this, m.group(1), m.group(2));
+            }
+            refreshConnectorVersionLabel();
+            sb.append(getString(R.string.connector_update_ok,
+                    ConnectorController.connectorVersionLabel(this)));
+        } else {
+            sb.append(getString(R.string.connector_update_fail, exitCode));
+            if (errmsg != null && errmsg.contains("allow-external-apps")) {
+                if (setupSheet == null) setupSheet = new TermuxSetupSheet(this);
+                setupSheet.show();
+            }
+        }
+        updateSheet.setBody(sb.toString().trim());
+        updateSheet.setSubtitle(ok
+                ? getString(R.string.connector_update_ok, ConnectorController.connectorVersionLabel(this))
+                : getString(R.string.connector_update_fail, exitCode));
     }
 
     private void applyTokenVisibility(boolean visible) {

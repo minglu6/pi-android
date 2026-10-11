@@ -24,6 +24,7 @@
 5. **会话历史** → `SessionsSheet`
 6. **短确认 / 单行路径输入** → `MaterialDialogs`（已套 `PiMaterialAlertDialog` + `AppFonts.applyTree`）
 7. **聊天内系统提示** → notice card 布局，不要塞进 `AlertDialog`
+8. **连接器进度 / Termux 前置配置** → `ConnectorProgressSheet` / `TermuxSetupSheet`
 
 禁止：裸 `AlertDialog.Builder`、未套 `PiMaterialAlertDialog` 的 `MaterialAlertDialogBuilder`、在 sheet 外另起一套圆角/字号。
 

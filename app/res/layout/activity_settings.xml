@@ -139,6 +139,114 @@
                     android:text="@string/settings_help"
                     android:textColor="@color/text_muted"
                     android:textSize="12.5sp" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="12dp"
+                    android:layout_marginBottom="4dp"
+                    android:background="@color/divider" />
+
+                <LinearLayout
+                    android:id="@+id/pref_auto_start"
+                    style="@style/SettingsPrefRow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="0dp"
+                    android:paddingEnd="0dp">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/settings_auto_start"
+                            android:textColor="@color/text_primary"
+                            android:textSize="15.5sp" />
+
+                        <TextView
+                            android:id="@+id/pref_auto_start_value"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="@string/settings_auto_start_on"
+                            android:textColor="@color/text_muted"
+                            android:textSize="13sp" />
+                    </LinearLayout>
+
+                    <androidx.appcompat.widget.SwitchCompat
+                        android:id="@+id/pref_auto_start_switch"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:checked="true" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/pref_update_connector"
+                    style="@style/SettingsPrefRow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="0dp"
+                    android:paddingEnd="0dp">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/settings_update_connector"
+                            android:textColor="@color/text_primary"
+                            android:textSize="15.5sp" />
+
+                        <TextView
+                            android:id="@+id/pref_connector_version"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="@string/settings_update_connector_desc"
+                            android:textColor="@color/text_muted"
+                            android:textSize="13sp" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/pref_termux_setup"
+                    style="@style/SettingsPrefRow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="0dp"
+                    android:paddingEnd="0dp">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/settings_termux_setup"
+                            android:textColor="@color/text_primary"
+                            android:textSize="15.5sp" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="@string/settings_termux_setup_desc"
+                            android:textColor="@color/text_muted"
+                            android:textSize="13sp" />
+                    </LinearLayout>
+                </LinearLayout>
             </LinearLayout>
 
             <!-- 外观 -->

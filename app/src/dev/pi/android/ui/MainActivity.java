@@ -59,6 +59,7 @@ import dev.pi.android.bridge.ModelRpc;
 import dev.pi.android.model.ChatMessage;
 import dev.pi.android.model.PickerItem;
 import dev.pi.android.model.SlashCommand;
+import dev.pi.android.termux.ConnectorController;
 import dev.pi.android.util.AppFonts;
 import dev.pi.android.util.InputHistory;
 import dev.pi.android.util.SlashCommandStore;
@@ -173,6 +174,46 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private String pendingScheduleListRpc = "";
     private String pendingScheduleCancelRpc = "";
     @Nullable private SchedulesSheet schedulesSheet;
+    @Nullable private TermuxSetupSheet termuxSetupSheet;
+    private final ConnectorController.Listener connectorListener = new ConnectorController.Listener() {
+        @Override
+        public void onAutoStartBegan() {
+            runOnUiThread(() ->
+                    showConnectionBanner(getString(R.string.connector_autostart_banner), false));
+        }
+
+        @Override
+        public void onAutoStartFinished(boolean ok, @Nullable String detail) {
+            runOnUiThread(() -> {
+                if (ok) {
+                    showConnectionBanner(getString(R.string.connector_autostart_ok), false);
+                    return;
+                }
+                String msg = detail == null ? "" : detail;
+                if (msg.contains("allow-external-apps") || msg.contains("RUN_COMMAND")
+                        || msg.contains("未安装 Termux") || msg.contains("缺少")) {
+                    if (termuxSetupSheet == null) termuxSetupSheet = new TermuxSetupSheet(MainActivity.this);
+                    termuxSetupSheet.show();
+                }
+                showConnectionBanner(getString(R.string.connector_autostart_fail, msg), true);
+            });
+        }
+
+        @Override public void onUpdateProgress(@NonNull String line) {}
+
+        @Override
+        public void onUpdateFinished(boolean ok, int exitCode, @Nullable String stdout,
+                                     @Nullable String stderr, @Nullable String errmsg) {
+            // SettingsActivity owns the update sheet; MainActivity only reconnects.
+        }
+
+        @Override
+        public void requestReconnect(@NonNull String reason) {
+            runOnUiThread(() -> {
+                if (!isConnected()) reconnect();
+            });
+        }
+    };
     private String lastMentionQuery = "";
     private long lastMentionAt;
     private int pasteGuard;
@@ -457,6 +498,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         updateSteerUi();
         if (steerToggle != null) steerToggle.setVisibility(View.VISIBLE);
+        ConnectorController.addListener(connectorListener);
         // status_chip 仍在布局中但已隐藏；保留空安全引用以免旧逻辑 NPE
         View statusChip = findViewById(R.id.status_chip);
         if (statusChip != null) statusChip.setVisibility(View.GONE);
@@ -818,12 +860,22 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         main.removeCallbacks(settleAfterAgentEnd);
         flushTranscriptPaint();
         snapshotChat();
+        ConnectorController.removeListener(connectorListener);
         if (serviceBound) {
             if (service != null) service.clearHostIf(this);
             unbindService(svcConn);
             serviceBound = false;
         }
         super.onDestroy();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
+                                           @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == TermuxSetupSheet.REQ_RUN_COMMAND && termuxSetupSheet != null) {
+            termuxSetupSheet.refresh();
+        }
     }
 
     @Override
@@ -2254,7 +2306,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 || "get_plan_mode".equals(command)
                 || "approve_plan".equals(command)
                 || "get_instructions".equals(command)
-                || "set_instructions".equals(command);
+                || "set_instructions".equals(command)
+                || "get_version".equals(command);
     }
 
     private static String friendlyConnectionError(@Nullable Throwable t) {
@@ -2285,6 +2338,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 setConnectionVisual("online", getString(R.string.status_online));
                 historyNeedsSync = true;
                 rpc("get_state", null);
+                rpc("get_version", null);
                 refreshSlashCommands();
                 refreshEmptyState();
                 if (pendingUiTarget != null) {
@@ -2313,6 +2367,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                     android.util.Log.w(TAG, "offline: " + error);
                 }
                 refreshEmptyState();
+                if (SettingsActivity.hasToken(this) && SettingsActivity.autoStartConnector(this)) {
+                    ConnectorController.onConnectFailure(this, null);
+                }
                 break;
         }
     }
@@ -2344,6 +2401,14 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 return;
             }
             Toast.makeText(this, R.string.rpc_failed, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if ("get_version".equals(command)) {
+            if (data != null) {
+                ConnectorController.saveConnectorVersion(this,
+                        data.optString("sha", null),
+                        data.optString("date", null));
+            }
             return;
         }
         if ("prompt".equals(command)) {
@@ -2848,6 +2913,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         friendlyConnectionError(t); // maps known patterns; raw never shown
         showConnectionBanner(msg, false);
         refreshEmptyState();
+        if (SettingsActivity.hasToken(this) && SettingsActivity.autoStartConnector(this)
+                && ConnectorController.isRefusedOrTimeout(t)) {
+            ConnectorController.onConnectFailure(this, t);
+        }
     }
 
     private void loadSessions() {
