@@ -32,6 +32,8 @@ import dev.pi.android.model.PickerItem;
 import dev.pi.android.termux.ConnectorController;
 import dev.pi.android.termux.TermuxRunCommand;
 import dev.pi.android.util.AppFonts;
+import dev.pi.android.util.ConnectionProfile;
+import dev.pi.android.util.ConnectionProfiles;
 import dev.pi.android.util.SecureTokenStore;
 
 /**
@@ -75,11 +77,11 @@ public class SettingsActivity extends AppCompatActivity {
     };
 
     public static String host(Context ctx) {
-        return prefs(ctx).getString(K_HOST, "127.0.0.1");
+        return ConnectionProfiles.active(ctx).host;
     }
 
     public static int port(Context ctx) {
-        return prefs(ctx).getInt(K_PORT, 8945);
+        return ConnectionProfiles.active(ctx).port;
     }
 
     /** Connector auth token — Keystore AES-GCM at rest (migrates legacy plaintext). Never log. */
@@ -97,11 +99,15 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     public static void setPort(Context ctx, int value) {
-        prefs(ctx).edit().putInt(K_PORT, value).apply();
+        ConnectionProfile p = ConnectionProfiles.active(ctx);
+        p.port = value;
+        ConnectionProfiles.save(ctx, p);
+        prefs(ctx).edit().putInt(K_PORT, value).apply(); // keep legacy mirror
     }
 
     public static String configSignature(Context ctx) {
-        return host(ctx) + ":" + port(ctx) + ":" + token(ctx);
+        ConnectionProfile p = ConnectionProfiles.active(ctx);
+        return p.id + "|" + p.host + ":" + p.port + ":" + token(ctx);
     }
 
     public static String themeMode(Context ctx) {
@@ -221,7 +227,26 @@ public class SettingsActivity extends AppCompatActivity {
                 setupSheet.show();
             });
         }
+        TextView profilesValue = findViewById(R.id.pref_profiles_value);
+        refreshProfilesLabel(profilesValue);
+        View prefProfiles = findViewById(R.id.pref_profiles);
+        if (prefProfiles != null) {
+            prefProfiles.setOnClickListener(v ->
+                    new ProfilesSheet(this, profile -> {
+                        hostEdit.setText(profile.host);
+                        portEdit.setText(String.valueOf(profile.port));
+                        tokenEdit.setText(SecureTokenStore.getForProfile(this, profile.id));
+                        refreshProfilesLabel(profilesValue);
+                    }).show());
+        }
         ConnectorController.addListener(connectorListener);
+    }
+
+    private void refreshProfilesLabel(@Nullable TextView profilesValue) {
+        if (profilesValue == null) return;
+        ConnectionProfile active = ConnectionProfiles.active(this);
+        profilesValue.setText(getString(R.string.settings_profiles_active_fmt,
+                active.name, active.host, active.port));
     }
 
     @Override
@@ -342,8 +367,14 @@ public class SettingsActivity extends AppCompatActivity {
             Toast.makeText(this, e.getMessage(), Toast.LENGTH_SHORT).show();
             return;
         }
+        String hostVal = hostEdit.getText().toString().trim();
+        if (hostVal.isEmpty()) hostVal = "127.0.0.1";
+        ConnectionProfile active = ConnectionProfiles.active(this);
+        active.host = hostVal;
+        active.port = portVal;
+        ConnectionProfiles.save(this, active);
         prefs(this).edit()
-                .putString(K_HOST, hostEdit.getText().toString().trim())
+                .putString(K_HOST, hostVal)
                 .putInt(K_PORT, portVal)
                 .apply();
         // Token is encrypted separately; never write plaintext "token" prefs again.

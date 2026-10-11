@@ -7,7 +7,7 @@
  *
  * 设计要点（每条都有一个代价/alternative，见 docs/bridge.md）：
  *  - 只以官方支持的方式驱动 Pi：`pi --mode rpc` 的 JSONL 子协议，不 import Pi 内部 dist。
- *  - 只绑 127.0.0.1 + token 鉴权。loopback 在本机不对 App 做强隔离，token 是唯一门槛。
+ *  - 默认绑 127.0.0.1 + token；`--tailscale` 只绑 CGNAT，`--host` 禁 0.0.0.0。token 必填。
  *  - 单个 Pi 子进程，客户端共享；最后一个客户端断开后按 --idle-exit 秒空闲退出（默认 600s），
  *    便于 runit/前台两种运行方式。
  *  - 能力白名单：默认 read-only + prompt/abort 等，以及 Pocket 所需官方 `bash` / `abort_bash`
@@ -52,8 +52,38 @@ const arg = (name, def) => {
 };
 const flags = (name) => argv.includes(`--${name}`);
 
-const HOST = arg("host", "127.0.0.1");
 const PORT = Number(arg("port", 8945));
+const WANT_TAILSCALE = flags("tailscale");
+function detectTailscaleIp() {
+  // Prefer `tailscale ip -4`; fall back to parsing `ip -4 addr show tailscale0`.
+  try {
+    const r = spawnSync("tailscale", ["ip", "-4"], { encoding: "utf8", timeout: 4000 });
+    if (r.status === 0) {
+      const ip = String(r.stdout || "").trim().split(/\s+/)[0];
+      if (/^100\.\d+\.\d+\.\d+$/.test(ip)) return ip;
+    }
+  } catch { /* ignore */ }
+  try {
+    const r = spawnSync("ip", ["-4", "-o", "addr", "show", "dev", "tailscale0"], {
+      encoding: "utf8", timeout: 4000,
+    });
+    const m = String(r.stdout || "").match(/\binet\s+(100\.\d+\.\d+\.\d+)\//);
+    if (m) return m[1];
+  } catch { /* ignore */ }
+  return null;
+}
+function resolveListenHost() {
+  if (WANT_TAILSCALE) {
+    const ip = detectTailscaleIp();
+    if (!ip) {
+      console.error("[pi-rpc-bridge] --tailscale: 未检测到 tailscale0 / `tailscale ip -4`，拒绝启动");
+      process.exit(2);
+    }
+    return ip;
+  }
+  return arg("host", "127.0.0.1");
+}
+const HOST = resolveListenHost();
 const PI_BIN = arg("pi-bin", process.env.PI_BIN || findPi());
 const DEFAULT_CWD = process.env.HOME || ".";
 /** Persist last App/bridge working directory across connector restarts. */
@@ -601,6 +631,23 @@ function authenticates(value) {
   return typeof value === "string" && timingSafeEqual(
     tokenDigest, createHash("sha256").update(value).digest()
   );
+}
+
+// Non-loopback binds are only safe with a non-empty token (already enforced above).
+const isLoopbackHost = HOST === "127.0.0.1" || HOST === "localhost" || HOST === "::1"
+  || HOST.startsWith("127.");
+if (!isLoopbackHost) {
+  console.error(
+    `[pi-rpc-bridge] WARNING: listening on non-loopback ${HOST}:${PORT} — `
+    + "token auth is mandatory; prefer --tailscale (bind CGNAT only) over 0.0.0.0"
+  );
+  if (HOST === "0.0.0.0" || HOST === "::") {
+    console.error(
+      "[pi-rpc-bridge] refused: binding 0.0.0.0/:: exposes the connector on all interfaces; "
+      + "use --tailscale or --host <tailscale-ip>"
+    );
+    process.exit(2);
+  }
 }
 
 // 延迟创建上传目录：未鉴权客户端不能在磁盘创建文件。

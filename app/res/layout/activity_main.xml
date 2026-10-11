@@ -90,6 +90,26 @@
                         android:text="@string/action_model"
                         android:textColor="@color/pi_blue"
                         android:textSize="11sp" />
+
+                    <TextView
+                        android:id="@+id/profile_chip"
+                        style="@style/MonoMetaText.Line"
+                        android:layout_width="wrap_content"
+                        android:layout_height="22dp"
+                        android:layout_marginStart="4dp"
+                        android:background="@drawable/bg_status_chip"
+                        android:clickable="true"
+                        android:ellipsize="end"
+                        android:focusable="true"
+                        android:gravity="center_vertical"
+                        android:maxWidth="88dp"
+                        android:maxLines="1"
+                        android:paddingStart="6dp"
+                        android:paddingEnd="6dp"
+                        android:singleLine="true"
+                        android:text="@string/profiles_chip"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="11sp" />
                 </LinearLayout>
 
                 <TextView
