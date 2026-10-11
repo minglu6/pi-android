@@ -12,6 +12,7 @@
  *    便于 runit/前台两种运行方式。
  *  - 能力白名单：默认 read-only + prompt/abort 等，以及 Pocket 所需官方 `bash` / `abort_bash`
  *    （`--allow-bash` 仍为同义词）。白名单不限制 prompt 驱动的 agent 工具。
+ *  - 计划模式：仅向 prompt/steer/follow_up 注入只读指令（Pi RPC 无工具 allow-list，无法硬拦截）。
  *
  * 线协议（client → server）：
  *    {"id":"1","rpc":"get_state","params":{}}
