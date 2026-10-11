@@ -195,13 +195,21 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                     showConnectionBanner(getString(R.string.connector_autostart_ok), false);
                     return;
                 }
-                String msg = detail == null ? "" : detail;
-                if (msg.contains("allow-external-apps") || msg.contains("RUN_COMMAND")
-                        || msg.contains("未安装 Termux") || msg.contains("缺少")) {
-                    if (termuxSetupSheet == null) termuxSetupSheet = new TermuxSetupSheet(MainActivity.this);
+                // Always surface RUN_COMMAND / plugin errors — never fail silently.
+                String msg = detail == null || detail.isEmpty() ? "启动失败" : detail;
+                boolean needSetup = msg.contains("allow-external-apps")
+                        || msg.contains("RUN_COMMAND")
+                        || msg.contains("未安装 Termux")
+                        || msg.contains("缺少")
+                        || msg.contains("not allowed to run")
+                        || msg.contains("external apps");
+                if (needSetup) {
+                    if (termuxSetupSheet == null) {
+                        termuxSetupSheet = new TermuxSetupSheet(MainActivity.this);
+                    }
                     termuxSetupSheet.show();
                 }
-                showConnectionBanner(getString(R.string.connector_autostart_fail, msg), true);
+                showConnectionBanner(getString(R.string.connector_autostart_fail, msg), false);
             });
         }
 
@@ -819,6 +827,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         String sig = SettingsActivity.configSignature(this);
         if (isConnected() && sig.equals(lastConfig)) return;
         reconnect();
+        // App resume / config change — kick local connector (debounced).
+        maybeAutoStartConnector(false);
     }
 
     private void reconnect() {
@@ -851,6 +861,42 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
     }
 
+    /**
+     * Explicit user reconnect (banner / empty CTA / slash reload / profile switch).
+     * Always attempts WS reconnect and, for local Termux, force-starts the connector
+     * (bypasses 45s debounce).
+     */
+    private void userReconnect() {
+        if (!SettingsActivity.hasToken(this)) {
+            startActivity(new Intent(this, SettingsActivity.class));
+            return;
+        }
+        setConnectionVisual("connecting", getString(R.string.status_reconnecting));
+        reconnect();
+        maybeAutoStartConnector(true);
+    }
+
+    /**
+     * When the active profile is local Termux and auto-start is on, start the connector
+     * in the background. Shows {@link TermuxSetupSheet} if prerequisites are missing.
+     *
+     * @param userInitiated bypass debounce; show setup immediately when needed
+     */
+    private void maybeAutoStartConnector(boolean userInitiated) {
+        if (!SettingsActivity.autoStartConnector(this)) return;
+        if (!ConnectionProfiles.autoStartAllowed(this)) return;
+        if (!SettingsActivity.hasToken(this)) return;
+        if (isConnected()) return;
+        if (ConnectorController.needsSetup(this) || TermuxSetupSheet.needsSetup(this)) {
+            if (termuxSetupSheet == null) termuxSetupSheet = new TermuxSetupSheet(this);
+            termuxSetupSheet.show();
+            showConnectionBanner(getString(R.string.connector_autostart_fail,
+                    getString(R.string.termux_setup_title)), false);
+            return;
+        }
+        ConnectorController.tryAutoStart(this, userInitiated);
+    }
+
     private void openProfilesSheet() {
         if (profilesSheet == null) {
             profilesSheet = new ProfilesSheet(this, new ProfilesSheet.Host() {
@@ -862,14 +908,20 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                     historyNeedsSync = true;
                     currentSessionPath = "";
                     currentSessionName = "";
-                    setConnectionVisual("connecting", getString(R.string.status_connecting));
-                    reconnect();
+                    userReconnect();
                 }
 
                 @Override
                 @Nullable
                 public String activeConnectionState() {
                     return connectionVisualState;
+                }
+
+                @Override
+                public void onLocalProbeFailed(@NonNull ConnectionProfile profile) {
+                    if (!profile.isLocalLoopback()) return;
+                    // 测速失败 on 本机 — same as tapping 重新连接.
+                    maybeAutoStartConnector(true);
                 }
             });
         }
@@ -884,14 +936,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     private void bindDefaultReconnectAction() {
         if (reconnectBtn == null) return;
-        reconnectBtn.setOnClickListener(v -> {
-            if (!SettingsActivity.hasToken(this)) {
-                startActivity(new Intent(this, SettingsActivity.class));
-            } else {
-                setConnectionVisual("connecting", getString(R.string.status_reconnecting));
-                reconnect();
-            }
-        });
+        reconnectBtn.setOnClickListener(v -> userReconnect());
     }
 
     private void maybeShowTailscaleHint(@Nullable Throwable t) {
@@ -1868,8 +1913,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                     startActivity(new Intent(this, SettingsActivity.class));
                     break;
                 case "reload":
-                    setConnectionVisual("connecting", getString(R.string.status_reconnecting));
-                    reconnect();
+                    userReconnect();
                     break;
                 case "stop":
                     rpc("clear_queue", null);
@@ -2343,10 +2387,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             emptyBody.setText(R.string.empty_offline_body);
             emptyAction.setVisibility(View.VISIBLE);
             emptyAction.setText(R.string.reconnect_action);
-            emptyAction.setOnClickListener(v -> {
-                setConnectionVisual("connecting", getString(R.string.status_reconnecting));
-                reconnect();
-            });
+            emptyAction.setOnClickListener(v -> userReconnect());
         } else {
             emptyTitle.setText(R.string.empty_title);
             emptyBody.setText(R.string.empty_body);

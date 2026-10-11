@@ -29,6 +29,16 @@
 
 禁止：裸 `AlertDialog.Builder`、未套 `PiMaterialAlertDialog` 的 `MaterialAlertDialogBuilder`、在 sheet 外另起一套圆角/字号。
 
+## 不要写多余说明
+
+对**约定俗成**的交互，不要加图例 / 操作说明字幕：
+
+- 状态点颜色（绿/红/灰）、下拉刷新、点选列表填回、拖拽条关 sheet 等 —— 用户已懂
+- Sheet 标题下不要再叠一句「下拉刷新探测 · 绿=可达…」这类图例
+- 输入框已有 `hint` 时，不要在标题下再重复同一段说明
+
+仍该保留的：空态说明、一次性前置配置、错误/风险提示、字段 placeholder（只出现一次）。
+
 ## 空态
 
 空态至少包含：**图标或 logo、标题、一句说明**。需要用户行动时再加：
@@ -49,6 +59,7 @@
 
 - [ ] 用现有 sheet / dialog 组件，而不是系统默认弹窗
 - [ ] 空态完整（图标 + 标题 + 说明 [+ CTA]）
+- [ ] 没有给约定交互加多余图例 / 重复 hint 字幕
 - [ ] `AppFonts.applyTree` 或 `mono()` 已覆盖
 - [ ] 色与间距对齐 notice / picker（不是 Material 默认 lavender）
 - [ ] 字符串进 `strings.xml`，中文用户可见文案不用「桥」而用「连接器」

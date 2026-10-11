@@ -53,6 +53,9 @@ public final class ProfilesSheet {
          */
         @Nullable
         String activeConnectionState();
+
+        /** Local Termux probe failed — MainActivity should force auto-start. */
+        default void onLocalProbeFailed(@NonNull ConnectionProfile profile) {}
     }
 
     enum Kind { IDLE, CHECKING, OK, FAIL }
@@ -181,6 +184,9 @@ public final class ProfilesSheet {
                 result.kind = Kind.FAIL;
                 result.latencyMs = ms;
                 result.detail = shortReason(detail);
+                if (p.isLocalLoopback()) {
+                    host.onLocalProbeFailed(p);
+                }
             }
             adapter.notifyDataSetChanged();
             if (toast) {
