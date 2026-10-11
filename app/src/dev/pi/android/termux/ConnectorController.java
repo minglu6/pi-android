@@ -55,10 +55,9 @@ public final class ConnectorController {
         LISTENERS.remove(l);
     }
 
-    /** Called from MainActivity when WebSocket fails with refused/timeout. */
+    /** Passive / refused WebSocket — auto-start with debounce (not an explicit tap). */
     public static void onConnectFailure(@NonNull Context ctx, @Nullable Throwable t) {
         if (!SettingsActivity.autoStartConnector(ctx)) return;
-        // Termux auto-start only for local loopback profiles.
         if (!dev.pi.android.util.ConnectionProfiles.autoStartAllowed(ctx)) return;
         if (!isRefusedOrTimeout(t)) return;
         tryAutoStart(ctx, false);
@@ -72,25 +71,38 @@ public final class ConnectorController {
                 || msg.contains("timed out") || msg.contains("unreachable");
     }
 
+    /** Termux missing or RUN_COMMAND not granted (allow-external needs a live probe). */
+    public static boolean needsSetup(@NonNull Context ctx) {
+        return !TermuxRunCommand.isTermuxInstalled(ctx)
+                || !TermuxRunCommand.hasRunCommandPermission(ctx);
+    }
+
     /**
-     * @param force ignore debounce (e.g. user tapped 重新连接 while auto-start on)
+     * Start/restart the local Termux connector in the background.
+     *
+     * @param force {@code true} for explicit user actions (重新连接 / 切到本机 / 测速失败) —
+     *              bypasses the 45s debounce; {@code false} for passive resume / onFailure.
+     * @return {@code true} if RUN_COMMAND was dispatched; {@code false} if skipped, needs
+     *         setup, or send failed (listeners still get {@link Listener#onAutoStartFinished}).
      */
-    public static void tryAutoStart(@NonNull Context ctx, boolean force) {
+    public static boolean tryAutoStart(@NonNull Context ctx, boolean force) {
         Context app = ctx.getApplicationContext();
-        if (!SettingsActivity.autoStartConnector(app)) return;
-        if (!dev.pi.android.util.ConnectionProfiles.autoStartAllowed(app)) return;
+        if (!SettingsActivity.autoStartConnector(app)) return false;
+        if (!dev.pi.android.util.ConnectionProfiles.autoStartAllowed(app)) return false;
         long now = System.currentTimeMillis();
-        if (!force && (startInFlight || now - lastStartAttemptAt < DEBOUNCE_MS)) {
-            Log.i(TAG, "auto-start debounced");
-            return;
+        if (!force) {
+            if (startInFlight || now - lastStartAttemptAt < DEBOUNCE_MS) {
+                Log.i(TAG, "auto-start debounced");
+                return false;
+            }
         }
         if (!TermuxRunCommand.isTermuxInstalled(app)) {
             notifyAutoStartFinished(false, "未安装 Termux");
-            return;
+            return false;
         }
         if (!TermuxRunCommand.hasRunCommandPermission(app)) {
             notifyAutoStartFinished(false, "缺少 RUN_COMMAND 权限");
-            return;
+            return false;
         }
         lastStartAttemptAt = now;
         startInFlight = true;
@@ -103,7 +115,9 @@ public final class ConnectorController {
         if (!ok) {
             startInFlight = false;
             notifyAutoStartFinished(false, "无法向 Termux 发送 RUN_COMMAND");
+            return false;
         }
+        return true;
     }
 
     public static boolean beginUpdate(@NonNull Context ctx) {
