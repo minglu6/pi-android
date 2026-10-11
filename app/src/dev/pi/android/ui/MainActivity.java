@@ -121,6 +121,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private View contextBarFill;
     private TextView diffBadge;
     private ImageButton btnStop;
+    private View planBar;
+    private TextView planStatus;
+    private TextView planApprove;
+    private boolean planModeOn;
     private View untilBar;
     private TextView untilStatus;
     private TextView untilStop;
@@ -128,8 +132,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private TextView steerModePlan;
     private TextView steerModeSteer;
     private TextView steerModeQueue;
-    /** 0=plan, 1=steer, 2=queue；流式发送时 plan/queue → follow_up，steer → steer */
+    /** 1=steer, 2=queue；流式发送时 queue → follow_up，steer → steer。「计划」chip 单独控制 planModeOn。 */
     private int composerMode = 1;
+    private String pendingPlanRpc = "";
     private long lastSessionStatsAt;
     /** Optional workspace fields from get_state — empty means hide. */
     private String stateCwd = "";
@@ -225,6 +230,19 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         statusText = findViewById(R.id.status_text);
         statusDot = findViewById(R.id.status_dot);
         generationStatus = findViewById(R.id.generation_status);
+        planBar = findViewById(R.id.plan_bar);
+        planStatus = findViewById(R.id.plan_status);
+        planApprove = findViewById(R.id.plan_approve);
+        if (planStatus != null) planStatus.setTypeface(AppFonts.mono(this, false));
+        if (planApprove != null) {
+            planApprove.setOnClickListener(v -> {
+                if (!isConnected()) {
+                    Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                pendingPlanRpc = rpc("approve_plan", null);
+            });
+        }
         untilBar = findViewById(R.id.until_bar);
         untilStatus = findViewById(R.id.until_status);
         untilStop = findViewById(R.id.until_stop);
@@ -379,10 +397,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             cwdChip.setOnClickListener(v -> openCwdSheet(null));
         }
         if (steerModePlan != null) {
-            steerModePlan.setOnClickListener(v -> {
-                composerMode = 0;
-                updateSteerUi();
-            });
+            // 「计划」chip toggles Pocket plan mode (not follow_up).
+            steerModePlan.setOnClickListener(v -> togglePlanMode());
         }
         if (steerModeSteer != null) {
             steerModeSteer.setOnClickListener(v -> {
@@ -1136,11 +1152,41 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         refreshSessionMeta();
     }
 
+    private void togglePlanMode() {
+        if (!isConnected()) {
+            Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        JSONObject params = new JSONObject();
+        try {
+            params.put("on", !planModeOn);
+        } catch (Exception e) {
+            throw new IllegalStateException("set_plan_mode", e);
+        }
+        pendingPlanRpc = rpc("set_plan_mode", params);
+    }
+
+    private void applyPlanUpdate(boolean on) {
+        planModeOn = on;
+        if (planBar != null) planBar.setVisibility(on ? View.VISIBLE : View.GONE);
+        updateSteerUi();
+    }
+
     private void updateSteerUi() {
         int on = R.drawable.bg_segmented_on;
         int onFg = ContextCompat.getColor(this, R.color.md_theme_onPrimary);
         int offFg = ContextCompat.getColor(this, R.color.text_muted);
-        TextView[] modes = {steerModePlan, steerModeSteer, steerModeQueue};
+        // Plan chip reflects planModeOn; steer/queue reflect composerMode.
+        if (steerModePlan != null) {
+            if (planModeOn) {
+                steerModePlan.setBackgroundResource(on);
+                steerModePlan.setTextColor(onFg);
+            } else {
+                steerModePlan.setBackgroundResource(android.R.color.transparent);
+                steerModePlan.setTextColor(offFg);
+            }
+        }
+        TextView[] modes = {null, steerModeSteer, steerModeQueue};
         for (int i = 0; i < modes.length; i++) {
             TextView tv = modes[i];
             if (tv == null) continue;
@@ -1470,7 +1516,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         } catch (Exception e) {
             throw new IllegalStateException("steer/follow_up params", e);
         }
-        String cmd = composerMode == 1 ? "steer" : "follow_up";
+        String cmd = composerMode == 1 ? "steer" : "follow_up"; // 2=queue→follow_up
         pendingPromptRpcId = rpc(cmd, params);
         pendingComposerText = text;
         stickToBottom = true;
@@ -1644,6 +1690,13 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 composer.setText("");
                 return;
             }
+        }
+        // Pocket plan mode: /plan
+        if (!hasAttach && text.equalsIgnoreCase("/plan")) {
+            hideSlashSuggestions();
+            composer.setText("");
+            togglePlanMode();
+            return;
         }
         // Pocket schedules: /schedule …  or bare /schedule → list
         if (!hasAttach && text.regionMatches(true, 0, "/schedule", 0, 9)
@@ -1953,7 +2006,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 || "clear_until".equals(command)
                 || "list_schedules".equals(command)
                 || "add_schedule".equals(command)
-                || "cancel_schedule".equals(command);
+                || "cancel_schedule".equals(command)
+                || "set_plan_mode".equals(command)
+                || "get_plan_mode".equals(command)
+                || "approve_plan".equals(command);
     }
 
     private static String friendlyConnectionError(@Nullable Throwable t) {
@@ -2275,6 +2331,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             JSONObject until = data.optJSONObject("until");
             if (until != null) applyUntilUpdate(until);
         }
+        if (data.has("plan")) {
+            JSONObject plan = data.optJSONObject("plan");
+            if (plan != null) applyPlanUpdate(plan.optBoolean("on", false));
+        }
     }
 
     /** Done-when bar: show while working/checking; hide on idle / after terminal states. */
@@ -2386,6 +2446,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         String type = ev.optString("type");
         if ("bash_execution_update".equals(type)) {
             applyBashDelta(ev);
+            return;
+        }
+        if ("plan_update".equals(type)) {
+            applyPlanUpdate(ev.optBoolean("on", false));
             return;
         }
         if ("until_update".equals(type)) {
@@ -3002,6 +3066,16 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
             return true;
         }
+        if ("set_plan_mode".equals(command) || "get_plan_mode".equals(command)
+                || "approve_plan".equals(command)) {
+            pendingPlanRpc = "";
+            if (resumed && isConnectorCommandRejected(error, command)) {
+                Toast.makeText(this, R.string.plan_connector_required, Toast.LENGTH_LONG).show();
+            } else if (resumed && error != null && !error.isEmpty()) {
+                Toast.makeText(this, error, Toast.LENGTH_LONG).show();
+            }
+            return true;
+        }
         if ("bash".equals(command) && id.equals(pendingBashRpc)) {
             ChatMessage.ToolData prev = adapter.findTool(id);
             String detail = error != null ? error : getString(R.string.shell_failed);
@@ -3112,6 +3186,24 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 Toast.makeText(this, R.string.schedules_cancelled, Toast.LENGTH_SHORT).show();
             }
             if (data != null) showSchedulesData(data);
+            return true;
+        }
+        if ("set_plan_mode".equals(command) || "get_plan_mode".equals(command)
+                || "approve_plan".equals(command)) {
+            pendingPlanRpc = "";
+            if (data != null) applyPlanUpdate(data.optBoolean("on", false));
+            if (resumed) {
+                if ("approve_plan".equals(command)) {
+                    Toast.makeText(this, R.string.plan_approved_toast, Toast.LENGTH_SHORT).show();
+                } else if ("set_plan_mode".equals(command)) {
+                    Toast.makeText(this,
+                            planModeOn ? R.string.plan_on_toast : R.string.plan_off_toast,
+                            Toast.LENGTH_SHORT).show();
+                    if (planModeOn) {
+                        Toast.makeText(this, R.string.plan_soft_limit, Toast.LENGTH_LONG).show();
+                    }
+                }
+            }
             return true;
         }
         if ("bash".equals(command) && id.equals(pendingBashRpc)) {

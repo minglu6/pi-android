@@ -257,4 +257,11 @@
     <string name="schedules_need_args">用法：/schedule in 2h 检查部署</string>
     <string name="schedules_connector_required">当前连接器不支持定时消息，请更新 Termux 侧连接器</string>
     <string name="schedules_fired_toast">定时消息已送达 Pi</string>
+    <string name="plan_bar_body">计划模式：只读探索并给出计划，批准前不改动。</string>
+    <string name="plan_approve">批准计划</string>
+    <string name="plan_on_toast">计划模式已开：Pi 只读并提计划</string>
+    <string name="plan_off_toast">计划模式已关</string>
+    <string name="plan_approved_toast">已批准计划，Pi 开始执行</string>
+    <string name="plan_connector_required">当前连接器不支持计划模式，请更新 Termux 侧连接器</string>
+    <string name="plan_soft_limit">说明：连接器以指令约束为主，无法在 RPC 层硬拦截工具。</string>
 </resources>
