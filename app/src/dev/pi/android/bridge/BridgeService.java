@@ -20,6 +20,7 @@ import androidx.core.app.NotificationCompat;
 
 import org.json.JSONObject;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -73,6 +74,9 @@ public class BridgeService extends Service {
 
         void onExtStatus(Map<String, String> statuses);
 
+        /** 扩展 setWidget 行文本（key → lines）；空 map 表示无 widget。 */
+        default void onExtWidgets(Map<String, List<String>> widgets) {}
+
         /** 扩展 setTitle：反映到顶栏品牌标题 */
         void onExtTitle(String title);
 
@@ -111,6 +115,7 @@ public class BridgeService extends Service {
 
     private final LocalBinder binder = new LocalBinder();
     private final Map<String, String> extStatuses = new LinkedHashMap<>();
+    private final Map<String, List<String>> extWidgets = new LinkedHashMap<>();
     private final Map<String, ExtensionUi.AnswerSink> asks = new LinkedHashMap<>();
     private Ask pendingAsk;
 
@@ -265,6 +270,13 @@ public class BridgeService extends Service {
                     }
 
                     @Override
+                    public void onWidget(String key, @Nullable List<String> lines) {
+                        if (lines == null) extWidgets.remove(key);
+                        else extWidgets.put(key, new ArrayList<>(lines));
+                        publishWidgets();
+                    }
+
+                    @Override
                     public void onTitle(String title) {
                         for (UiHost h : hosts) {
                             try {
@@ -390,6 +402,7 @@ public class BridgeService extends Service {
         this.host = h;
         dbg("setHost hosts=" + hosts.size());
         publishStatuses();
+        publishWidgets();
         if (!bridge.isConnected()) {
             connectWithSaved();
         } else {
@@ -508,6 +521,19 @@ public class BridgeService extends Service {
         for (UiHost h : hosts) {
             try {
                 h.onExtStatus(snap);
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    private void publishWidgets() {
+        Map<String, List<String>> snap = new LinkedHashMap<>();
+        for (Map.Entry<String, List<String>> e : extWidgets.entrySet()) {
+            snap.put(e.getKey(), new ArrayList<>(e.getValue()));
+        }
+        for (UiHost h : hosts) {
+            try {
+                h.onExtWidgets(snap);
             } catch (Exception ignored) {
             }
         }

@@ -408,6 +408,20 @@
             android:orientation="horizontal" />
     </LinearLayout>
 
+    <!-- Extension setWidget lines (ANSI-rendered), above composer chrome -->
+    <TextView
+        android:id="@+id/ext_widget"
+        style="@style/MonoMetaText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingStart="12dp"
+        android:paddingTop="2dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="2dp"
+        android:textColor="@color/text_secondary"
+        android:textSize="10.5sp"
+        android:visibility="gone" />
+
     <TextView
         android:id="@+id/generation_status"
         style="@style/MonoMetaText.Line"
@@ -677,34 +691,35 @@
             </LinearLayout>
         </LinearLayout>
 
-        <!-- Tiny footer: single line; long status/stats ellipsize -->
+        <!-- Footer: connection + extension setStatus (multi-line ANSI); stats on the right -->
         <LinearLayout
             android:id="@+id/status_footer"
             android:layout_width="match_parent"
-            android:layout_height="18dp"
-            android:gravity="center_vertical"
+            android:layout_height="wrap_content"
+            android:gravity="top"
+            android:minHeight="18dp"
             android:orientation="horizontal"
             android:paddingStart="6dp"
-            android:paddingTop="0dp"
+            android:paddingTop="1dp"
             android:paddingEnd="6dp"
-            android:paddingBottom="0dp">
+            android:paddingBottom="1dp">
 
             <View
                 android:id="@+id/status_dot"
                 android:layout_width="5dp"
                 android:layout_height="5dp"
+                android:layout_marginTop="5dp"
                 android:background="@drawable/ic_status_dot" />
 
             <TextView
                 android:id="@+id/status_text"
-                style="@style/MonoMetaText.Line"
+                style="@style/MonoMetaText"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="5dp"
                 android:layout_weight="1"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:singleLine="true"
+                android:lineSpacingExtra="1dp"
+                android:maxLines="8"
                 android:text="@string/status_connecting"
                 android:textColor="@color/text_muted"
                 android:textSize="10.5sp" />
