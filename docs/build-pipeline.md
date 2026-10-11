@@ -57,6 +57,7 @@ python3 tools/fetch-aars.py \
   --root com.google.android.material:material:1.12.0 \
   --root org.jetbrains.kotlin:kotlin-stdlib:1.9.24 \
   --root com.squareup.okhttp3:okhttp:4.12.0 \
+  --root androidx.swiperefreshlayout:swiperefreshlayout:1.1.0 \
   --exclude org.jetbrains.kotlin:kotlin-stdlib-jdk7 \
   --exclude org.jetbrains.kotlin:kotlin-stdlib-jdk8 \
   --exclude org.jetbrains.kotlin:kotlin-stdlib-common

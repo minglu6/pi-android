@@ -11,6 +11,14 @@
     android:paddingEnd="8dp"
     android:paddingBottom="10dp">
 
+    <View
+        android:id="@+id/profile_status_dot"
+        android:layout_width="9dp"
+        android:layout_height="9dp"
+        android:layout_marginEnd="12dp"
+        android:background="@drawable/ic_status_dot"
+        android:contentDescription="@string/profiles_status_cd" />
+
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="wrap_content"
@@ -38,6 +46,17 @@
             android:maxLines="1"
             android:textColor="@color/text_muted"
             android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/profile_status_detail"
+            style="@style/MonoMetaText.Line"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="1dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="@color/text_faint"
+            android:textSize="11sp" />
     </LinearLayout>
 
     <TextView
