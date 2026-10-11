@@ -155,6 +155,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private String pendingReadPath = "";
     private String pendingCheckoutRpc = "";
     private boolean pendingReadAsAttach;
+    private String pendingInstructionsRpc = "";
+    private String sessionInstructions = "";
+    private boolean instructionsEditorPending;
     private String pendingUntilRpc = "";
     private String pendingScheduleRpc = "";
     private String pendingScheduleListRpc = "";
@@ -1215,6 +1218,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         addOverflowItem(m, 7, 3, R.string.menu_files, R.drawable.ic_menu_files);
         addOverflowItem(m, 8, 4, R.string.menu_changes, R.drawable.ic_menu_changes);
         addOverflowItem(m, 9, 5, R.string.menu_schedules, R.drawable.ic_menu_schedules);
+        addOverflowItem(m, 10, 6, R.string.menu_instructions, R.drawable.ic_menu_instructions);
         menu.setOnMenuItemClickListener(this::onOverflowItem);
         menu.show();
     }
@@ -1249,6 +1253,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 return true;
             case 9:
                 openSchedulesSheet();
+                return true;
+            case 10:
+                openInstructionsEditor();
                 return true;
             default:
                 return false;
@@ -1698,6 +1705,23 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             togglePlanMode();
             return;
         }
+        // Pocket session instructions: /instructions …
+        if (!hasAttach && text.regionMatches(true, 0, "/instructions", 0, 13)
+                && (text.length() == 13 || Character.isWhitespace(text.charAt(13)))) {
+            if (!isConnected()) {
+                Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+                return;
+            }
+            hideSlashSuggestions();
+            composer.setText("");
+            String arg = text.length() > 13 ? text.substring(13).trim() : "";
+            if (arg.isEmpty()) {
+                openInstructionsEditor();
+                return;
+            }
+            saveInstructions(arg);
+            return;
+        }
         // Pocket schedules: /schedule …  or bare /schedule → list
         if (!hasAttach && text.regionMatches(true, 0, "/schedule", 0, 9)
                 && (text.length() == 9 || Character.isWhitespace(text.charAt(9)))) {
@@ -2009,7 +2033,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 || "cancel_schedule".equals(command)
                 || "set_plan_mode".equals(command)
                 || "get_plan_mode".equals(command)
-                || "approve_plan".equals(command);
+                || "approve_plan".equals(command)
+                || "get_instructions".equals(command)
+                || "set_instructions".equals(command);
     }
 
     private static String friendlyConnectionError(@Nullable Throwable t) {
@@ -2335,6 +2361,39 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             JSONObject plan = data.optJSONObject("plan");
             if (plan != null) applyPlanUpdate(plan.optBoolean("on", false));
         }
+        if (data.has("instructions")) {
+            JSONObject instr = data.optJSONObject("instructions");
+            if (instr != null) sessionInstructions = instr.optString("text", "");
+            else sessionInstructions = data.optString("instructions", sessionInstructions);
+        }
+    }
+
+    private void openInstructionsEditor() {
+        if (!isConnected()) {
+            Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        instructionsEditorPending = true;
+        pendingInstructionsRpc = rpc("get_instructions", null);
+    }
+
+    private void showInstructionsEditor() {
+        MaterialDialogs.promptText(this, R.string.instructions_title, R.string.instructions_hint,
+                sessionInstructions,
+                android.text.InputType.TYPE_CLASS_TEXT
+                        | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                        | android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES,
+                this::saveInstructions);
+    }
+
+    private void saveInstructions(@NonNull String text) {
+        JSONObject params = new JSONObject();
+        try {
+            params.put("text", text == null ? "" : text.trim());
+        } catch (Exception e) {
+            throw new IllegalStateException("set_instructions", e);
+        }
+        pendingInstructionsRpc = rpc("set_instructions", params);
     }
 
     /** Done-when bar: show while working/checking; hide on idle / after terminal states. */
@@ -2450,6 +2509,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         if ("plan_update".equals(type)) {
             applyPlanUpdate(ev.optBoolean("on", false));
+            return;
+        }
+        if ("instructions_update".equals(type)) {
+            sessionInstructions = ev.optString("text", "");
             return;
         }
         if ("until_update".equals(type)) {
@@ -3076,6 +3139,15 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
             return true;
         }
+        if ("get_instructions".equals(command) || "set_instructions".equals(command)) {
+            pendingInstructionsRpc = "";
+            if (resumed && isConnectorCommandRejected(error, command)) {
+                Toast.makeText(this, R.string.instructions_connector_required, Toast.LENGTH_LONG).show();
+            } else if (resumed && error != null && !error.isEmpty()) {
+                Toast.makeText(this, error, Toast.LENGTH_LONG).show();
+            }
+            return true;
+        }
         if ("bash".equals(command) && id.equals(pendingBashRpc)) {
             ChatMessage.ToolData prev = adapter.findTool(id);
             String detail = error != null ? error : getString(R.string.shell_failed);
@@ -3203,6 +3275,21 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                         Toast.makeText(this, R.string.plan_soft_limit, Toast.LENGTH_LONG).show();
                     }
                 }
+            }
+            return true;
+        }
+        if ("get_instructions".equals(command) || "set_instructions".equals(command)) {
+            pendingInstructionsRpc = "";
+            if (data != null) sessionInstructions = data.optString("text", "");
+            if ("get_instructions".equals(command) && instructionsEditorPending) {
+                instructionsEditorPending = false;
+                showInstructionsEditor();
+            }
+            if ("set_instructions".equals(command) && resumed) {
+                Toast.makeText(this,
+                        sessionInstructions.isEmpty()
+                                ? R.string.instructions_cleared : R.string.instructions_saved,
+                        Toast.LENGTH_SHORT).show();
             }
             return true;
         }

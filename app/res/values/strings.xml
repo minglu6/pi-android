@@ -264,4 +264,10 @@
     <string name="plan_approved_toast">已批准计划，Pi 开始执行</string>
     <string name="plan_connector_required">当前连接器不支持计划模式，请更新 Termux 侧连接器</string>
     <string name="plan_soft_limit">说明：连接器以指令约束为主，无法在 RPC 层硬拦截工具。</string>
+    <string name="menu_instructions">会话说明</string>
+    <string name="instructions_title">会话说明</string>
+    <string name="instructions_hint">Pi 会在本会话每条消息前看到这些说明（如：用 pnpm 不用 npm）</string>
+    <string name="instructions_saved">已保存会话说明</string>
+    <string name="instructions_cleared">已清空会话说明</string>
+    <string name="instructions_connector_required">当前连接器不支持会话说明，请更新 Termux 侧连接器</string>
 </resources>
