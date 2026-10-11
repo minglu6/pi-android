@@ -4,7 +4,7 @@
 
 本轮按用户指定参考 [TannerMidd/pi-pocket](https://github.com/TannerMidd/pi-pocket)，
 审阅版本 `45685e1`，主要对应 `web/composer.js`、`web/transcript.js`、`web/chat.js` 和移动端 CSS。
-采用其移动端交互思路，不引入 WebView/React，不替换本项目原生 Java、桥协议或已修好的模型/会话状态逻辑。
+采用其移动端交互思路，默认不引入 WebView/React，不替换本项目原生 Java、桥协议或已修好的模型/会话状态逻辑。例外：助手回复中的 SVG/HTML 预览使用沙箱 WebView（JS 关闭、禁止网络），仅作媒体预览。
 
 - 正文与工具活动分离，不把 assistant 的 `toolCall` 内容再次渲染成正文。
 - 工具命令与原始输出分离；紧凑预览、展开/收起、横向查看长行、复制完整输出。

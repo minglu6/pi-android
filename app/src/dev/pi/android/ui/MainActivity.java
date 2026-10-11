@@ -46,9 +46,11 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import android.util.Base64;
 
 import dev.pi.android.R;
 import dev.pi.android.bridge.AgentState;
@@ -155,6 +157,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private String pendingReadPath = "";
     private String pendingCheckoutRpc = "";
     private boolean pendingReadAsAttach;
+    /** RPC id → callback for markdown ![](path) image loads (encoding=base64). */
+    private final Map<String, MessageAdapter.ProjectImageCallback> pendingImageLoads = new HashMap<>();
+    private final Map<String, String> pendingImagePaths = new HashMap<>();
     private String pendingInstructionsRpc = "";
     private String sessionInstructions = "";
     private boolean instructionsEditorPending;
@@ -345,6 +350,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
             @Override public void onImageFullscreen(@NonNull ChatMessage.AttachmentData attachment) {
                 showImageFullscreen(attachment);
+            }
+            @Override public void onLoadProjectImage(@NonNull String path,
+                    @NonNull MessageAdapter.ProjectImageCallback callback) {
+                loadProjectImageBytes(path, callback);
             }
         });
         list.setAdapter(adapter);
@@ -3165,6 +3174,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
             return true;
         }
+        if ("read_project_file".equals(command) && pendingImageLoads.containsKey(id)) {
+            MessageAdapter.ProjectImageCallback cb = pendingImageLoads.remove(id);
+            String path = pendingImagePaths.remove(id);
+            if (cb != null) cb.onResult(path == null ? "" : path, null);
+            return true;
+        }
         if ("list_project_files".equals(command) || "git_status".equals(command)
                 || "git_branches".equals(command) || "git_checkout".equals(command)
                 || "git_diff".equals(command) || "read_project_file".equals(command)
@@ -3329,6 +3344,29 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
             return true;
         }
+        if ("read_project_file".equals(command) && pendingImageLoads.containsKey(id)) {
+            MessageAdapter.ProjectImageCallback cb = pendingImageLoads.remove(id);
+            String path = pendingImagePaths.remove(id);
+            if (path == null) path = "";
+            byte[] bytes = null;
+            if (data != null) {
+                String b64 = data.optString("contentBase64", "");
+                if (!b64.isEmpty()) {
+                    try {
+                        bytes = Base64.decode(b64, Base64.DEFAULT);
+                    } catch (IllegalArgumentException ignored) {
+                        bytes = null;
+                    }
+                } else {
+                    String content = data.optString("content", "");
+                    if (!content.isEmpty()) {
+                        bytes = content.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                    }
+                }
+            }
+            if (cb != null) cb.onResult(path, bytes);
+            return true;
+        }
         if ("read_project_file".equals(command) && id.equals(pendingReadRpc)) {
             String path = pendingReadPath;
             boolean asAttach = pendingReadAsAttach;
@@ -3474,6 +3512,31 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         } else if ("set_cwd".equals(command)) {
             if (id.equals(pendingCwdSetRpc)) pendingCwdSetRpc = "";
         }
+    }
+
+    /** Load project file bytes for markdown inline images (base64 over bridge). */
+    private void loadProjectImageBytes(@NonNull String path,
+                                       @NonNull MessageAdapter.ProjectImageCallback callback) {
+        if (!isConnected()) {
+            callback.onResult(path, null);
+            return;
+        }
+        String rel = path.trim();
+        if (rel.startsWith("file://")) rel = rel.substring(7);
+        if (rel.startsWith("~/")) rel = rel.substring(2);
+        JSONObject params = new JSONObject();
+        try {
+            params.put("path", rel);
+            params.put("encoding", "base64");
+            params.put("asImage", true);
+            params.put("maxBytes", 512 * 1024);
+        } catch (Exception e) {
+            callback.onResult(path, null);
+            return;
+        }
+        String rid = rpc("read_project_file", params);
+        pendingImageLoads.put(rid, callback);
+        pendingImagePaths.put(rid, path);
     }
 
     /** Browse working directory; {@code path} null/empty lists current session cwd. */

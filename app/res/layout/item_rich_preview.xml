@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="6dp"
+    android:layout_marginBottom="6dp"
+    android:background="@drawable/bg_tool_output"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="28dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="10dp"
+        android:paddingEnd="4dp">
+
+        <TextView
+            android:id="@+id/rich_lang"
+            style="@style/MonoMetaText.Line"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textColor="@color/text_muted"
+            android:textSize="10.5sp" />
+
+        <TextView
+            android:id="@+id/rich_tab_preview"
+            style="@style/MonoMetaText.Line"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:gravity="center"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:text="@string/rich_tab_preview"
+            android:textColor="@color/pi_blue"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/rich_tab_code"
+            style="@style/MonoMetaText.Line"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:gravity="center"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:text="@string/rich_tab_code"
+            android:textColor="@color/text_muted"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/rich_copy"
+            style="@style/MonoMetaText.Line"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:gravity="center"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:text="@string/action_copy"
+            android:textColor="@color/pi_blue"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:id="@+id/rich_preview_host"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="120dp"
+        android:paddingBottom="4dp" />
+
+    <HorizontalScrollView
+        android:id="@+id/rich_code_hscroll"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:fillViewport="true"
+        android:overScrollMode="ifContentScrolls"
+        android:scrollbars="horizontal"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/rich_code_body"
+            style="@style/MonoMetaText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:breakStrategy="simple"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="8dp"
+            android:textColor="@color/text_secondary"
+            android:textIsSelectable="true"
+            android:textSize="12sp" />
+    </HorizontalScrollView>
+</LinearLayout>

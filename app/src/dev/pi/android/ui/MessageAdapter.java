@@ -17,10 +17,15 @@ import android.view.ViewGroup;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.style.ForegroundColorSpan;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.PopupMenu;
+import android.widget.TableLayout;
+import android.widget.TableRow;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -51,6 +56,8 @@ import dev.pi.android.util.AppFonts;
 import dev.pi.android.util.Bitmaps;
 import dev.pi.android.util.DiffLite;
 import dev.pi.android.util.MarkdownLite;
+import dev.pi.android.util.MdTables;
+import dev.pi.android.util.RichBlocks;
 import dev.pi.android.util.SyntaxLite;
 
 /**
@@ -115,6 +122,19 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
 
         /** Fullscreen image preview for chat attachments. Default no-op. */
         default void onImageFullscreen(@NonNull ChatMessage.AttachmentData attachment) {}
+
+        /**
+         * Load a project-relative image for markdown {@code ![](path)}.
+         * Callback on main thread; null bytes = missing/failed.
+         */
+        default void onLoadProjectImage(@NonNull String path,
+                                        @NonNull ProjectImageCallback callback) {
+            callback.onResult(path, null);
+        }
+    }
+
+    public interface ProjectImageCallback {
+        void onResult(@NonNull String path, @Nullable byte[] bytes);
     }
 
     private static final int CODE_FOLD_LINES = 40;
@@ -190,6 +210,11 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
     private final Map<String, Boolean> noticeExpanded = new HashMap<>();
     /** Assistant code-block fold state (adapter-scoped so recycle keeps it). */
     private final Map<String, Boolean> codeBlockExpanded = new HashMap<>();
+    /** Rich preview vs code tab: true = showing code. */
+    private final Map<String, Boolean> richShowCode = new HashMap<>();
+    /** Cached inline project images (path → bytes). */
+    private final Map<String, byte[]> projectImageCache = new HashMap<>();
+    private final Map<String, Boolean> projectImageFailed = new HashMap<>();
 
     public MessageAdapter(OnMessageChanged listener) {
         this.listener = listener;
@@ -353,6 +378,9 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
     public void onViewRecycled(@NonNull VH holder) {
         holder.cancelThumbnails();
         if (holder.attachmentItems != null) holder.attachmentItems.removeAllViews();
+        if (holder.type == TYPE_AGENT && holder.agentBody != null) {
+            holder.destroyWebViews(holder.agentBody);
+        }
         // Clear tool text so recycled views never flash previous command/status.
         if (holder.type == TYPE_TOOL) {
             if (holder.toolGlyph != null) holder.toolGlyph.setText("");
@@ -582,7 +610,29 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
             if (agentBody == null || text == null) return;
             for (int i = agentBody.getChildCount() - 1; i >= 0; i--) {
                 View child = agentBody.getChildAt(i);
-                if (child != text) agentBody.removeViewAt(i);
+                if (child != text) {
+                    destroyWebViews(child);
+                    agentBody.removeViewAt(i);
+                }
+            }
+        }
+
+        private void destroyWebViews(@Nullable View root) {
+            if (root instanceof WebView) {
+                WebView wv = (WebView) root;
+                wv.stopLoading();
+                wv.loadUrl("about:blank");
+                if (wv.getParent() instanceof ViewGroup) {
+                    ((ViewGroup) wv.getParent()).removeView(wv);
+                }
+                wv.destroy();
+                return;
+            }
+            if (root instanceof ViewGroup) {
+                ViewGroup g = (ViewGroup) root;
+                for (int i = g.getChildCount() - 1; i >= 0; i--) {
+                    destroyWebViews(g.getChildAt(i));
+                }
             }
         }
 
@@ -597,61 +647,338 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
             for (int si = 0; si < segs.size(); si++) {
                 Seg seg = segs.get(si);
                 if (seg.code) {
-                    View block = LayoutInflater.from(ctx).inflate(R.layout.item_code_block, agentBody, false);
-                    TextView lang = block.findViewById(R.id.code_lang);
-                    TextView body = block.findViewById(R.id.code_body);
-                    TextView copy = block.findViewById(R.id.code_copy);
-                    TextView fold = block.findViewById(R.id.code_fold);
-                    String langLabel = SyntaxLite.normalizeLang(seg.lang);
-                    lang.setText(langLabel);
-                    body.setTypeface(AppFonts.mono(ctx, false));
-                    final String key = "code|" + si + "|" + seg.body.hashCode();
-                    boolean expanded = Boolean.TRUE.equals(codeBlockExpanded.get(key));
-                    int lines = countLines(seg.body);
-                    boolean foldable = lines > CODE_FOLD_LINES;
-                    String shown = (!foldable || expanded) ? seg.body
-                            : firstNLines(seg.body, CODE_FOLD_LINES);
-                    int kw = ContextCompat.getColor(ctx, R.color.pi_blue);
-                    int str = ContextCompat.getColor(ctx, R.color.status_online);
-                    int cmt = ContextCompat.getColor(ctx, R.color.text_muted);
-                    int num = ContextCompat.getColor(ctx, R.color.pi_amber);
-                    body.setMaxLines(Integer.MAX_VALUE);
-                    body.setEllipsize(null);
-                    body.setText(SyntaxLite.highlight(shown, langLabel, kw, str, cmt, num));
-                    body.setBackgroundColor(codeBg);
-                    if (foldable) {
-                        fold.setVisibility(View.VISIBLE);
-                        fold.setText(expanded ? R.string.code_fold : R.string.code_show_all);
-                        fold.setOnClickListener(v -> {
-                            codeBlockExpanded.put(key,
-                                    !Boolean.TRUE.equals(codeBlockExpanded.get(key)));
-                            int pos = getBindingAdapterPosition();
-                            if (pos != RecyclerView.NO_POSITION) notifyItemChanged(pos);
-                        });
+                    RichBlocks.Kind kind = RichBlocks.kind(seg.lang, seg.body);
+                    if (kind == RichBlocks.Kind.SVG || kind == RichBlocks.Kind.HTML) {
+                        agentBody.addView(bindRichBlock(si, seg, kind, codeBg, codeFg));
+                    } else if (kind == RichBlocks.Kind.DIFF) {
+                        agentBody.addView(bindCodeBlock(si, seg, codeBg, codeFg, true));
                     } else {
-                        fold.setVisibility(View.GONE);
+                        agentBody.addView(bindCodeBlock(si, seg, codeBg, codeFg, false));
                     }
-                    final String copyText = seg.body;
-                    copy.setOnClickListener(v -> copyPlain(copyText));
-                    agentBody.addView(block);
                 } else if (!seg.body.isEmpty()) {
-                    if (firstText) {
-                        text.setVisibility(View.VISIBLE);
-                        text.setText(MarkdownLite.render(ctx, seg.body, codeBg, codeFg));
-                        firstText = false;
-                    } else {
-                        TextView tv = new TextView(ctx);
-                        tv.setText(MarkdownLite.render(ctx, seg.body, codeBg, codeFg));
-                        tv.setTextColor(ContextCompat.getColor(ctx, R.color.text_primary));
-                        tv.setTextSize(14);
-                        tv.setTextIsSelectable(true);
-                        agentBody.addView(tv);
-                    }
+                    firstText = appendProseBlocks(seg.body, codeBg, codeFg, firstText);
                 }
             }
             if (firstText) {
                 text.setVisibility(View.GONE);
             }
+        }
+
+        /** @return whether still waiting for first text slot */
+        private boolean appendProseBlocks(String body, int codeBg, int codeFg, boolean firstText) {
+            List<MdTables.Block> blocks = MdTables.split(body);
+            boolean waiting = firstText;
+            for (MdTables.Block block : blocks) {
+                if (block.table && block.rows != null) {
+                    agentBody.addView(buildTableView(block.rows));
+                } else if (block.prose != null && !block.prose.isEmpty()) {
+                    waiting = appendImageAwareProse(block.prose, codeBg, codeFg, waiting);
+                }
+            }
+            return waiting;
+        }
+
+        private boolean appendImageAwareProse(String prose, int codeBg, int codeFg, boolean firstText) {
+            // Split on ![alt](src) — remote http(s) stay as text; local paths become ImageViews.
+            java.util.regex.Pattern img = java.util.regex.Pattern.compile(
+                    "!\\[([^\\]]*)\\]\\(([^)]+)\\)");
+            java.util.regex.Matcher m = img.matcher(prose);
+            int last = 0;
+            boolean waiting = firstText;
+            while (m.find()) {
+                if (m.start() > last) {
+                    waiting = appendTextChunk(prose.substring(last, m.start()), codeBg, codeFg, waiting);
+                }
+                String alt = m.group(1) == null ? "" : m.group(1);
+                String src = m.group(2) == null ? "" : m.group(2).trim();
+                if (src.startsWith("http://") || src.startsWith("https://") || src.startsWith("data:")) {
+                    waiting = appendTextChunk(m.group(0), codeBg, codeFg, waiting);
+                } else {
+                    agentBody.addView(bindInlineProjectImage(src, alt));
+                }
+                last = m.end();
+            }
+            if (last < prose.length()) {
+                waiting = appendTextChunk(prose.substring(last), codeBg, codeFg, waiting);
+            }
+            return waiting;
+        }
+
+        private boolean appendTextChunk(String chunk, int codeBg, int codeFg, boolean firstText) {
+            if (chunk.isEmpty()) return firstText;
+            if (firstText) {
+                text.setVisibility(View.VISIBLE);
+                text.setText(MarkdownLite.render(ctx, chunk, codeBg, codeFg));
+                return false;
+            }
+            TextView tv = new TextView(ctx);
+            tv.setText(MarkdownLite.render(ctx, chunk, codeBg, codeFg));
+            tv.setTextColor(ContextCompat.getColor(ctx, R.color.text_primary));
+            tv.setTextSize(14);
+            tv.setTextIsSelectable(true);
+            agentBody.addView(tv);
+            return false;
+        }
+
+        private View bindInlineProjectImage(@NonNull String path, @NonNull String alt) {
+            LinearLayout wrap = new LinearLayout(ctx);
+            wrap.setOrientation(LinearLayout.VERTICAL);
+            wrap.setPadding(0, dp(6), 0, dp(6));
+            ImageView iv = new ImageView(ctx);
+            iv.setAdjustViewBounds(true);
+            iv.setMaxHeight(dp(280));
+            iv.setScaleType(ImageView.ScaleType.FIT_START);
+            iv.setContentDescription(alt.isEmpty() ? path : alt);
+            TextView err = new TextView(ctx);
+            err.setText(R.string.rich_image_missing);
+            err.setTextColor(ContextCompat.getColor(ctx, R.color.text_muted));
+            err.setTextSize(12);
+            err.setVisibility(View.GONE);
+            wrap.addView(iv, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            wrap.addView(err);
+
+            byte[] cached = projectImageCache.get(path);
+            if (cached != null) {
+                applyInlineBytes(iv, err, cached);
+            } else if (Boolean.TRUE.equals(projectImageFailed.get(path))) {
+                iv.setVisibility(View.GONE);
+                err.setVisibility(View.VISIBLE);
+            } else if (MessageAdapter.this.agentActions != null) {
+                final Object token = new Object();
+                wrap.setTag(token);
+                MessageAdapter.this.agentActions.onLoadProjectImage(path, (p, bytes) -> {
+                    if (wrap.getTag() != token) return;
+                    if (bytes == null || bytes.length == 0) {
+                        projectImageFailed.put(path, true);
+                        iv.setVisibility(View.GONE);
+                        err.setVisibility(View.VISIBLE);
+                        return;
+                    }
+                    projectImageCache.put(path, bytes);
+                    applyInlineBytes(iv, err, bytes);
+                });
+            } else {
+                iv.setVisibility(View.GONE);
+                err.setVisibility(View.VISIBLE);
+            }
+            return wrap;
+        }
+
+        private void applyInlineBytes(ImageView iv, TextView err, byte[] bytes) {
+            // SVG text → tiny WebView; raster → Bitmap.
+            String head = new String(bytes, 0, Math.min(bytes.length, 256), StandardCharsets.UTF_8);
+            if (RichBlocks.looksLikeSvg(head) || head.trim().startsWith("<?xml")) {
+                FrameLayout host = new FrameLayout(ctx);
+                ViewGroup parent = (ViewGroup) iv.getParent();
+                int idx = parent.indexOfChild(iv);
+                parent.removeView(iv);
+                parent.addView(host, idx, new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, dp(200)));
+                WebView wv = newSandboxedWebView();
+                host.addView(wv, new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                String svg = new String(bytes, StandardCharsets.UTF_8);
+                wv.loadDataWithBaseURL(null,
+                        "<html><body style=\"margin:0;background:#111\">" + svg + "</body></html>",
+                        "text/html", "utf-8", null);
+                err.setVisibility(View.GONE);
+                return;
+            }
+            Bitmap bmp = Bitmaps.decodeByteArrayBounded(bytes, Bitmaps.VIEW_EDGE);
+            if (bmp == null) {
+                iv.setVisibility(View.GONE);
+                err.setVisibility(View.VISIBLE);
+                return;
+            }
+            iv.setImageBitmap(bmp);
+            iv.setVisibility(View.VISIBLE);
+            err.setVisibility(View.GONE);
+            final byte[] full = bytes;
+            iv.setOnClickListener(v -> {
+                ChatMessage.AttachmentData att = new ChatMessage.AttachmentData(
+                        "image", "image/*", "image", full.length, "",
+                        Base64.encodeToString(full, Base64.NO_WRAP));
+                if (MessageAdapter.this.agentActions != null) {
+                    MessageAdapter.this.agentActions.onImageFullscreen(att);
+                }
+            });
+        }
+
+        private View buildTableView(@NonNull String[][] rows) {
+            HorizontalScrollView scroll = new HorizontalScrollView(ctx);
+            scroll.setFillViewport(false);
+            scroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+            TableLayout table = new TableLayout(ctx);
+            table.setStretchAllColumns(false);
+            int pad = dp(8);
+            int minCell = dp(12 * 8); // ~12ch
+            int codeBg = ContextCompat.getColor(ctx, R.color.bg_code);
+            int codeFg = ContextCompat.getColor(ctx, R.color.pi_amber);
+            for (int r = 0; r < rows.length; r++) {
+                TableRow tr = new TableRow(ctx);
+                for (int c = 0; c < rows[r].length; c++) {
+                    TextView cell = new TextView(ctx);
+                    cell.setText(MarkdownLite.render(ctx, rows[r][c], codeBg, codeFg));
+                    cell.setTextColor(ContextCompat.getColor(ctx, R.color.text_primary));
+                    cell.setTextSize(r == 0 ? 12.5f : 12f);
+                    if (r == 0) cell.setTypeface(cell.getTypeface(), android.graphics.Typeface.BOLD);
+                    cell.setPadding(pad, pad / 2, pad, pad / 2);
+                    cell.setMinWidth(minCell);
+                    cell.setBackgroundColor(r % 2 == 0
+                            ? ContextCompat.getColor(ctx, R.color.bg_elevated)
+                            : ContextCompat.getColor(ctx, R.color.bg_surface));
+                    TableRow.LayoutParams lp = new TableRow.LayoutParams(
+                            TableRow.LayoutParams.WRAP_CONTENT, TableRow.LayoutParams.WRAP_CONTENT);
+                    lp.setMargins(0, 0, 1, 1);
+                    tr.addView(cell, lp);
+                }
+                table.addView(tr);
+            }
+            table.setPadding(0, dp(4), 0, dp(4));
+            scroll.addView(table);
+            return scroll;
+        }
+
+        private View bindCodeBlock(int si, Seg seg, int codeBg, int codeFg, boolean asDiff) {
+            View block = LayoutInflater.from(ctx).inflate(R.layout.item_code_block, agentBody, false);
+            TextView lang = block.findViewById(R.id.code_lang);
+            TextView body = block.findViewById(R.id.code_body);
+            TextView copy = block.findViewById(R.id.code_copy);
+            TextView fold = block.findViewById(R.id.code_fold);
+            String langLabel = asDiff ? "diff" : SyntaxLite.normalizeLang(seg.lang);
+            lang.setText(langLabel);
+            body.setTypeface(AppFonts.mono(ctx, false));
+            final String key = "code|" + si + "|" + seg.body.hashCode();
+            boolean expanded = Boolean.TRUE.equals(codeBlockExpanded.get(key));
+            int lines = countLines(seg.body);
+            boolean foldable = lines > CODE_FOLD_LINES;
+            String shown = (!foldable || expanded) ? seg.body
+                    : firstNLines(seg.body, CODE_FOLD_LINES);
+            body.setMaxLines(Integer.MAX_VALUE);
+            body.setEllipsize(null);
+            if (asDiff && DiffLite.looksLikeDiff(shown)) {
+                body.setText(DiffLite.render(shown,
+                        ContextCompat.getColor(ctx, R.color.diff_add),
+                        ContextCompat.getColor(ctx, R.color.diff_del),
+                        ContextCompat.getColor(ctx, R.color.text_muted),
+                        ContextCompat.getColor(ctx, R.color.text_secondary)));
+            } else {
+                int kw = ContextCompat.getColor(ctx, R.color.pi_blue);
+                int str = ContextCompat.getColor(ctx, R.color.status_online);
+                int cmt = ContextCompat.getColor(ctx, R.color.text_muted);
+                int num = ContextCompat.getColor(ctx, R.color.pi_amber);
+                body.setText(SyntaxLite.highlight(shown, langLabel, kw, str, cmt, num));
+            }
+            body.setBackgroundColor(codeBg);
+            if (foldable) {
+                fold.setVisibility(View.VISIBLE);
+                fold.setText(expanded ? R.string.code_fold : R.string.code_show_all);
+                fold.setOnClickListener(v -> {
+                    codeBlockExpanded.put(key,
+                            !Boolean.TRUE.equals(codeBlockExpanded.get(key)));
+                    int pos = getBindingAdapterPosition();
+                    if (pos != RecyclerView.NO_POSITION) notifyItemChanged(pos);
+                });
+            } else {
+                fold.setVisibility(View.GONE);
+            }
+            final String copyText = seg.body;
+            copy.setOnClickListener(v -> copyPlain(copyText));
+            return block;
+        }
+
+        private View bindRichBlock(int si, Seg seg, RichBlocks.Kind kind, int codeBg, int codeFg) {
+            View block = LayoutInflater.from(ctx).inflate(R.layout.item_rich_preview, agentBody, false);
+            TextView lang = block.findViewById(R.id.rich_lang);
+            TextView tabPreview = block.findViewById(R.id.rich_tab_preview);
+            TextView tabCode = block.findViewById(R.id.rich_tab_code);
+            TextView copy = block.findViewById(R.id.rich_copy);
+            FrameLayout host = block.findViewById(R.id.rich_preview_host);
+            HorizontalScrollView codeScroll = block.findViewById(R.id.rich_code_hscroll);
+            TextView codeBody = block.findViewById(R.id.rich_code_body);
+
+            String label = kind == RichBlocks.Kind.SVG ? "svg" : "html";
+            lang.setText(label);
+            tabPreview.setText(kind == RichBlocks.Kind.SVG
+                    ? R.string.rich_tab_image : R.string.rich_tab_preview);
+
+            final String key = "rich|" + si + "|" + seg.body.hashCode();
+            boolean showCode = Boolean.TRUE.equals(richShowCode.get(key));
+
+            int kw = ContextCompat.getColor(ctx, R.color.pi_blue);
+            int str = ContextCompat.getColor(ctx, R.color.status_online);
+            int cmt = ContextCompat.getColor(ctx, R.color.text_muted);
+            int num = ContextCompat.getColor(ctx, R.color.pi_amber);
+            codeBody.setTypeface(AppFonts.mono(ctx, false));
+            codeBody.setText(SyntaxLite.highlight(seg.body, label, kw, str, cmt, num));
+            codeBody.setBackgroundColor(codeBg);
+
+            Runnable applyTab = () -> {
+                boolean code = Boolean.TRUE.equals(richShowCode.get(key));
+                host.setVisibility(code ? View.GONE : View.VISIBLE);
+                codeScroll.setVisibility(code ? View.VISIBLE : View.GONE);
+                tabPreview.setTextColor(ContextCompat.getColor(ctx,
+                        code ? R.color.text_muted : R.color.pi_blue));
+                tabCode.setTextColor(ContextCompat.getColor(ctx,
+                        code ? R.color.pi_blue : R.color.text_muted));
+            };
+
+            host.removeAllViews();
+            int maxH = Math.round(ctx.getResources().getDisplayMetrics().heightPixels
+                    * CARD_SCROLL_MAX_SCREEN);
+            host.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, Math.max(dp(120), maxH)));
+            WebView wv = newSandboxedWebView();
+            host.addView(wv, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            if (kind == RichBlocks.Kind.SVG) {
+                String svg = seg.body.trim();
+                if (!RichBlocks.looksLikeSvg(svg)) {
+                    TextView broken = new TextView(ctx);
+                    broken.setText(R.string.rich_svg_broken);
+                    broken.setTextColor(ContextCompat.getColor(ctx, R.color.text_muted));
+                    broken.setPadding(dp(10), dp(10), dp(10), dp(10));
+                    host.removeAllViews();
+                    host.addView(broken);
+                } else {
+                    wv.loadDataWithBaseURL(null,
+                            "<html><body style=\"margin:0;background:#111;display:flex;"
+                                    + "align-items:center;justify-content:center;min-height:100%\">"
+                                    + svg + "</body></html>",
+                            "text/html", "utf-8", null);
+                }
+            } else {
+                wv.loadDataWithBaseURL(null, RichBlocks.previewDocument(seg.body),
+                        "text/html", "utf-8", null);
+            }
+
+            tabPreview.setOnClickListener(v -> {
+                richShowCode.put(key, false);
+                applyTab.run();
+            });
+            tabCode.setOnClickListener(v -> {
+                richShowCode.put(key, true);
+                applyTab.run();
+            });
+            copy.setOnClickListener(v -> copyPlain(seg.body));
+            if (showCode) richShowCode.put(key, true);
+            applyTab.run();
+            return block;
+        }
+
+        private WebView newSandboxedWebView() {
+            WebView wv = new WebView(ctx);
+            WebSettings s = wv.getSettings();
+            s.setJavaScriptEnabled(false);
+            s.setDomStorageEnabled(false);
+            s.setAllowFileAccess(false);
+            s.setAllowContentAccess(false);
+            s.setBlockNetworkLoads(true);
+            s.setBuiltInZoomControls(false);
+            s.setDisplayZoomControls(false);
+            wv.setBackgroundColor(ContextCompat.getColor(ctx, R.color.bg_base));
+            return wv;
         }
 
         private void bindAgentActions(ChatMessage msg) {
