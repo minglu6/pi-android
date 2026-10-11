@@ -335,6 +335,14 @@ public class BridgeService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
+        // startForegroundService (Activity recreate / post-dataSync-timeout) requires
+        // startForeground again even when the Service instance survived via bind.
+        String fgState = (bridge != null && bridge.isConnected()) ? "online" : "connecting";
+        try {
+            startForeground(ONGOING_ID, ongoingNotification(fgState));
+        } catch (Exception e) {
+            Log.w(TAG, "startForeground onStartCommand failed", e);
+        }
         if (ACTION_ANSWER.equals(action) && intent != null) {
             cancelAsk(intent.getIntExtra(EXTRA_NOTIFY_ID, 0));
             pendingAsk = null;
