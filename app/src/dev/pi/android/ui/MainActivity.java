@@ -55,6 +55,7 @@ import dev.pi.android.bridge.AgentState;
 import dev.pi.android.bridge.BridgeService;
 import dev.pi.android.bridge.ModelRpc;
 import dev.pi.android.model.ChatMessage;
+import dev.pi.android.model.PickerItem;
 import dev.pi.android.model.SlashCommand;
 import dev.pi.android.util.AppFonts;
 import dev.pi.android.util.SlashCommandStore;
@@ -150,6 +151,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private String pendingCheckoutRpc = "";
     private boolean pendingReadAsAttach;
     private String pendingUntilRpc = "";
+    private String pendingScheduleRpc = "";
+    private String pendingScheduleListRpc = "";
+    private String pendingScheduleCancelRpc = "";
+    @Nullable private PickerSheet schedulesSheet;
     private String lastMentionQuery = "";
     private long lastMentionAt;
     private int pasteGuard;
@@ -1163,6 +1168,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         addOverflowItem(m, 6, 2, R.string.menu_export, R.drawable.ic_menu_export);
         addOverflowItem(m, 7, 3, R.string.menu_files, R.drawable.ic_menu_files);
         addOverflowItem(m, 8, 4, R.string.menu_changes, R.drawable.ic_menu_changes);
+        addOverflowItem(m, 9, 5, R.string.menu_schedules, R.drawable.ic_menu_schedules);
         menu.setOnMenuItemClickListener(this::onOverflowItem);
         menu.show();
     }
@@ -1194,6 +1200,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 return true;
             case 8:
                 openChangesSheet();
+                return true;
+            case 9:
+                openSchedulesSheet();
                 return true;
             default:
                 return false;
@@ -1636,6 +1645,31 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 return;
             }
         }
+        // Pocket schedules: /schedule …  or bare /schedule → list
+        if (!hasAttach && text.regionMatches(true, 0, "/schedule", 0, 9)
+                && (text.length() == 9 || Character.isWhitespace(text.charAt(9)))) {
+            if (!isConnected()) {
+                Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+                return;
+            }
+            String arg = text.length() > 9 ? text.substring(9).trim() : "";
+            hideSlashSuggestions();
+            composer.setText("");
+            if (arg.isEmpty()) {
+                openSchedulesSheet();
+                return;
+            }
+            JSONObject params = new JSONObject();
+            try {
+                params.put("when", arg);
+            } catch (Exception e) {
+                throw new IllegalStateException("add_schedule params", e);
+            }
+            pendingScheduleRpc = rpc("add_schedule", params);
+            adapter.add(new ChatMessage(ChatMessage.Role.USER, "/schedule " + arg));
+            maybeScrollToBottom(true);
+            return;
+        }
         // Pocket Done-when: /until <cmd>
         if (!hasAttach && text.regionMatches(true, 0, "/until", 0, 6)
                 && (text.length() == 6 || Character.isWhitespace(text.charAt(6)))) {
@@ -1916,7 +1950,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 || "list_cwd_entries".equals(command)
                 || "get_until".equals(command)
                 || "set_until".equals(command)
-                || "clear_until".equals(command);
+                || "clear_until".equals(command)
+                || "list_schedules".equals(command)
+                || "add_schedule".equals(command)
+                || "cancel_schedule".equals(command);
     }
 
     private static String friendlyConnectionError(@Nullable Throwable t) {
@@ -2353,6 +2390,17 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         if ("until_update".equals(type)) {
             applyUntilUpdate(ev);
+            return;
+        }
+        if ("schedule_update".equals(type)) {
+            if (schedulesSheet != null) showSchedulesData(ev);
+            return;
+        }
+        if ("schedule_fired".equals(type)) {
+            if (resumed) {
+                Toast.makeText(this, R.string.schedules_fired_toast, Toast.LENGTH_SHORT).show();
+            }
+            // Background "Pi 已完成" still comes from BridgeService on agent_settled.
             return;
         }
         if ("extension_notify".equals(type)) {
@@ -2814,6 +2862,57 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
 
+    // ---------- Pocket schedules ----------
+
+    private void openSchedulesSheet() {
+        if (!isConnected()) {
+            Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        schedulesSheet = new PickerSheet(this, R.string.schedules_title, false, item -> {
+            if (!(item.payload instanceof String)) return;
+            String sid = (String) item.payload;
+            MaterialDialogs.confirm(this, R.string.schedules_cancel, R.string.schedules_cancel,
+                    android.R.string.ok, () -> {
+                        JSONObject params = new JSONObject();
+                        try {
+                            params.put("scheduleId", sid);
+                        } catch (Exception e) {
+                            throw new IllegalStateException("cancel_schedule", e);
+                        }
+                        pendingScheduleCancelRpc = rpc("cancel_schedule", params);
+                    });
+        });
+        schedulesSheet.setItems(java.util.Collections.singletonList(
+                PickerItem.row(getString(R.string.schedules_loading), null, "", false)));
+        schedulesSheet.show();
+        pendingScheduleListRpc = rpc("list_schedules", null);
+    }
+
+    private void showSchedulesData(@Nullable JSONObject data) {
+        if (schedulesSheet == null || data == null) return;
+        org.json.JSONArray arr = data.optJSONArray("schedules");
+        java.util.List<PickerItem> items = new java.util.ArrayList<>();
+        if (arr != null) {
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject s = arr.optJSONObject(i);
+                if (s == null) continue;
+                String id = s.optString("id", "");
+                if (id.isEmpty()) continue;
+                String text = s.optString("text", "");
+                String when = s.optString("nextLabel", "");
+                String every = s.optString("everyLabel", "");
+                String title = when.isEmpty() ? text : when + " · " + text;
+                String sub = every.isEmpty() ? getString(R.string.schedules_cancel) : every;
+                items.add(PickerItem.row(title, sub, id, false));
+            }
+        }
+        if (items.isEmpty()) {
+            items.add(PickerItem.row(getString(R.string.schedules_empty), null, "", false));
+        }
+        schedulesSheet.setItems(items);
+    }
+
     // ---------- Pocket ports: @ / !shell / paste / Files / Changes / git ----------
 
     private void runShellCommand(String cmd, boolean exclude) {
@@ -2886,6 +2985,18 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             if ("set_until".equals(command)) pendingUntilRpc = "";
             if (resumed && isConnectorCommandRejected(error, command)) {
                 Toast.makeText(this, R.string.until_connector_required, Toast.LENGTH_LONG).show();
+            } else if (resumed && error != null && !error.isEmpty()) {
+                Toast.makeText(this, error, Toast.LENGTH_LONG).show();
+            }
+            return true;
+        }
+        if ("list_schedules".equals(command) || "add_schedule".equals(command)
+                || "cancel_schedule".equals(command)) {
+            if ("list_schedules".equals(command)) pendingScheduleListRpc = "";
+            if ("add_schedule".equals(command)) pendingScheduleRpc = "";
+            if ("cancel_schedule".equals(command)) pendingScheduleCancelRpc = "";
+            if (resumed && isConnectorCommandRejected(error, command)) {
+                Toast.makeText(this, R.string.schedules_connector_required, Toast.LENGTH_LONG).show();
             } else if (resumed && error != null && !error.isEmpty()) {
                 Toast.makeText(this, error, Toast.LENGTH_LONG).show();
             }
@@ -2975,6 +3086,32 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                     Toast.makeText(this, getString(R.string.until_set_ok, cmd), Toast.LENGTH_SHORT).show();
                 }
             }
+            return true;
+        }
+        if ("list_schedules".equals(command) || "add_schedule".equals(command)
+                || "cancel_schedule".equals(command)) {
+            if ("list_schedules".equals(command) && id.equals(pendingScheduleListRpc)) {
+                pendingScheduleListRpc = "";
+            }
+            if ("add_schedule".equals(command) && id.equals(pendingScheduleRpc)) {
+                pendingScheduleRpc = "";
+            }
+            if ("cancel_schedule".equals(command) && id.equals(pendingScheduleCancelRpc)) {
+                pendingScheduleCancelRpc = "";
+            }
+            if ("add_schedule".equals(command) && resumed && data != null) {
+                JSONObject sch = data.optJSONObject("schedule");
+                String label = sch != null ? sch.optString("nextLabel", "") : "";
+                if (!label.isEmpty()) {
+                    Toast.makeText(this, getString(R.string.schedules_added, label),
+                            Toast.LENGTH_SHORT).show();
+                }
+            }
+            if ("cancel_schedule".equals(command) && resumed
+                    && data != null && data.optBoolean("cancelled", false)) {
+                Toast.makeText(this, R.string.schedules_cancelled, Toast.LENGTH_SHORT).show();
+            }
+            if (data != null) showSchedulesData(data);
             return true;
         }
         if ("bash".equals(command) && id.equals(pendingBashRpc)) {

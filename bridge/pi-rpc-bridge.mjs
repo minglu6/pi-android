@@ -32,6 +32,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {AttachmentStore, prepareAttachments, prepareInlineImages} from "./attachment-store.mjs";
+import {
+  parseWhen, nextRepeat, describeMoment, describeRepeat, WHEN_HELP, knownZone,
+} from "./schedule-when.mjs";
 
 const argv = process.argv.slice(2);
 const arg = (name, def) => {
@@ -271,6 +274,181 @@ async function maybeRunUntilCheck(source) {
   if (!sent) log("until: could not send follow-up prompt (Pi unavailable)");
   untilBusy = false;
 }
+
+// ---------- Scheduled messages (/schedule): persist JSON, never double-send ----------
+const SCHEDULE_FILE = path.join(os.homedir(), ".pi/agent/pi-android.schedules.json");
+const SCHEDULED_PREFIX = "[scheduled] ";
+const MAX_SCHEDULES = 50;
+const MAX_SCHEDULE_TEXT = 4000;
+const DEFAULT_ZONE = (() => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; }
+  catch { return "UTC"; }
+})();
+/** @type {Record<string, object>} */
+let scheduleItems = {};
+/** @type {ReturnType<typeof setTimeout> | null} */
+let scheduleTimer = null;
+
+function loadSchedules() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(SCHEDULE_FILE, "utf8"));
+    const items = raw && typeof raw === "object" ? (raw.items || raw) : {};
+    scheduleItems = {};
+    for (const [id, item] of Object.entries(items)) {
+      if (!item || typeof item !== "object") continue;
+      scheduleItems[id] = item;
+      // Crash mid-send: treat as already sent (never double-send).
+      if (item.phase === "sending") {
+        finishScheduleSend(item);
+      }
+    }
+  } catch {
+    scheduleItems = {};
+  }
+  persistSchedules();
+  armScheduleTimer();
+}
+
+function persistSchedules() {
+  try {
+    fs.mkdirSync(path.dirname(SCHEDULE_FILE), { recursive: true });
+    const tmp = SCHEDULE_FILE + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify({ items: scheduleItems }, null, 2));
+    fs.renameSync(tmp, SCHEDULE_FILE);
+  } catch (e) {
+    log(`schedule persist failed: ${e.message}`);
+  }
+}
+
+function listSchedulesPublic() {
+  const now = Date.now();
+  return Object.values(scheduleItems)
+    .filter((s) => s && s.phase !== "sending")
+    .sort((a, b) => (a.next || 0) - (b.next || 0))
+    .map((s) => ({
+      id: s.id,
+      text: s.text,
+      next: s.next,
+      nextLabel: describeMoment(s.next, s.zone || DEFAULT_ZONE, now),
+      every: s.every || null,
+      everyLabel: s.every ? describeRepeat(s.every) : null,
+      zone: s.zone || DEFAULT_ZONE,
+      runs: s.runs || 0,
+    }));
+}
+
+function broadcastSchedules() {
+  dispatch({ type: "schedule_update", schedules: listSchedulesPublic() });
+}
+
+function armScheduleTimer() {
+  if (scheduleTimer) {
+    clearTimeout(scheduleTimer);
+    scheduleTimer = null;
+  }
+  const now = Date.now();
+  let soonest = Infinity;
+  for (const s of Object.values(scheduleItems)) {
+    if (!s || s.phase === "sending") continue;
+    if (typeof s.next === "number" && s.next < soonest) soonest = s.next;
+  }
+  if (!Number.isFinite(soonest)) return;
+  const delay = Math.max(0, Math.min(soonest - now, 60_000));
+  scheduleTimer = setTimeout(() => {
+    scheduleTimer = null;
+    tickSchedules().catch((e) => log(`schedule tick: ${e.message}`));
+  }, delay);
+  scheduleTimer.unref?.();
+}
+
+function finishScheduleSend(item) {
+  const id = item.id;
+  item.runs = (item.runs || 0) + 1;
+  delete item.phase;
+  delete item.sendKey;
+  if (!item.every) {
+    delete scheduleItems[id];
+    return;
+  }
+  try {
+    item.next = nextRepeat(item.every, Date.now(), item.zone || DEFAULT_ZONE);
+    scheduleItems[id] = item;
+  } catch (e) {
+    log(`schedule nextRepeat failed: ${e.message}`);
+    delete scheduleItems[id];
+  }
+}
+
+async function tickSchedules() {
+  const now = Date.now();
+  const due = Object.values(scheduleItems)
+    .filter((s) => s && s.phase !== "sending" && typeof s.next === "number" && s.next <= now)
+    .sort((a, b) => a.next - b.next);
+  for (const item of due) {
+    await fireSchedule(item);
+  }
+  persistSchedules();
+  broadcastSchedules();
+  armScheduleTimer();
+}
+
+async function fireSchedule(item) {
+  const sendKey = `${item.id}-${item.runs || 0}`;
+  // Persist sending phase BEFORE prompt — restart will skip re-send.
+  item.phase = "sending";
+  item.sendKey = sendKey;
+  scheduleItems[item.id] = item;
+  persistSchedules();
+  dispatch({
+    type: "schedule_fired",
+    id: item.id,
+    text: item.text,
+    sendKey,
+  });
+  const sent = bridgeOwnedPrompt(SCHEDULED_PREFIX + item.text);
+  if (!sent) log(`schedule ${item.id}: Pi unavailable; marked sent to avoid double-fire`);
+  finishScheduleSend(item);
+}
+
+function addSchedule(whenText, zone) {
+  const z = (zone && knownZone(zone)) ? zone : DEFAULT_ZONE;
+  const raw = String(whenText || "").trim();
+  if (!raw) throw new Error(WHEN_HELP);
+  const parsed = parseWhen(raw, Date.now(), z);
+  const text = (parsed.rest || "").trim();
+  if (!text) throw new Error("请在时间后写上要发送的内容");
+  if (text.length > MAX_SCHEDULE_TEXT) throw new Error(`正文最多 ${MAX_SCHEDULE_TEXT} 字`);
+  if (Object.keys(scheduleItems).length >= MAX_SCHEDULES) {
+    throw new Error(`最多 ${MAX_SCHEDULES} 条定时消息`);
+  }
+  const id = `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const item = {
+    id,
+    text,
+    whenRaw: raw,
+    next: parsed.next,
+    every: parsed.every || null,
+    zone: z,
+    runs: 0,
+  };
+  scheduleItems[id] = item;
+  persistSchedules();
+  broadcastSchedules();
+  armScheduleTimer();
+  return listSchedulesPublic().find((s) => s.id === id) || item;
+}
+
+function cancelSchedule(id) {
+  const key = String(id || "");
+  if (!key || !scheduleItems[key]) return { cancelled: false, schedules: listSchedulesPublic() };
+  delete scheduleItems[key];
+  persistSchedules();
+  broadcastSchedules();
+  armScheduleTimer();
+  return { cancelled: true, schedules: listSchedulesPublic() };
+}
+
+loadSchedules();
 
 function findPi() {
   for (const p of [
@@ -1039,6 +1217,31 @@ function writeCommand(id, ws, command, params) {
     return;
   }
   // Pocket: working directory — no Pi set_cwd RPC; bridge-local + Pi respawn.
+  // Pocket scheduled messages (/schedule).
+  if (command === "list_schedules") {
+    respond(ws, id, true, "list_schedules", { schedules: listSchedulesPublic() }, null);
+    return;
+  }
+  if (command === "add_schedule") {
+    try {
+      const when = (params || {}).when || (params || {}).text || "";
+      const added = addSchedule(when, (params || {}).zone);
+      respond(ws, id, true, "add_schedule", { schedule: added, schedules: listSchedulesPublic() }, null);
+    } catch (e) {
+      respond(ws, id, false, "add_schedule", null, e.message);
+    }
+    return;
+  }
+  if (command === "cancel_schedule") {
+    try {
+      // Note: params.id is reserved by the wire protocol — use scheduleId.
+      const sid = (params || {}).scheduleId || (params || {}).schedule_id;
+      respond(ws, id, true, "cancel_schedule", cancelSchedule(sid), null);
+    } catch (e) {
+      respond(ws, id, false, "cancel_schedule", null, e.message);
+    }
+    return;
+  }
   // Pocket Done-when (/until): bridge-local goal check after each agent_settled.
   if (command === "set_until") {
     try {
