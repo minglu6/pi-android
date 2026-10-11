@@ -5,6 +5,7 @@
     <string name="app_subtitle">Unofficial</string>
     <string name="hint_message">问 Pi 任何问题…</string>
     <string name="hint_message_streaming">引导当前运行…</string>
+    <string name="hint_message_queue">排队，本轮结束后发送…</string>
     <string name="hint_disconnected">连接器未连接</string>
     <string name="action_send">发送</string>
     <string name="action_stop">停止</string>
