@@ -32,6 +32,8 @@
     <color name="status_online">#587539</color>
     <color name="status_connecting">#B15C00</color>
     <color name="status_offline">#F52A65</color>
+    <!-- Grey pulse while probing a profile (not the amber 「连接中」). -->
+    <color name="status_checking">#949BB8</color>
     <color name="diff_add">#587539</color>
     <color name="diff_del">#F52A65</color>
     <color name="role_you">#2E7DE9</color>

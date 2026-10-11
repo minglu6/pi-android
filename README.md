@@ -31,9 +31,10 @@ adb shell am start -n dev.pi.android/.ui.MainActivity --es token "$TOKEN"
 ### 从 App 自动启动 / 更新连接器（一次性前置）
 
 设置里默认开启 **「自动启动 Termux 连接器」**：WebSocket 被拒绝或超时会通过
-Termux `RUN_COMMAND` 执行 `sv up` / `sv restart`（找不到服务则回退
+Termux `RUN_COMMAND`（`BACKGROUND=true`，只启 `RunCommandService`，**不打开 Termux UI**）
+执行 `sv up` / `sv restart`（找不到服务则回退
 `~/bin/pi-rpc-bridge` / `node …/pi-rpc-bridge.mjs`），并带退避重连。
-**「更新并重启连接器」** 会从 GitHub `master` 拉取最新 `bridge/*.mjs`，
+**「更新并重启连接器」** 同样后台执行：从 GitHub `master` 拉取最新 `bridge/*.mjs`，
 必要时 `npm install`，再 `sv restart`。
 
 首次使用前在设备上完成（各一次）：

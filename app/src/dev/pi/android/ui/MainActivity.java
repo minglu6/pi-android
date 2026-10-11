@@ -117,6 +117,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private TextView modelChip;
     private TextView profileChip;
     @Nullable private ProfilesSheet profilesSheet;
+    /** Last setConnectionVisual state: online|starting|connecting|offline — for profile dots. */
+    private String connectionVisualState = "offline";
     private TextView cwdChip;
     /** Bridge supports get_cwd/set_cwd/list_cwd_entries (or get_state injects cwd). */
     private boolean cwdSupported;
@@ -851,15 +853,24 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     private void openProfilesSheet() {
         if (profilesSheet == null) {
-            profilesSheet = new ProfilesSheet(this, profile -> {
-                refreshProfileChip();
-                // Clear transcript — remote host has different sessions.
-                resetTranscript();
-                historyNeedsSync = true;
-                currentSessionPath = "";
-                currentSessionName = "";
-                setConnectionVisual("connecting", getString(R.string.status_connecting));
-                reconnect();
+            profilesSheet = new ProfilesSheet(this, new ProfilesSheet.Host() {
+                @Override
+                public void onProfileSwitched(@NonNull ConnectionProfile profile) {
+                    refreshProfileChip();
+                    // Clear transcript — remote host has different sessions.
+                    resetTranscript();
+                    historyNeedsSync = true;
+                    currentSessionPath = "";
+                    currentSessionName = "";
+                    setConnectionVisual("connecting", getString(R.string.status_connecting));
+                    reconnect();
+                }
+
+                @Override
+                @Nullable
+                public String activeConnectionState() {
+                    return connectionVisualState;
+                }
             });
         }
         profilesSheet.show();
@@ -2262,6 +2273,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private void setConnectionVisual(String state, String label) {
+        connectionVisualState = state == null ? "offline" : state;
+        if (profilesSheet != null) profilesSheet.onActiveConnectionChanged();
         // Footer shows connection/activity only (cost/cache stay in footer_stats).
         // Model + thinking belong on the composer chip — never prefix them here.
         // Extension setStatus owns the label when present (see renderExtStatus).
@@ -2498,6 +2511,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 break;
             case "offline":
             default:
+                // Pre-auth greeting (offline with no error) is filtered in BridgeConnection.
+                // Auth reject arrives as offline+error (e.g. bad token) or close 4001.
                 historyRequest = "";
                 historyNeedsSync = true;
                 setStreaming(false);
@@ -2511,9 +2526,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                     android.util.Log.w(TAG, "offline: " + error);
                 }
                 refreshEmptyState();
-                if (SettingsActivity.hasToken(this) && SettingsActivity.autoStartConnector(this)) {
-                    ConnectorController.onConnectFailure(this, null);
-                }
+                // Termux auto-start only from onFailure (refused/timeout), not status offline
+                // (bridge still up / auth errors must not launch Termux).
                 break;
         }
     }

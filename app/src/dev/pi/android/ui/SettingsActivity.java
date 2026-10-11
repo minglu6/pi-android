@@ -232,11 +232,21 @@ public class SettingsActivity extends AppCompatActivity {
         View prefProfiles = findViewById(R.id.pref_profiles);
         if (prefProfiles != null) {
             prefProfiles.setOnClickListener(v ->
-                    new ProfilesSheet(this, profile -> {
-                        hostEdit.setText(profile.host);
-                        portEdit.setText(String.valueOf(profile.port));
-                        tokenEdit.setText(SecureTokenStore.getForProfile(this, profile.id));
-                        refreshProfilesLabel(profilesValue);
+                    new ProfilesSheet(this, new ProfilesSheet.Host() {
+                        @Override
+                        public void onProfileSwitched(@NonNull ConnectionProfile profile) {
+                            hostEdit.setText(profile.host);
+                            portEdit.setText(String.valueOf(profile.port));
+                            tokenEdit.setText(SecureTokenStore.getForProfile(
+                                    SettingsActivity.this, profile.id));
+                            refreshProfilesLabel(profilesValue);
+                        }
+
+                        @Override
+                        @Nullable
+                        public String activeConnectionState() {
+                            return null; // Settings has no live socket — probe only
+                        }
                     }).show());
         }
         ConnectorController.addListener(connectorListener);

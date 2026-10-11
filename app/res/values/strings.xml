@@ -113,6 +113,14 @@
     <string name="profiles_host_required">请填写主机</string>
     <string name="profiles_port_invalid">端口无效</string>
     <string name="profiles_chip">配置</string>
+    <string name="profiles_status_hint">下拉刷新探测 · 绿=可达 · 红=失败 · 灰=检测中</string>
+    <string name="profiles_status_cd">连接状态</string>
+    <string name="profiles_status_checking">检测中…</string>
+    <string name="profiles_status_ok">连通 · %1$d ms</string>
+    <string name="profiles_status_fail">%1$s</string>
+    <string name="profiles_status_live_online">当前连接 · 在线</string>
+    <string name="profiles_status_live_connecting">当前连接 · 连接中</string>
+    <string name="profiles_status_live_offline">当前连接 · 未连接</string>
     <string name="settings_profiles">连接配置</string>
     <string name="settings_profiles_desc">多主机 / Tailscale 远程 · 测速切换</string>
     <string name="settings_profiles_active_fmt">当前：%1$s · %2$s:%3$d</string>

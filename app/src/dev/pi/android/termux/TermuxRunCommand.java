@@ -13,8 +13,8 @@ import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
 
 /**
- * Fire Termux {@code RUN_COMMAND} in the background and optionally deliver
- * stdout/exit via {@link TermuxPluginResultReceiver}.
+ * Fire Termux {@code RUN_COMMAND} in the background only.
+ * Never brings Termux UI to the foreground — keeps the user in Pi.
  */
 public final class TermuxRunCommand {
     private static final String TAG = "TermuxRun";
@@ -36,22 +36,9 @@ public final class TermuxRunCommand {
                 == PackageManager.PERMISSION_GRANTED;
     }
 
-    /** Bring Termux to foreground so its services can start (needed after force-stop). */
-    public static boolean launchTermuxApp(@NonNull Context ctx) {
-        Intent launch = ctx.getPackageManager().getLaunchIntentForPackage(TermuxConstants.TERMUX_PACKAGE);
-        if (launch == null) return false;
-        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        try {
-            ctx.startActivity(launch);
-            return true;
-        } catch (Exception e) {
-            Log.w(TAG, "launch Termux failed", e);
-            return false;
-        }
-    }
-
     /**
-     * Run {@code bash -lc <script>} in Termux background.
+     * Run {@code bash -lc <script>} via Termux {@link TermuxConstants#RUN_COMMAND_SERVICE}
+     * with {@code RUN_COMMAND_BACKGROUND=true}. Does not launch Termux activities.
      *
      * @param opTag opaque tag echoed to the result receiver (e.g. {@code start}, {@code update})
      */
@@ -71,16 +58,30 @@ public final class TermuxRunCommand {
         intent.setAction(TermuxConstants.ACTION_RUN_COMMAND);
         intent.putExtra(TermuxConstants.EXTRA_COMMAND_PATH, TermuxConstants.PREFIX_BASH);
         intent.putExtra(TermuxConstants.EXTRA_ARGUMENTS, new String[]{"-lc", script});
+        // Must stay true — otherwise Termux opens a session Activity and steals focus.
         intent.putExtra(TermuxConstants.EXTRA_BACKGROUND, true);
         intent.putExtra(TermuxConstants.EXTRA_COMMAND_LABEL,
                 label != null ? label : "Pi Android");
         intent.putExtra(TermuxConstants.EXTRA_PENDING_INTENT, resultPendingIntent(ctx, opTag));
         try {
-            ctx.startService(intent);
+            // RunCommandService is a Termux FGS; startForegroundService when available
+            // so Android 8+ can start it without bringing Termux UI forward.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                ContextCompat.startForegroundService(ctx.getApplicationContext(), intent);
+            } else {
+                ctx.getApplicationContext().startService(intent);
+            }
             return true;
         } catch (Exception e) {
-            Log.w(TAG, "startService RUN_COMMAND failed", e);
-            return false;
+            Log.w(TAG, "start RunCommandService failed", e);
+            // Fallback: plain startService (some Termux builds accept this while already alive).
+            try {
+                ctx.getApplicationContext().startService(intent);
+                return true;
+            } catch (Exception e2) {
+                Log.w(TAG, "startService RUN_COMMAND failed", e2);
+                return false;
+            }
         }
     }
 

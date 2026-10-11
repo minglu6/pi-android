@@ -17,7 +17,11 @@ import okhttp3.Response;
 import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
 
-/** One-shot WebSocket auth probe with latency for profile "测试连接". */
+/**
+ * One-shot WebSocket auth probe with latency for profile「测速».
+ * Bridge greets with {@code state:offline} before auth — that is not failure.
+ * Success = {@code state:online}; auth fail = {@code offline} with error or close 4001.
+ */
 public final class ProfileConnectTester {
     public interface Callback {
         void onResult(boolean ok, long latencyMs, @Nullable String detail);
@@ -53,15 +57,36 @@ public final class ProfileConnectTester {
             public void onMessage(@NonNull WebSocket webSocket, @NonNull String text) {
                 try {
                     JSONObject o = new JSONObject(text);
-                    if ("status".equals(o.optString("kind"))) {
-                        String state = o.optString("state");
-                        if ("online".equals(state)) {
-                            finish(true, null);
-                        } else {
-                            finish(false, o.optString("error", "鉴权失败"));
-                        }
+                    if (!"status".equals(o.optString("kind"))) return;
+                    String state = o.optString("state");
+                    String err = o.isNull("error") ? null : o.optString("error");
+                    if ("online".equals(state) || "starting".equals(state)) {
+                        finish(true, null);
+                        return;
+                    }
+                    // Greeting offline (no error) — wait for online / auth reject.
+                    if ("offline".equals(state) && err != null && !err.isEmpty()) {
+                        finish(false, err);
                     }
                 } catch (Exception ignored) {
+                }
+            }
+
+            @Override
+            public void onClosing(@NonNull WebSocket webSocket, int code, @NonNull String reason) {
+                if (code == 4001) {
+                    finish(false, reason == null || reason.isEmpty() ? "鉴权失败" : reason);
+                }
+                try { webSocket.close(code, reason); } catch (Exception ignored) {}
+            }
+
+            @Override
+            public void onClosed(@NonNull WebSocket webSocket, int code, @NonNull String reason) {
+                if (code == 4001) {
+                    finish(false, reason == null || reason.isEmpty() ? "鉴权失败" : reason);
+                } else if (!done.get()) {
+                    // Unexpected close before online — treat as failure if still waiting.
+                    finish(false, reason == null || reason.isEmpty() ? "连接关闭" : reason);
                 }
             }
 

@@ -96,26 +96,23 @@ public final class ConnectorController {
         startInFlight = true;
         retryIndex = 0;
         notifyAutoStartBegan();
-        // Ensure Termux process is alive before RUN_COMMAND.
-        TermuxRunCommand.launchTermuxApp(app);
-        MAIN.postDelayed(() -> {
-            boolean ok = TermuxRunCommand.runBashLc(app, ConnectorScripts.startOrRestart(),
-                    OP_START, "启动 Pi 连接器");
-            if (!ok) {
-                startInFlight = false;
-                notifyAutoStartFinished(false, "无法向 Termux 发送 RUN_COMMAND");
-            }
-        }, 800);
+        // Background-only: RUN_COMMAND_BACKGROUND=true via RunCommandService.
+        // Do NOT launch Termux Activity — keep user in Pi.
+        boolean ok = TermuxRunCommand.runBashLc(app, ConnectorScripts.startOrRestart(),
+                OP_START, "启动 Pi 连接器");
+        if (!ok) {
+            startInFlight = false;
+            notifyAutoStartFinished(false, "无法向 Termux 发送 RUN_COMMAND");
+        }
     }
 
     public static boolean beginUpdate(@NonNull Context ctx) {
         Context app = ctx.getApplicationContext();
         if (!TermuxRunCommand.isTermuxInstalled(app)) return false;
         if (!TermuxRunCommand.hasRunCommandPermission(app)) return false;
-        TermuxRunCommand.launchTermuxApp(app);
-        MAIN.postDelayed(() -> TermuxRunCommand.runBashLc(app, ConnectorScripts.updateAndRestart(),
-                OP_UPDATE, "更新并重启连接器"), 600);
-        return true;
+        // Background-only; never bring Termux UI forward.
+        return TermuxRunCommand.runBashLc(app, ConnectorScripts.updateAndRestart(),
+                OP_UPDATE, "更新并重启连接器");
     }
 
     static void onTermuxResult(@NonNull Context ctx, @Nullable String op,
