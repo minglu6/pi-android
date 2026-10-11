@@ -2498,6 +2498,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 break;
             case "offline":
             default:
+                // Pre-auth greeting (offline with no error) is filtered in BridgeConnection.
+                // Auth reject arrives as offline+error (e.g. bad token) or close 4001.
                 historyRequest = "";
                 historyNeedsSync = true;
                 setStreaming(false);
@@ -2511,9 +2513,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                     android.util.Log.w(TAG, "offline: " + error);
                 }
                 refreshEmptyState();
-                if (SettingsActivity.hasToken(this) && SettingsActivity.autoStartConnector(this)) {
-                    ConnectorController.onConnectFailure(this, null);
-                }
+                // Termux auto-start only from onFailure (refused/timeout), not status offline
+                // (bridge still up / auth errors must not launch Termux).
                 break;
         }
     }

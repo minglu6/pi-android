@@ -175,13 +175,24 @@ public class BridgeConnection {
         switch (kind) {
             case "status": {
                 String state = obj.optString("state");
-                // 初始 offline（包括 bad token）不能证明鉴权。桥收到 auth 后的
-                // online/starting 才是 ack；此后 Pi offline 不撤销 socket 鉴权。
+                String err = obj.isNull("error") ? null : obj.optString("error");
+                boolean hasErr = err != null && !err.isEmpty();
+                // 桥在鉴权前会先发 state:offline（无 error）——那是问候，不是失败。
+                // online/starting 才是鉴权 ack；offline+error（如 bad token）才是鉴权失败。
+                // 此后 Pi offline 不撤销 socket 鉴权。
                 if (authSent && ("online".equals(state) || "starting".equals(state))) {
                     authed = true;
                     flushOutbox();
                 }
-                String err = obj.isNull("error") ? null : obj.optString("error");
+                if (!authed) {
+                    if ("online".equals(state) || "starting".equals(state)) {
+                        postStatus(gen, state, err);
+                    } else if ("offline".equals(state) && hasErr) {
+                        postStatus(gen, state, err);
+                    }
+                    // else: ignore greeting offline / unknown until ack or auth error
+                    break;
+                }
                 postStatus(gen, state, err);
                 break;
             }

@@ -160,7 +160,8 @@ public final class BridgeConnectionTest {
         equal(Arrays.asList(first, second), s.rpcIds(), "FIFO/id preserved after ack");
         check(f.recording.calls.isEmpty(), "Listener called before main drain");
         drain();
-        equal(Arrays.asList("status:offline", "status:unknown", "status:online"), f.recording.calls, "status delivery");
+        // Greeting offline / unknown must not reach UI; only auth ack (online).
+        equal(Arrays.asList("status:online"), f.recording.calls, "status delivery");
     }
 
     private static void startingAck() {
