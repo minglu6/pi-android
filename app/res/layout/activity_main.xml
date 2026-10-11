@@ -423,6 +423,44 @@
         android:textSize="11sp"
         android:visibility="gone" />
 
+    <!-- Done-when (/until) status above composer -->
+    <LinearLayout
+        android:id="@+id/until_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingTop="2dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="2dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/until_status"
+            style="@style/MonoMetaText.Line"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="2"
+            android:textColor="@color/text_secondary"
+            android:textSize="11.5sp" />
+
+        <TextView
+            android:id="@+id/until_stop"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:paddingStart="10dp"
+            android:paddingTop="4dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="4dp"
+            android:text="@string/until_stop"
+            android:textColor="@color/pi_amber"
+            android:textSize="12sp" />
+    </LinearLayout>
+
     <!-- Composer card -->
     <LinearLayout
         android:id="@+id/composer_bar"

@@ -100,6 +100,178 @@ void ALLOW_BASH;
 /** 当前会话显示名；get_session_name 通过官方 get_state 获取，不返回乐观缓存。 */
 let currentSessionName = "";
 
+// ---------- Done-when (/until): Pocket-style goal check after each agent turn ----------
+const UNTIL_MAX = 5;
+const UNTIL_TIMEOUT_MS = 600_000;
+const UNTIL_TAIL = 3000;
+const UNTIL_PREFIX = "[until] ";
+/** @type {null | {command: string, tries: number, max: number, status: string, lastCode?: number, lastTail?: string}} */
+let untilGoal = null;
+let untilBusy = false;
+/** @type {import('node:child_process').ChildProcess | null} */
+let untilProc = null;
+
+function untilSnapshot() {
+  if (!untilGoal) return { type: "until_update", status: "idle" };
+  return {
+    type: "until_update",
+    command: untilGoal.command,
+    tries: untilGoal.tries,
+    max: untilGoal.max,
+    status: untilGoal.status,
+    lastCode: untilGoal.lastCode ?? null,
+    lastTail: untilGoal.lastTail ?? "",
+  };
+}
+
+function broadcastUntil() {
+  dispatch(untilSnapshot());
+}
+
+function setUntilGoal(command) {
+  const check = String(command || "").trim();
+  if (!check) throw new Error("请指定要通过的命令，例如 /until npm test");
+  if (check.length > 2000) throw new Error("检查命令过长（最多 2000 字符）");
+  abortUntilProc();
+  untilGoal = { command: check, tries: 0, max: UNTIL_MAX, status: "working" };
+  broadcastUntil();
+  return untilSnapshot();
+}
+
+function clearUntilGoal() {
+  abortUntilProc();
+  if (!untilGoal) {
+    broadcastUntil();
+    return { status: "idle" };
+  }
+  untilGoal = { ...untilGoal, status: "stopped" };
+  const snap = untilSnapshot();
+  broadcastUntil();
+  untilGoal = null;
+  return snap;
+}
+
+function abortUntilProc() {
+  if (untilProc && untilProc.exitCode === null) {
+    try { untilProc.kill("SIGKILL"); } catch { /* ignore */ }
+  }
+  untilProc = null;
+}
+
+/** Fire a prompt into Pi with no client response (bridge-owned follow-up). */
+function bridgeOwnedPrompt(message) {
+  const pi = ensurePi();
+  if (!pi || pi.stdin.destroyed || pi.stdin.writableEnded) return false;
+  const internalId = `bridge-${++rpcSeq}`;
+  const sink = { send() {} };
+  const timer = setTimeout(() => pendingReqs.delete(internalId), 120_000);
+  timer.unref();
+  pendingReqs.set(internalId, {
+    ws: sink, clientId: internalId, command: "prompt", piCommand: "prompt", timer,
+  });
+  try {
+    pi.stdin.write(JSON.stringify({ id: internalId, type: "prompt", message }) + "\n");
+    return true;
+  } catch (e) {
+    clearTimeout(timer);
+    pendingReqs.delete(internalId);
+    log(`until follow-up prompt failed: ${e.message}`);
+    return false;
+  }
+}
+
+function runUntilShell(command) {
+  return new Promise((resolve) => {
+    const cwd = resolveProjectCwd();
+    let out = "";
+    // Prefer bash -lc when available (Termux); fall back to sh -c.
+    const shell = process.env.SHELL && fs.existsSync(process.env.SHELL)
+      ? process.env.SHELL : "/bin/sh";
+    const child = spawn(shell, ["-lc", command], {
+      cwd,
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    untilProc = child;
+    const timer = setTimeout(() => {
+      try { child.kill("SIGKILL"); } catch { /* ignore */ }
+    }, UNTIL_TIMEOUT_MS);
+    timer.unref();
+    const onChunk = (buf) => {
+      out = (out + buf.toString()).slice(-UNTIL_TAIL);
+    };
+    child.stdout.on("data", onChunk);
+    child.stderr.on("data", onChunk);
+    child.on("close", (code, signal) => {
+      clearTimeout(timer);
+      if (untilProc === child) untilProc = null;
+      if (signal) {
+        resolve({
+          passed: false,
+          code: -1,
+          tail: `${out}\n检查被中断（${signal === "SIGKILL" ? "超时或停止" : signal}）`
+            .trim().slice(-UNTIL_TAIL),
+        });
+        return;
+      }
+      resolve({ passed: code === 0, code: code ?? -1, tail: out.trim() });
+    });
+    child.on("error", (e) => {
+      clearTimeout(timer);
+      if (untilProc === child) untilProc = null;
+      resolve({ passed: false, code: -1, tail: e.message });
+    });
+  });
+}
+
+async function maybeRunUntilCheck(source) {
+  if (!untilGoal || untilGoal.status !== "working" || untilBusy) return;
+  untilBusy = true;
+  const command = untilGoal.command;
+  untilGoal = { ...untilGoal, status: "checking" };
+  broadcastUntil();
+  let result;
+  try {
+    result = await runUntilShell(command);
+  } catch (e) {
+    result = { passed: false, code: -1, tail: e.message || String(e) };
+  }
+  // Cleared while running?
+  if (!untilGoal || untilGoal.command !== command) {
+    untilBusy = false;
+    broadcastUntil();
+    return;
+  }
+  untilGoal.tries += 1;
+  untilGoal.lastCode = result.code;
+  untilGoal.lastTail = result.tail;
+  if (result.passed) {
+    untilGoal.status = "met";
+    broadcastUntil();
+    log(`until met: ${command} (after ${untilGoal.tries} checks, source=${source})`);
+    untilGoal = null;
+    untilBusy = false;
+    return;
+  }
+  if (untilGoal.tries >= untilGoal.max) {
+    untilGoal.status = "gave-up";
+    broadcastUntil();
+    log(`until gave-up: ${command} after ${untilGoal.max} checks`);
+    untilGoal = null;
+    untilBusy = false;
+    return;
+  }
+  untilGoal.status = "working";
+  broadcastUntil();
+  const output = result.tail === ""
+    ? "命令没有输出。"
+    : `输出末尾：\n\n\`\`\`\n${result.tail}\n\`\`\``;
+  const msg = `${UNTIL_PREFIX}\`${command}\` 仍未通过（exit ${result.code}，第 ${untilGoal.tries}/${untilGoal.max} 次检查）。${output}\n\n请继续修改直到该命令通过。`;
+  const sent = bridgeOwnedPrompt(msg);
+  if (!sent) log("until: could not send follow-up prompt (Pi unavailable)");
+  untilBusy = false;
+}
+
 function findPi() {
   for (const p of [
     path.join(os.homedir(), ".pi/agent/bin/pi"),
@@ -272,6 +444,8 @@ function routeRecord(rec) {
     if (rec.success && !rec.data?.cancelled &&
         ["new_session", "switch_session", "fork", "clone"].includes(entry.command)) {
       currentSessionName = "";
+      // New/switched session: drop Done-when so checks never follow the wrong cwd/session.
+      if (untilGoal) clearUntilGoal();
     }
     if (entry.onResponse) {
       entry.onResponse(rec);
@@ -282,12 +456,20 @@ function routeRecord(rec) {
       data = { name: currentSessionName };
     } else if (rec.success && entry.piCommand === "get_state" && entry.command === "get_state") {
       // Inject bridge cwd — Pi get_state does not document a cwd field / set_cwd RPC.
-      data = { ...(rec.data && typeof rec.data === "object" ? rec.data : {}), cwd: resolveProjectCwd() };
+      data = {
+        ...(rec.data && typeof rec.data === "object" ? rec.data : {}),
+        cwd: resolveProjectCwd(),
+        until: untilSnapshot(),
+      };
     }
     respond(entry.ws, entry.clientId, !!rec.success, entry.command, data, rec.error);
     return;
   }
   dispatch(rec);
+  // Done-when: after Pi settles (not aborted), run the check in session cwd.
+  if (rec.type === "agent_settled" && !rec.aborted) {
+    maybeRunUntilCheck("agent_settled").catch((e) => log(`until check error: ${e.message}`));
+  }
 }
 
 /** 唯一内部 ID -> {ws, clientId, command, piCommand}；不以客户端 ID 为 Map key。 */
@@ -857,6 +1039,23 @@ function writeCommand(id, ws, command, params) {
     return;
   }
   // Pocket: working directory — no Pi set_cwd RPC; bridge-local + Pi respawn.
+  // Pocket Done-when (/until): bridge-local goal check after each agent_settled.
+  if (command === "set_until") {
+    try {
+      respond(ws, id, true, "set_until", setUntilGoal((params || {}).command || (params || {}).cmd), null);
+    } catch (e) {
+      respond(ws, id, false, "set_until", null, e.message);
+    }
+    return;
+  }
+  if (command === "clear_until") {
+    respond(ws, id, true, "clear_until", clearUntilGoal(), null);
+    return;
+  }
+  if (command === "get_until") {
+    respond(ws, id, true, "get_until", untilSnapshot(), null);
+    return;
+  }
   if (command === "get_cwd") {
     respond(ws, id, true, "get_cwd", { cwd: resolveProjectCwd() }, null);
     return;

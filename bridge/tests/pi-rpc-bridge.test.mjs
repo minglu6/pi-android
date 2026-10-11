@@ -211,6 +211,36 @@ test('Pocket cwd RPCs: get_cwd / list_cwd_entries / set_cwd persist + inject get
   assert.notEqual(bad.error, '命令不允许: set_cwd');
 });
 
+test('Pocket Done-when (/until): set/clear + check after agent_settled', async t => {
+  const h = await harness(t), c = await h.connect();
+  c.rpc('empty', 'set_until', {command: '  '});
+  assert.equal((await c.response('empty')).ok, false);
+  c.rpc('set', 'set_until', {command: 'false'});
+  const set = await c.response('set');
+  assert.equal(set.ok, true);
+  assert.equal(set.data.status, 'working');
+  assert.equal(set.data.command, 'false');
+  // Event broadcast from setUntilGoal
+  assert.ok(c.frames.some(f => f.kind === 'event' && f.event?.type === 'until_update'
+    && f.event.status === 'working'));
+  c.rpc('get', 'get_until', {});
+  assert.equal((await c.response('get')).data.status, 'working');
+  // Prompt → fake-pi agent_settled → bridge runs `false` → follow-up
+  c.rpc('go', 'prompt', {message: 'work on failing check'});
+  await c.response('go');
+  const checking = await waitFor(
+    () => c.frames.filter(f => f.kind === 'event' && f.event?.type === 'until_update'),
+    rows => rows.some(f => f.event.status === 'checking' || (f.event.status === 'working' && f.event.tries >= 1)),
+  );
+  assert.ok(checking.length >= 1);
+  c.rpc('stop', 'clear_until', {});
+  const cleared = await c.response('stop');
+  assert.equal(cleared.ok, true);
+  assert.equal(cleared.data.status, 'stopped');
+  c.rpc('idle', 'get_until', {});
+  assert.equal((await c.response('idle')).data.status, 'idle');
+});
+
 test('Pocket MCP RPCs: list_mcp_servers + get_project_trust from mcp.json / trust.json', async t => {
   const h = await harness(t), c = await h.connect();
   const agentDir = path.join(h.dir, '.pi', 'agent');

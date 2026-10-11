@@ -238,4 +238,13 @@
     <string name="cwd_parent">上级目录</string>
     <string name="cwd_use_here">使用此目录</string>
     <string name="cwd_loading">加载目录…</string>
+    <string name="until_stop">停止</string>
+    <string name="until_need_cmd">请指定检查命令，例如 /until npm test</string>
+    <string name="until_set_ok">将检查「%1$s」直到通过（最多 5 次）</string>
+    <string name="until_status_working">直到 · %1$s · %2$d/%3$d</string>
+    <string name="until_status_checking">检查中 · %1$s · %2$d/%3$d</string>
+    <string name="until_status_met">已通过 · %1$s</string>
+    <string name="until_status_gave_up">未通过 · %1$s（已达上限）</string>
+    <string name="until_status_stopped">已停止检查</string>
+    <string name="until_connector_required">当前连接器不支持 /until，请更新 Termux 侧连接器</string>
 </resources>
