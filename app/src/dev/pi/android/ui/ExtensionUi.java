@@ -50,6 +50,9 @@ public class ExtensionUi {
         void onTitle(String title);
 
         void onNotify(String message, String type);
+
+        /** RPC setWidget string lines (null clears). Default no-op. */
+        default void onWidget(String key, @Nullable List<String> lines) {}
     }
 
     private static final long MAX_QUEUE_AGE_MS = 120_000L;
@@ -109,16 +112,34 @@ public class ExtensionUi {
                     return true;
                 case "setStatus":
                     if (sink != null) {
-                        sink.onStatus(req.optString("statusKey", "?"),
-                                req.isNull("statusText") ? null : req.optString("statusText"));
+                        String text = req.isNull("statusText") ? null : req.optString("statusText");
+                        // null / empty clears this key (Pi passes undefined to clear)
+                        if (text != null && text.isEmpty()) text = null;
+                        sink.onStatus(req.optString("statusKey", "?"), text);
                     }
                     return true;
                 case "setTitle":
                     if (sink != null) sink.onTitle(req.optString("title", ""));
                     return true;
                 case "setWidget":
+                    if (sink != null) {
+                        String key = req.optString("widgetKey", "?");
+                        if (req.isNull("widgetLines")) {
+                            sink.onWidget(key, null);
+                        } else {
+                            List<String> lines = new ArrayList<>();
+                            JSONArray arr = req.optJSONArray("widgetLines");
+                            if (arr != null) {
+                                for (int i = 0; i < arr.length(); i++) {
+                                    lines.add(String.valueOf(arr.opt(i)));
+                                }
+                            }
+                            sink.onWidget(key, lines);
+                        }
+                    }
+                    return true;
                 case "set_editor_text":
-                    // 都 fire-and-forget，忽略不会阻塞 Pi
+                    // fire-and-forget，忽略不会阻塞 Pi
                     return true;
                 default:
                     // 未知方法：回一条 cancelled，至少不让 Pi 挂住

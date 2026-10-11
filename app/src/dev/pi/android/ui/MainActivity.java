@@ -219,6 +219,11 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private TextView actionsBody;
     private LinearLayout actionsButtons;
     private final java.util.LinkedHashMap<String, String> extStatuses = new java.util.LinkedHashMap<>();
+    private final java.util.LinkedHashMap<String, java.util.List<String>> extWidgets =
+            new java.util.LinkedHashMap<>();
+    private TextView extWidgetView;
+    /** When true, App-built footer_stats / context bar are hidden (extension owns metrics). */
+    private boolean extOwnsFooterMetrics;
     private String uiTarget;
     private String pendingUiTarget;
     private String modelStatus = "";
@@ -236,6 +241,11 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         setContentView(R.layout.activity_main);
 
         statusText = findViewById(R.id.status_text);
+        extWidgetView = findViewById(R.id.ext_widget);
+        if (extWidgetView != null) {
+            extWidgetView.setTypeface(AppFonts.mono(this, false));
+            extWidgetView.setVisibility(View.GONE);
+        }
         statusDot = findViewById(R.id.status_dot);
         generationStatus = findViewById(R.id.generation_status);
         planBar = findViewById(R.id.plan_bar);
@@ -753,6 +763,13 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     @Override
+    public void onExtWidgets(java.util.Map<String, java.util.List<String>> widgets) {
+        extWidgets.clear();
+        if (widgets != null) extWidgets.putAll(widgets);
+        main.post(this::renderExtWidgets);
+    }
+
+    @Override
     public void onExtTitle(String title) {
         main.post(() -> {
             if (title == null || title.isEmpty()) {
@@ -808,6 +825,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private void restoreStatusChip() {
+        if (!extStatuses.isEmpty()) {
+            renderExtStatus();
+            return;
+        }
         setConnectionVisual("online", getString(R.string.status_idle));
     }
 
@@ -1333,6 +1354,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             sb.append(formatNumber(data.opt("totalTokens"))).append(" tok");
         }
 
+        if (extOwnsFooterMetrics) {
+            hideFooterMetrics();
+            return;
+        }
         boolean hasMetrics = sb.length() > 0 || contextPct != null;
         if (footerSep != null) footerSep.setVisibility(hasMetrics ? View.VISIBLE : View.GONE);
         if (contextBarWrap != null) {
@@ -1876,6 +1901,14 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private void setConnectionVisual(String state, String label) {
         // Footer shows connection/activity only (cost/cache stay in footer_stats).
         // Model + thinking belong on the composer chip — never prefix them here.
+        // Extension setStatus owns the label when present (see renderExtStatus).
+        if (!extStatuses.isEmpty() && ("online".equals(state) || "starting".equals(state))) {
+            // Keep connection dot color, but do not overwrite extension ANSI status text.
+            applyStatusDot(state);
+            updateSendEnabled();
+            refreshReconnectBanner();
+            return;
+        }
         if ("online".equals(state) || "starting".equals(state)) {
             if (!AgentState.get().isFresh() && "online".equals(state)) {
                 label = getString(R.string.generation_model_sync);
@@ -1884,6 +1917,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
         }
         if (statusText != null) statusText.setText(label);
+        applyStatusDot(state);
+        updateSendEnabled();
+        refreshReconnectBanner();
+    }
+
+    private void applyStatusDot(String state) {
         if (statusDot == null) return;
         int color;
         switch (state) {
@@ -1903,8 +1942,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         dot.setShape(GradientDrawable.OVAL);
         dot.setColor(ContextCompat.getColor(this, color));
         statusDot.setBackground(dot);
-        updateSendEnabled();
-        refreshReconnectBanner();
     }
 
     private void refreshEmptyState() {
@@ -2711,15 +2748,70 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     private void renderExtStatus() {
         if (extStatuses.isEmpty()) {
-            restoreStatusChip();
+            extOwnsFooterMetrics = false;
+            // Re-apply App stats if we had been hiding them for extension chrome.
+            maybeRequestSessionStats();
+            setConnectionVisual("online", getString(R.string.status_idle));
             return;
         }
         StringBuilder sb = new StringBuilder();
         for (String v : extStatuses.values()) {
-            if (sb.length() > 0) sb.append(" · ");
+            if (v == null || v.isEmpty()) continue;
+            if (sb.length() > 0) sb.append('\n');
             sb.append(v);
         }
-        setConnectionVisual("online", sb.length() > 60 ? sb.substring(0, 60) + "…" : sb.toString());
+        CharSequence rendered = dev.pi.android.util.AnsiSgr.render(sb.toString());
+        extOwnsFooterMetrics = looksLikeMetrics(sb.toString());
+        if (extOwnsFooterMetrics) hideFooterMetrics();
+        if (statusText != null) {
+            statusText.setTypeface(AppFonts.mono(this, false));
+            statusText.setText(rendered);
+        }
+        applyStatusDot("online");
+        updateSendEnabled();
+        refreshReconnectBanner();
+    }
+
+    private void renderExtWidgets() {
+        if (extWidgetView == null) return;
+        if (extWidgets.isEmpty()) {
+            extWidgetView.setVisibility(View.GONE);
+            extWidgetView.setText("");
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (java.util.List<String> lines : extWidgets.values()) {
+            if (lines == null) continue;
+            for (String line : lines) {
+                if (line == null) continue;
+                if (sb.length() > 0) sb.append('\n');
+                sb.append(line);
+            }
+        }
+        if (sb.length() == 0) {
+            extWidgetView.setVisibility(View.GONE);
+            extWidgetView.setText("");
+            return;
+        }
+        extWidgetView.setText(dev.pi.android.util.AnsiSgr.render(sb.toString()));
+        extWidgetView.setVisibility(View.VISIBLE);
+        if (looksLikeMetrics(sb.toString())) {
+            extOwnsFooterMetrics = true;
+            hideFooterMetrics();
+        }
+    }
+
+    /** Heuristic: extension text already carries token/cost/context chrome. */
+    private static boolean looksLikeMetrics(String text) {
+        if (text == null || text.isEmpty()) return false;
+        String t = text.toLowerCase(java.util.Locale.ROOT);
+        return t.indexOf('$') >= 0
+                || t.contains("↑") || t.contains("↓")
+                || t.contains("cache") || t.contains("idle usage")
+                || t.contains("context")
+                || t.matches("(?s).*\\bmc:\\s*[0-9].*")
+                || t.matches("(?s).*\\b\\d+(\\.\\d+)?%\\s*/\\s*\\d+k\\b.*")
+                || t.matches("(?s).*\\$[0-9].*");
     }
 
     private void switchToSession(String path) {
