@@ -283,4 +283,8 @@
     <string name="session_pin_mark">◆</string>
     <string name="session_pinned_toast">已置顶</string>
     <string name="session_unpinned_toast">已取消置顶</string>
+    <string name="menu_input_history">输入历史</string>
+    <string name="input_history_title">输入历史</string>
+    <string name="input_history_empty">还没有发送过消息。外接键盘在输入框按 ↑ 可回看。</string>
+    <string name="input_history_hint">点选填回输入框 · 外接键盘 ↑/↓ 浏览</string>
 </resources>
