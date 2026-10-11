@@ -150,6 +150,11 @@ public final class PickerSheet {
         }
     }
 
+    /** Override the centered empty-list message (e.g. input history). */
+    public void setEmptyMessage(@NonNull CharSequence message) {
+        if (empty != null) empty.setText(message);
+    }
+
     public void setItems(@NonNull List<PickerItem> items) {
         all.clear();
         all.addAll(items);

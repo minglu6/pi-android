@@ -36,10 +36,13 @@ public final class MaterialDialogs {
                                @StringRes int positiveRes, @NonNull ConfirmListener ok) {
         MaterialAlertDialogBuilder b = new MaterialAlertDialogBuilder(ctx, R.style.PiMaterialAlertDialog);
         if (titleRes != 0) b.setTitle(titleRes);
-        b.setMessage(messageRes)
+        android.app.Dialog dialog = b.setMessage(messageRes)
                 .setPositiveButton(positiveRes, (d, w) -> ok.onConfirm())
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
+        android.view.View root = dialog.getWindow() != null
+                ? dialog.getWindow().getDecorView() : null;
+        if (root != null) AppFonts.applyTree(root);
     }
 
     public static void promptText(@NonNull Context ctx, @StringRes int titleRes, @StringRes int hintRes,
@@ -76,12 +79,15 @@ public final class MaterialDialogs {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.setMargins(pad, Math.round(8 * density), pad, 0);
         wrap.addView(input, lp);
-        new MaterialAlertDialogBuilder(ctx, R.style.PiMaterialAlertDialog)
+        android.app.Dialog dialog = new MaterialAlertDialogBuilder(ctx, R.style.PiMaterialAlertDialog)
                 .setTitle(titleRes)
                 .setView(wrap)
                 .setPositiveButton(android.R.string.ok, (d, w) ->
                         ok.onSubmit(input.getText().toString().trim()))
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
+        android.view.View root = dialog.getWindow() != null
+                ? dialog.getWindow().getDecorView() : null;
+        if (root != null) AppFonts.applyTree(root);
     }
 }

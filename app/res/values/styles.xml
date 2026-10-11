@@ -139,11 +139,16 @@
     <style name="PiMaterialAlertDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
         <item name="colorPrimary">@color/md_theme_primary</item>
         <item name="colorOnPrimary">@color/md_theme_onPrimary</item>
+        <!-- Keep secondary off lavender so dialogs match Tokyo Night chrome. -->
+        <item name="colorSecondary">@color/md_theme_primary</item>
+        <item name="colorOnSecondary">@color/md_theme_onPrimary</item>
         <item name="colorSurface">@color/bg_elevated</item>
         <item name="colorOnSurface">@color/text_primary</item>
         <item name="android:colorBackground">@color/bg_elevated</item>
         <item name="android:fontFamily">@font/meslo_lgldz_nf</item>
         <item name="fontFamily">@font/meslo_lgldz_nf</item>
+        <item name="buttonBarPositiveButtonStyle">@style/Widget.Pi.Button.Text</item>
+        <item name="buttonBarNegativeButtonStyle">@style/Widget.Pi.Button.Text</item>
         <item name="materialAlertDialogTitleTextStyle">@style/PiAlertTitle</item>
         <item name="materialAlertDialogBodyTextStyle">@style/PiAlertBody</item>
         <item name="shapeAppearanceOverlay">@style/PiAlertShape</item>
