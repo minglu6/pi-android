@@ -37,6 +37,10 @@ import {
   parseWhen, nextRepeat, describeMoment, describeRepeat, WHEN_HELP, knownZone,
 } from "./schedule-when.mjs";
 
+/** Stamped by the App「更新并重启连接器」script (sed); get_version returns these. */
+const CONNECTOR_SHA = "unknown";
+const CONNECTOR_DATE = "unknown";
+
 const argv = process.argv.slice(2);
 const arg = (name, def) => {
   const i = argv.findIndex((a) => a === `--${name}` || a.startsWith(`--${name}=`));
@@ -1415,6 +1419,14 @@ function writeCommand(id, ws, command, params) {
   }
   if (command === "get_until") {
     respond(ws, id, true, "get_until", untilSnapshot(), null);
+    return;
+  }
+  if (command === "get_version") {
+    respond(ws, id, true, "get_version", {
+      sha: CONNECTOR_SHA,
+      date: CONNECTOR_DATE,
+      file: typeof __filename !== "undefined" ? __filename : "pi-rpc-bridge.mjs",
+    }, null);
     return;
   }
   if (command === "get_cwd") {

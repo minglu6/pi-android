@@ -12,6 +12,17 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
+    <!-- Termux RUN_COMMAND：自动启动 / 更新连接器（用户在「其他权限」中授予）。 -->
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
+
+    <!-- Android 11+ package visibility for Termux. -->
+    <queries>
+        <package android:name="com.termux" />
+        <intent>
+            <action android:name="com.termux.RUN_COMMAND" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
@@ -25,6 +36,10 @@
             android:name=".bridge.BridgeService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <receiver
+            android:name=".termux.TermuxPluginResultReceiver"
+            android:exported="false" />
 
         <activity
             android:name=".ui.SettingsActivity"
