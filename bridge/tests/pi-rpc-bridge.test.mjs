@@ -211,6 +211,22 @@ test('Pocket cwd RPCs: get_cwd / list_cwd_entries / set_cwd persist + inject get
   assert.notEqual(bad.error, '命令不允许: set_cwd');
 });
 
+test('Pocket session instructions: set/get prepended on prompt', async t => {
+  const h = await harness(t), c = await h.connect();
+  c.rpc('set', 'set_instructions', {text: 'use pnpm, not npm'});
+  const set = await c.response('set');
+  assert.equal(set.ok, true);
+  assert.equal(set.data.text, 'use pnpm, not npm');
+  c.rpc('p', 'prompt', {message: 'install deps'});
+  await c.response('p');
+  const prompt = (await h.commands()).filter(r => r.type === 'prompt').pop();
+  assert.ok(prompt.message.includes('本会话说明'));
+  assert.ok(prompt.message.includes('use pnpm, not npm'));
+  assert.ok(prompt.message.includes('install deps'));
+  c.rpc('clear', 'set_instructions', {text: ''});
+  assert.equal((await c.response('clear')).data.text, '');
+});
+
 test('Pocket plan mode: set/approve injects instruction on prompt', async t => {
   const h = await harness(t), c = await h.connect();
   c.rpc('on', 'set_plan_mode', {on: true});

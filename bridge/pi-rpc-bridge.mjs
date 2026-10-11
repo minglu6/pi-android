@@ -484,14 +484,92 @@ function approvePlan() {
   return { ...planSnapshot(), prompted: sent };
 }
 
-/** Prepend plan-mode instruction to user-facing agent messages. */
+/** Prepend plan-mode + per-session instructions to user-facing agent messages. */
 function applyPlanToParams(command, params) {
-  if (!planModeOn) return params;
   if (command !== "prompt" && command !== "steer" && command !== "follow_up") return params;
   const message = params && typeof params.message === "string" ? params.message : "";
-  if (message.startsWith(PLANNING_INSTRUCTION) || message.startsWith("【计划模式")) return params;
-  return { ...params, message: PLANNING_INSTRUCTION + message };
+  let prefix = "";
+  if (planModeOn && !message.startsWith(PLANNING_INSTRUCTION) && !message.startsWith("【计划模式")) {
+    prefix += PLANNING_INSTRUCTION;
+  }
+  const instr = getSessionInstructions();
+  if (instr) {
+    const block = `【本会话说明】\n${instr}\n\n`;
+    if (!message.includes("【本会话说明】") && !prefix.includes("【本会话说明】")) {
+      prefix += block;
+    }
+  }
+  if (!prefix) return params;
+  return { ...params, message: prefix + message };
 }
+
+// ---------- Per-session instructions (/instructions) ----------
+const INSTRUCTIONS_FILE = path.join(os.homedir(), ".pi/agent/pi-android.instructions.json");
+const MAX_INSTRUCTIONS = 8000;
+/** @type {Record<string, string>} */
+let instructionsBySession = {};
+/** Current session key: session file path, or "default". */
+let currentSessionKey = "default";
+
+function loadInstructions() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(INSTRUCTIONS_FILE, "utf8"));
+    const map = raw && typeof raw === "object" ? (raw.bySession || raw) : {};
+    instructionsBySession = {};
+    for (const [k, v] of Object.entries(map)) {
+      if (typeof v === "string" && v.trim()) instructionsBySession[k] = v.trim();
+    }
+  } catch {
+    instructionsBySession = {};
+  }
+}
+
+function persistInstructions() {
+  try {
+    fs.mkdirSync(path.dirname(INSTRUCTIONS_FILE), { recursive: true });
+    const tmp = INSTRUCTIONS_FILE + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify({ bySession: instructionsBySession }, null, 2));
+    fs.renameSync(tmp, INSTRUCTIONS_FILE);
+  } catch (e) {
+    log(`instructions persist failed: ${e.message}`);
+  }
+}
+
+function sessionKeyFromPath(sessionPath) {
+  if (typeof sessionPath !== "string" || !sessionPath.trim()) return "default";
+  try {
+    return path.resolve(sessionPath);
+  } catch {
+    return sessionPath.trim();
+  }
+}
+
+function getSessionInstructions() {
+  const t = instructionsBySession[currentSessionKey];
+  return typeof t === "string" ? t : "";
+}
+
+function setSessionInstructions(text) {
+  const v = text == null ? "" : String(text).trim();
+  if (v.length > MAX_INSTRUCTIONS) {
+    throw new Error(`说明最多 ${MAX_INSTRUCTIONS} 字`);
+  }
+  if (!v) delete instructionsBySession[currentSessionKey];
+  else instructionsBySession[currentSessionKey] = v;
+  persistInstructions();
+  const snap = instructionsSnapshot();
+  dispatch({ type: "instructions_update", ...snap });
+  return snap;
+}
+
+function instructionsSnapshot() {
+  return {
+    sessionKey: currentSessionKey,
+    text: getSessionInstructions(),
+  };
+}
+
+loadInstructions();
 
 function findPi() {
   for (const p of [
@@ -668,6 +746,12 @@ function routeRecord(rec) {
       // New/switched session: drop Done-when so checks never follow the wrong cwd/session.
       if (untilGoal) clearUntilGoal();
       if (planModeOn) setPlanMode(false);
+      if (entry.command === "new_session") {
+        currentSessionKey = "default";
+      } else if (entry.pendingSessionPath) {
+        currentSessionKey = sessionKeyFromPath(entry.pendingSessionPath);
+      }
+      dispatch({ type: "instructions_update", ...instructionsSnapshot() });
     }
     if (entry.onResponse) {
       entry.onResponse(rec);
@@ -683,6 +767,7 @@ function routeRecord(rec) {
         cwd: resolveProjectCwd(),
         until: untilSnapshot(),
         plan: planSnapshot(),
+        instructions: instructionsSnapshot(),
       };
     }
     respond(entry.ws, entry.clientId, !!rec.success, entry.command, data, rec.error);
@@ -1287,6 +1372,20 @@ function writeCommand(id, ws, command, params) {
     }
     return;
   }
+  // Pocket per-session instructions.
+  if (command === "get_instructions") {
+    respond(ws, id, true, "get_instructions", instructionsSnapshot(), null);
+    return;
+  }
+  if (command === "set_instructions") {
+    try {
+      respond(ws, id, true, "set_instructions",
+        setSessionInstructions((params || {}).text ?? (params || {}).instructions ?? ""), null);
+    } catch (e) {
+      respond(ws, id, false, "set_instructions", null, e.message);
+    }
+    return;
+  }
   // Pocket plan mode (soft: instruction injection only — no Pi RPC tool allow-list).
   if (command === "set_plan_mode") {
     const on = !!(params || {}).on;
@@ -1513,8 +1612,13 @@ function forwardCommand(id, ws, command, params) {
   const internalId = `bridge-${++rpcSeq}`;
   // get_session_name 是兼容别名；名称的权威来源是官方 get_state，不是本地乐观写入。
   const piCommand = command === "get_session_name" ? "get_state" : command;
+  const pending = { ws, clientId: id, command, piCommand };
+  if (["switch_session", "fork", "clone"].includes(command)
+      && params && typeof params.sessionPath === "string") {
+    pending.pendingSessionPath = params.sessionPath;
+  }
   const rec = { ...params, id: internalId, type: piCommand };
-  pendingReqs.set(internalId, { ws, clientId: id, command, piCommand });
+  pendingReqs.set(internalId, pending);
   if (command === "set_model") {
     log(`rpc set_model ${id} provider=${params && params.provider} modelId=${params && params.modelId}`);
   } else {
