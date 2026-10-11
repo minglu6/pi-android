@@ -13,6 +13,7 @@ import androidx.annotation.StringRes;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
 import dev.pi.android.R;
+import dev.pi.android.util.AppFonts;
 
 /** Material 3 风格确认 / 输入对话框（圆角 28dp，跟随应用主题）。 */
 public final class MaterialDialogs {
@@ -60,6 +61,7 @@ public final class MaterialDialogs {
         float density = ctx.getResources().getDisplayMetrics().density;
         int pad = Math.round(24 * density);
         EditText input = new EditText(ctx);
+        input.setTypeface(AppFonts.mono(ctx, false));
         input.setInputType(inputType);
         input.setHint(hintRes);
         input.setText(prefill == null ? "" : prefill);

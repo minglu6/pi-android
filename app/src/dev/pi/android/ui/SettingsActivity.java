@@ -107,8 +107,10 @@ public class SettingsActivity extends AppCompatActivity {
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         applySavedTheme(this);
         super.onCreate(savedInstanceState);
+        AppFonts.beforeContentView(this);
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         setContentView(R.layout.activity_settings);
+        AppFonts.afterContentView(this);
 
         View top = findViewById(R.id.settings_top);
         View root = findViewById(R.id.settings_root);
@@ -256,7 +258,7 @@ public class SettingsActivity extends AppCompatActivity {
         PickerSheet sheet = new PickerSheet(this, R.string.settings_term_font, false, item -> {
             if (item.payload instanceof String) {
                 AppFonts.setFamily(this, (String) item.payload);
-                refreshTermFontLabels();
+                recreate(); // theme fontFamily + AppFonts cache path
             }
         });
         sheet.setItems(items);

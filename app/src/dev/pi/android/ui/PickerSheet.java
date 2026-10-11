@@ -63,6 +63,7 @@ public final class PickerSheet {
         this.activity = activity;
         dialog = new BottomSheetDialog(activity, R.style.PickerBottomSheet);
         View root = LayoutInflater.from(activity).inflate(R.layout.sheet_picker, null, false);
+        dev.pi.android.util.AppFonts.applyTree(root);
         dialog.setContentView(root);
 
         TextView title = root.findViewById(R.id.picker_title);

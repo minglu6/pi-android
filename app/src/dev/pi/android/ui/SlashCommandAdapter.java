@@ -13,6 +13,7 @@ import java.util.List;
 
 import dev.pi.android.R;
 import dev.pi.android.model.SlashCommand;
+import dev.pi.android.util.AppFonts;
 
 public class SlashCommandAdapter extends RecyclerView.Adapter<SlashCommandAdapter.VH> {
 
@@ -51,6 +52,8 @@ public class SlashCommandAdapter extends RecyclerView.Adapter<SlashCommandAdapte
     @Override
     public void onBindViewHolder(@NonNull VH holder, int position) {
         SlashCommand cmd = items.get(position);
+        holder.cmd.setTypeface(AppFonts.mono(holder.itemView.getContext(), false));
+        holder.desc.setTypeface(AppFonts.mono(holder.itemView.getContext(), false));
         holder.cmd.setText(cmd.name);
         String desc = cmd.description;
         if (desc == null || desc.isEmpty()) {

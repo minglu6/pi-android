@@ -211,6 +211,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private String historyRequest = "";
     private String pendingPrompt;
     private String lastConfig;
+    private String lastFontSig = "";
     private String currentSessionPath = "";
     private String currentSessionName = "";
     private final java.util.List<CharSequence> modelLabels = new java.util.ArrayList<>();
@@ -241,9 +242,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     protected void onCreate(Bundle savedInstanceState) {
         SettingsActivity.applySavedTheme(this);
         super.onCreate(savedInstanceState);
+        AppFonts.beforeContentView(this);
         AgentState.get().loadCache(this);
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         setContentView(R.layout.activity_main);
+        AppFonts.afterContentView(this);
+        lastFontSig = AppFonts.signature(this);
 
         statusText = findViewById(R.id.status_text);
         extWidgetView = findViewById(R.id.ext_widget);
@@ -739,6 +743,13 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     protected void onResume() {
         super.onResume();
         resumed = true;
+        String fontSig = AppFonts.signature(this);
+        if (lastFontSig != null && !lastFontSig.isEmpty() && !fontSig.equals(lastFontSig)) {
+            lastFontSig = fontSig;
+            recreate();
+            return;
+        }
+        lastFontSig = fontSig;
         restoreFromAgentState();
         if (serviceBound && service != null) {
             service.setHost(this);

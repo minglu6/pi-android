@@ -119,6 +119,7 @@ public class SessionListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
         }
 
         void bind(SessionEntry entry) {
+            text.setTypeface(AppFonts.mono(itemView.getContext(), true));
             text.setText(entry.headerLabel);
         }
     }
@@ -151,6 +152,7 @@ public class SessionListAdapter extends RecyclerView.Adapter<RecyclerView.ViewHo
         }
 
         void bind(SessionEntry entry, Listener listener) {
+            title.setTypeface(AppFonts.mono(itemView.getContext(), false));
             title.setText(entry.title);
             boolean sameAsTitle = entry.preview != null && entry.title != null
                     && entry.preview.equals(entry.title);

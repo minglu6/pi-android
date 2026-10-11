@@ -186,7 +186,7 @@
     <string name="menu_new_session">新建会话</string>
     <string name="menu_reload">重新连接</string>
     <string name="menu_fork">从消息 Fork…</string>
-    <string name="settings_term_font">终端 / 代码字体</string>
+    <string name="settings_term_font">界面 / 终端字体</string>
     <string name="settings_term_font_nerd">MesloLGLDZ Nerd Font</string>
     <string name="settings_term_font_system">系统等宽</string>
     <string name="settings_term_size">代码字号</string>
