@@ -62,6 +62,16 @@ public class BridgeService extends Service {
     /** True between agent_start and agent_settled — used for background "done" notify. */
     private boolean agentRunning;
 
+    /**
+     * Set when {@link #handleDataSyncTimeout} demotes the FGS. Used to skip sticky
+     * null-intent restarts that would immediately re-enter {@code startForeground}
+     * and loop with another system dataSync timeout. Explicit Activity
+     * {@code startForegroundService} (non-null Intent) still re-promotes.
+     */
+    private volatile long fgsTimedOutAtElapsed;
+    /** Skip sticky re-promote for this long after a system dataSync timeout. */
+    private static final long FGS_TIMEOUT_STICKY_COOLDOWN_MS = 60_000L;
+
     /** Activity 实现：服务转发事件给它渲染；没有 Activity 时事件只影响状态与通知。 */
     public interface UiHost {
         void onStatus(String state, @Nullable String error);
@@ -335,11 +345,26 @@ public class BridgeService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
-        // startForegroundService (Activity recreate / post-dataSync-timeout) requires
+        // After #33 dataSync onTimeout: do not re-enter FGS from a sticky null-Intent
+        // restart (would loop timeout → startForeground → timeout). Activity
+        // startForegroundService always passes a non-null Intent and still re-promotes.
+        long sinceTimeout = fgsTimedOutAtElapsed == 0L
+                ? Long.MAX_VALUE
+                : (android.os.SystemClock.elapsedRealtime() - fgsTimedOutAtElapsed);
+        boolean stickyAfterTimeout = intent == null
+                && sinceTimeout < FGS_TIMEOUT_STICKY_COOLDOWN_MS;
+        if (stickyAfterTimeout) {
+            Log.w(TAG, "skip startForeground after dataSync timeout ("
+                    + sinceTimeout + "ms ago) — sticky null Intent, avoid FGS loop");
+            dbg("skip fg sticky-after-timeout");
+            return START_NOT_STICKY;
+        }
+        // startForegroundService (Activity recreate / later return) requires
         // startForeground again even when the Service instance survived via bind.
         String fgState = (bridge != null && bridge.isConnected()) ? "online" : "connecting";
         try {
             startForeground(ONGOING_ID, ongoingNotification(fgState));
+            fgsTimedOutAtElapsed = 0L;
         } catch (Exception e) {
             Log.w(TAG, "startForeground onStartCommand failed", e);
         }
@@ -375,6 +400,8 @@ public class BridgeService extends Service {
         Log.w(TAG, "dataSync FGS timed out by system — " + reason
                 + "; stopping foreground, disconnecting bridge, stopSelf (no hard kill)");
         dbg("fgs timeout " + reason);
+        // Mark before stopSelf so a sticky restart in the same window skips re-enter.
+        fgsTimedOutAtElapsed = android.os.SystemClock.elapsedRealtime();
         try {
             if (extUi != null) extUi.cancelPending();
         } catch (Exception e) {
@@ -392,6 +419,7 @@ public class BridgeService extends Service {
         }
         // Bound Activities may keep the Service instance alive until unbind;
         // stopSelf still clears the start sticky / FGS obligation promptly.
+        // Do not call startForeground here — that would fight #33's demotion.
         stopSelf();
     }
 
