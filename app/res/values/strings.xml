@@ -247,4 +247,14 @@
     <string name="until_status_gave_up">未通过 · %1$s（已达上限）</string>
     <string name="until_status_stopped">已停止检查</string>
     <string name="until_connector_required">当前连接器不支持 /until，请更新 Termux 侧连接器</string>
+    <string name="menu_schedules">定时消息</string>
+    <string name="schedules_title">定时消息</string>
+    <string name="schedules_empty">暂无定时消息。可用 /schedule in 2h …</string>
+    <string name="schedules_loading">加载中…</string>
+    <string name="schedules_cancel">取消这条定时</string>
+    <string name="schedules_cancelled">已取消定时消息</string>
+    <string name="schedules_added">已安排：%1$s</string>
+    <string name="schedules_need_args">用法：/schedule in 2h 检查部署</string>
+    <string name="schedules_connector_required">当前连接器不支持定时消息，请更新 Termux 侧连接器</string>
+    <string name="schedules_fired_toast">定时消息已送达 Pi</string>
 </resources>

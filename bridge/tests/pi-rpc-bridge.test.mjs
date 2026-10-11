@@ -211,6 +211,28 @@ test('Pocket cwd RPCs: get_cwd / list_cwd_entries / set_cwd persist + inject get
   assert.notEqual(bad.error, '命令不允许: set_cwd');
 });
 
+test('Pocket schedules: add / list / cancel + parse when', async t => {
+  const h = await harness(t), c = await h.connect();
+  c.rpc('bad', 'add_schedule', {when: 'in 2h'});
+  assert.equal((await c.response('bad')).ok, false); // missing message body
+  c.rpc('add', 'add_schedule', {when: 'in 2h check the deploy'});
+  const add = await c.response('add');
+  assert.equal(add.ok, true);
+  assert.ok(add.data.schedule?.id);
+  assert.equal(add.data.schedule.text, 'check the deploy');
+  assert.ok(add.data.schedule.next > Date.now());
+  c.rpc('list', 'list_schedules', {});
+  const list = await c.response('list');
+  assert.equal(list.ok, true);
+  assert.ok(list.data.schedules.some(s => s.id === add.data.schedule.id));
+  c.rpc('cancel', 'cancel_schedule', {scheduleId: add.data.schedule.id});
+  const cancel = await c.response('cancel');
+  assert.equal(cancel.ok, true, cancel.error);
+  assert.equal(cancel.data.cancelled, true);
+  c.rpc('list2', 'list_schedules', {});
+  assert.equal((await c.response('list2')).data.schedules.length, 0);
+});
+
 test('Pocket Done-when (/until): set/clear + check after agent_settled', async t => {
   const h = await harness(t), c = await h.connect();
   c.rpc('empty', 'set_until', {command: '  '});
