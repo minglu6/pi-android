@@ -120,6 +120,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private View contextBarFill;
     private TextView diffBadge;
     private ImageButton btnStop;
+    private View untilBar;
+    private TextView untilStatus;
+    private TextView untilStop;
     private View steerToggle;
     private TextView steerModePlan;
     private TextView steerModeSteer;
@@ -146,6 +149,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private String pendingReadPath = "";
     private String pendingCheckoutRpc = "";
     private boolean pendingReadAsAttach;
+    private String pendingUntilRpc = "";
     private String lastMentionQuery = "";
     private long lastMentionAt;
     private int pasteGuard;
@@ -216,6 +220,16 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         statusText = findViewById(R.id.status_text);
         statusDot = findViewById(R.id.status_dot);
         generationStatus = findViewById(R.id.generation_status);
+        untilBar = findViewById(R.id.until_bar);
+        untilStatus = findViewById(R.id.until_status);
+        untilStop = findViewById(R.id.until_stop);
+        if (untilStatus != null) untilStatus.setTypeface(AppFonts.mono(this, false));
+        if (untilStop != null) {
+            untilStop.setOnClickListener(v -> {
+                if (isConnected()) rpc("clear_until", null);
+                applyUntilUpdate(null);
+            });
+        }
         brandLogo = findViewById(R.id.brand_logo);
         sessionTitle = findViewById(R.id.session_title);
         sessionMeta = findViewById(R.id.session_meta);
@@ -1622,6 +1636,31 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 return;
             }
         }
+        // Pocket Done-when: /until <cmd>
+        if (!hasAttach && text.regionMatches(true, 0, "/until", 0, 6)
+                && (text.length() == 6 || Character.isWhitespace(text.charAt(6)))) {
+            if (!isConnected()) {
+                Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
+                return;
+            }
+            String check = text.length() > 6 ? text.substring(6).trim() : "";
+            if (check.isEmpty()) {
+                Toast.makeText(this, R.string.until_need_cmd, Toast.LENGTH_SHORT).show();
+                return;
+            }
+            hideSlashSuggestions();
+            composer.setText("");
+            JSONObject params = new JSONObject();
+            try {
+                params.put("command", check);
+            } catch (Exception e) {
+                throw new IllegalStateException("set_until params", e);
+            }
+            pendingUntilRpc = rpc("set_until", params);
+            adapter.add(new ChatMessage(ChatMessage.Role.USER, "/until " + check));
+            maybeScrollToBottom(true);
+            return;
+        }
         // 完整匹配已知斜杠命令 → App 动作或 prompt /name
         if (slashStore != null && text.startsWith("/") && !hasAttach) {
             for (SlashCommand c : slashStore.current()) {
@@ -1874,7 +1913,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 || "abort_bash".equals(command)
                 || "get_cwd".equals(command)
                 || "set_cwd".equals(command)
-                || "list_cwd_entries".equals(command);
+                || "list_cwd_entries".equals(command)
+                || "get_until".equals(command)
+                || "set_until".equals(command)
+                || "clear_until".equals(command);
     }
 
     private static String friendlyConnectionError(@Nullable Throwable t) {
@@ -2192,6 +2234,61 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 || data.has("cost") || data.has("contextPercent") || data.has("totalTokens")) {
             applySessionStats(data);
         }
+        if (data.has("until")) {
+            JSONObject until = data.optJSONObject("until");
+            if (until != null) applyUntilUpdate(until);
+        }
+    }
+
+    /** Done-when bar: show while working/checking; hide on idle / after terminal states. */
+    private void applyUntilUpdate(@Nullable JSONObject ev) {
+        if (untilBar == null || untilStatus == null) return;
+        if (ev == null) {
+            untilBar.setVisibility(View.GONE);
+            return;
+        }
+        String status = ev.optString("status", "idle");
+        String command = ev.optString("command", "");
+        int tries = ev.optInt("tries", 0);
+        int max = ev.optInt("max", 5);
+        if ("idle".equals(status) || status.isEmpty()) {
+            untilBar.setVisibility(View.GONE);
+            return;
+        }
+        String label;
+        switch (status) {
+            case "checking":
+                label = getString(R.string.until_status_checking, command, tries, max);
+                break;
+            case "met":
+                label = getString(R.string.until_status_met, command);
+                break;
+            case "gave-up":
+                label = getString(R.string.until_status_gave_up, command);
+                break;
+            case "stopped":
+                label = getString(R.string.until_status_stopped);
+                break;
+            case "working":
+            default:
+                label = getString(R.string.until_status_working, command, tries, max);
+                break;
+        }
+        untilStatus.setText(label);
+        untilBar.setVisibility(View.VISIBLE);
+        if (untilStop != null) {
+            boolean active = "working".equals(status) || "checking".equals(status);
+            untilStop.setVisibility(active ? View.VISIBLE : View.GONE);
+        }
+        if ("met".equals(status) || "gave-up".equals(status) || "stopped".equals(status)) {
+            // Keep result visible briefly, then hide.
+            main.postDelayed(() -> {
+                if (untilBar != null && untilBar.getVisibility() == View.VISIBLE) {
+                    CharSequence cur = untilStatus != null ? untilStatus.getText() : "";
+                    if (label.contentEquals(cur)) untilBar.setVisibility(View.GONE);
+                }
+            }, 3500);
+        }
     }
 
     private static String firstString(JSONObject data, String... keys) {
@@ -2252,6 +2349,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         String type = ev.optString("type");
         if ("bash_execution_update".equals(type)) {
             applyBashDelta(ev);
+            return;
+        }
+        if ("until_update".equals(type)) {
+            applyUntilUpdate(ev);
             return;
         }
         if ("extension_notify".equals(type)) {
@@ -2781,6 +2882,15 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private boolean handlePocketRpcFailure(String id, String command, @Nullable String error) {
+        if ("set_until".equals(command) || "clear_until".equals(command) || "get_until".equals(command)) {
+            if ("set_until".equals(command)) pendingUntilRpc = "";
+            if (resumed && isConnectorCommandRejected(error, command)) {
+                Toast.makeText(this, R.string.until_connector_required, Toast.LENGTH_LONG).show();
+            } else if (resumed && error != null && !error.isEmpty()) {
+                Toast.makeText(this, error, Toast.LENGTH_LONG).show();
+            }
+            return true;
+        }
         if ("bash".equals(command) && id.equals(pendingBashRpc)) {
             ChatMessage.ToolData prev = adapter.findTool(id);
             String detail = error != null ? error : getString(R.string.shell_failed);
@@ -2855,6 +2965,18 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     private boolean handlePocketRpcResponse(String id, String command, @Nullable JSONObject data,
                                             @Nullable String error, boolean ok) {
+        if ("set_until".equals(command) || "clear_until".equals(command) || "get_until".equals(command)) {
+            if ("set_until".equals(command) && id.equals(pendingUntilRpc)) pendingUntilRpc = "";
+            if (data != null) applyUntilUpdate(data);
+            else if ("clear_until".equals(command)) applyUntilUpdate(null);
+            if ("set_until".equals(command) && resumed && data != null) {
+                String cmd = data.optString("command", "");
+                if (!cmd.isEmpty()) {
+                    Toast.makeText(this, getString(R.string.until_set_ok, cmd), Toast.LENGTH_SHORT).show();
+                }
+            }
+            return true;
+        }
         if ("bash".equals(command) && id.equals(pendingBashRpc)) {
             ChatMessage.ToolData prev = adapter.findTool(id);
             String output = data != null ? data.optString("output", "") : "";
