@@ -1,215 +1,219 @@
 # pi-android
 
-Unofficial Android client for Pi
-([@earendil-works/pi-coding-agent](https://github.com/earendil-works/pi)).
+**A native Android client for Pi, with local Termux and remote Tailscale connections.**
 
-**Not affiliated with or endorsed by Earendil Inc.** It reuses nothing but Pi's
-public, documented RPC interface; no Pi source code is vendored or patched here.
+English | [简体中文](README.zh-CN.md)
 
-Pi（[@earendil-works/pi-coding-agent](https://github.com/earendil-works/pi)）的非官方 Android 原生客户端。
-与 Earendil Inc. 没有隶属关系，也没有其背书。
+pi-android connects a Java-based Android app to [Pi](https://github.com/earendil-works/pi) through a Node.js WebSocket bridge and Pi's documented `pi --mode rpc` interface. Pi runs in your existing Termux or computer environment; the app does not bundle a second Pi runtime.
 
-## Quick start
+**Unofficial community project. Not affiliated with or endorsed by Earendil Inc.** No Pi source code is vendored or patched. See [Notices and attribution](NOTICE.md) for third-party branding, UI references, and licensing information.
 
-```sh
-# 1) Token（600），APK 与连接器共用
-umask 077; head -c 24 /dev/urandom | base64 > ~/.pi/agent/pi-android.token
+## Project scope
 
-# 2) Termux 侧常驻连接器
-sv up pi-rpc-bridge          # 或一次性：~/bin/pi-rpc-bridge
+Choose between two connection modes:
 
-# 3) 构建 APK（需 ANDROID_JAR + aapt2/d8/apksigner，见 CONTRIBUTING.md）
-make apk
-# 或：cd app && bash build.sh --only-apk
-adb install -r app/out/pi-android.apk
+- **Local:** run the Android app, bridge, and Pi on the same device using Termux and `127.0.0.1:8945`.
+- **Remote:** run the bridge and Pi on a computer, join the phone and computer to the same Tailscale network, and select that computer's connection profile in the app.
 
-# 4) 首次连：设置里填 token，或 adb 投放
-TOKEN=$(cat ~/.pi/agent/pi-android.token)
-adb shell am start -n dev.pi.android/.ui.MainActivity --es token "$TOKEN"
-```
+The bridge uses the Pi configuration available on its host, normally under `~/.pi/agent`, including model credentials, skills, extensions, and stored sessions. Remote execution remains on the computer. Tailscale is installed separately; the app does not embed a VPN, provide a hosted relay, or make the bridge safe to expose to the public internet.
 
-### 从 App 自动启动 / 更新连接器（一次性前置）
+## Features
 
-设置里默认开启 **「自动启动 Termux 连接器」**：WebSocket 被拒绝或超时会通过
-Termux `RUN_COMMAND`（`BACKGROUND=true`，只启 `RunCommandService`，**不打开 Termux UI**）
-执行 `sv up` / `sv restart`（找不到服务则回退
-`~/bin/pi-rpc-bridge` / `node …/pi-rpc-bridge.mjs`），并带退避重连。
-**「更新并重启连接器」** 同样后台执行：从 GitHub `master` 拉取最新 `bridge/*.mjs`，
-必要时 `npm install`，再 `sv restart`。
+- Streaming conversations with Markdown, code blocks, tool timelines, model thinking, response cancellation, and steer/follow-up input during generation.
+- Session creation, history browsing, switching, forking, renaming, deletion, and local pinning; input history and conversation search/export.
+- Model and thinking-level selection, subject to the installed Pi version and provider capabilities.
+- Image and file attachments, project-file references, file/Git views, and direct shell interactions.
+- Tables, inline images, and SVG/HTML reply previews. HTML/SVG previews use a restricted WebView with JavaScript and network access disabled.
+- Extension interactions: select, confirm, input, editor, notifications, status updates, titles, and text widgets.
+- Plan mode, per-session instructions, scheduled messages, and command-based completion checks through `/until`.
+- Multiple connection profiles with status/latency checks and per-profile model/session state; local Termux connector startup and updates from Settings.
+- Foreground connection service, background interaction notifications, and text sharing through Android `ACTION_SEND` with `text/plain`.
+- History-derived empty-state suggestions, with fallback behavior for older connectors.
+- A compact native interface with Meslo Nerd Font typography and light/dark themes.
 
-首次使用前在设备上完成（各一次）：
-
-1. **安装官方 Termux**（F-Droid / GitHub；不要用已停更的 Play 商店版）
-2. **授予权限**：Pi 应用信息 → 其他权限 → 允许「在 Termux 中运行命令」
-   （`com.termux.permission.RUN_COMMAND`）。也可在设置 →「连接器一键配置」里申请。
-3. **允许外部应用**（在 Termux 里执行一次）：
-
-```sh
-echo 'allow-external-apps=true' >> ~/.termux/termux.properties && termux-reload-settings
-```
-
-更新仓库里的 `bridge/pi-rpc-bridge.mjs` 后也可在 App 设置点 **更新并重启连接器**，
-或在 Termux 手动：
-
-```sh
-sv restart pi-rpc-bridge     # runit；一次性进程则 Ctrl-C 后重新 ~/bin/pi-rpc-bridge
-```
-
-也可把文本分享给 Pi（`ACTION_SEND` text/plain），或深链
-`--es ui sessions|settings|fork|models|thinking|newsession`。
-
-### Tailscale 远程连接
-
-不嵌 Tailscale SDK：手机装官方 [Tailscale Android](https://tailscale.com/download/android)，
-电脑与手机加入同一 tailnet。连接器只绑 Tailscale CGNAT 地址（或 MagicDNS），
-**拒绝** `0.0.0.0` / `::`；非 loopback 必须带 token。
-
-**电脑端（例：Mac Studio）**
-
-```sh
-# 1) 与本机 Termux 共用同一 token 文件
-umask 077; mkdir -p ~/.pi/agent
-# 若已有 token 可跳过生成，直接复制到本机
-head -c 24 /dev/urandom | base64 > ~/.pi/agent/pi-android.token
-
-# 2) 安装并登录 Tailscale（macOS App 或 brew）
-tailscale status   # 确认在线，记下 100.x 或 xxx.ts.net
-
-# 3) 拉仓库并装为用户常驻服务（launchd / systemd --user）
-git clone https://github.com/minglu6/pi-android.git ~/src/pi-android   # 或已有仓库
-cd ~/src/pi-android
-bash scripts/install-remote.sh
-# 默认 --tailscale（只绑 tailscale0 / `tailscale ip -4`）
-# 覆盖：PI_ANDROID_HOST=100.x.y.z bash scripts/install-remote.sh
-# 日志（macOS）：~/Library/Logs/pi-rpc-bridge*.log
-```
-
-手动前台跑亦可：
-
-```sh
-cd bridge && npm install --omit=dev
-node pi-rpc-bridge.mjs --tailscale --port 8945 --token-file ~/.pi/agent/pi-android.token
-# 或：node pi-rpc-bridge.mjs --host 100.x.y.z --port 8945 --token-file …
-```
-
-**手机端**
-
-1. 打开官方 Tailscale App 并登录同一账号 / tailnet  
-2. Pi → 顶栏配置芯片或 设置 → **连接配置** → 新建  
-   - 名称：如 `Mac Studio`  
-   - 主机：`100.x.y.z` 或 `name.ts.net`  
-   - 端口：`8945`  
-   - Token：与电脑 `~/.pi/agent/pi-android.token` 相同  
-   - 可选 cwd：远程机上的默认工作目录  
-3. 点 **测速** 看延迟；切换配置后自动重连。默认「本机 Termux」仍是 `127.0.0.1:8945`  
-4. 若连 100.x / `*.ts.net` 失败，会提示 **请先打开 Tailscale**（不内嵌 VPN）
-
-Termux **自动启动连接器** 只对 loopback 配置生效；远程配置不会触发 `RUN_COMMAND`。
-
-贡献 / 环境变量 / CI：见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
+The UI covers a subset of Pi's RPC capabilities. Availability depends on the installed Pi and connector versions; this repository does not publish a version-by-version compatibility matrix.
 
 ## Architecture
 
+```text
+Android app (dev.pi.android)
+    │ WebSocket + shared token
+    ├── Local: 127.0.0.1:8945 → Termux bridge
+    └── Remote: Tailscale address:8945 → computer bridge
+                                             │
+                                  JSONL over stdin/stdout
+                                             ▼
+                                   Pi: pi --mode rpc
+                                             │
+                              Host configuration and tools
 ```
-pi-android.apk                      Java 原生 UI · 包名 dev.pi.android · 官方 Pi logo
-   │  ws://127.0.0.1:8945  (loopback + token)
-   ▼
-Termux: pi-rpc-bridge  →  bridge/pi-rpc-bridge.mjs  →  pi --mode rpc
-                                                          (stdin/stdout JSONL)
-   ▼
-现有 ~/.pi/agent：模型认证 / Skills / Extensions / 历史会话 全部保留
+
+Each bridge starts one Pi child process on demand and shares it between connected clients. Sessions persist by default; `--no-session` explicitly requests a temporary session. Closing the app UI does not necessarily stop its foreground service or the bridge. After the last WebSocket client disconnects, the bridge stops its Pi child after 600 seconds by default; `--idle-exit 0` disables this timeout. Android may still terminate apps under background-execution or battery-management policies.
+
+## Local setup with Termux
+
+### Requirements
+
+- Android 8.0 / API 26 or later, as declared by the build configuration. This is not a device-compatibility guarantee.
+- Termux with Node.js, npm, and a working Pi installation supporting `pi --mode rpc`.
+- A model provider configured in that Termux Pi environment.
+- A checkout of this repository in Termux and an installed pi-android APK.
+
+### 1. Prepare the bridge and token
+
+Run from the repository root in Termux:
+
+```sh
+npm ci --prefix bridge
+pi --version
 ```
 
-APK 关闭不会销毁 Termux 里的任何东西；反过来，Termux 里的 Pi 也不用为 APK 活着。
-桥默认使用 Pi 的持久会话；显式 `--no-session` 才是临时会话，进程结束后不会保留。
+Create a shared token. This command creates the parent directory and refuses to overwrite an existing token:
 
-本仓库**不是** Pocket Pi fork：本机已有 Termux + Pi，薄客户端只走官方 `pi --mode rpc`，
-不必打包第二套 bootstrap。代价是 RPC 演进时本仓库要跟着加；好处是 `pkg upgrade` 更新 Pi
-通常不用动 APK。
+```sh
+node --input-type=module -e '
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { randomBytes } from "node:crypto";
+const dir = path.join(os.homedir(), ".pi/agent");
+fs.mkdirSync(dir, { recursive: true });
+fs.writeFileSync(path.join(dir, "pi-android.token"), randomBytes(24).toString("base64") + "\n", { mode: 0o600, flag: "wx" });
+'
+```
 
-| 路径 | 是什么 |
+If it reports `EEXIST`, reuse the existing token; do not replace it without updating the app's profile. Keep its contents private. The bridge refuses to start without a readable, non-empty token file.
+
+### 2. Start the bridge manually
+
+```sh
+node bridge/pi-rpc-bridge.mjs
+```
+
+Keep this Termux process running while using the app. Session persistence is enabled by default.
+
+Common options:
+
+| Option | Purpose |
 | --- | --- |
-| `bridge/pi-rpc-bridge.mjs` | WebSocket ↔ Pi RPC 连接器（Termux / Node） |
-| `app/src/dev/pi/android/` | APK：`ui/` · `bridge/` · `model/` · `util/` |
-| `app/tools/` | 无 Gradle 脚本：`fetch-aars` / `gen-dep-r` / `assemble` / `axml-package` |
-| `app/build.sh` | `aapt2 → javac → d8 → assemble → apksigner` |
-| `app/libs/` | 依赖 AAR/JAR（**不进 git**，`make deps` 重建） |
-| `artwork/` | logo 与 adaptive / monochrome 说明 |
-| `docs/build-pipeline.md` | 构建坑目录与 CI 细节 |
-| `Makefile` | 规范命令：`deps` / `apk` / `clean` |
-| `NOTICE.md` | 商标 / logo / 许可证说明 |
+| `--pi-bin /path/to/pi` | Select the Pi executable; `PI_BIN` is also supported. |
+| `--cwd /path/to/project` | Set the initial directory; otherwise use the saved bridge directory or `HOME`. |
+| `--token-file /path/to/token` | Select the token file; defaults to `~/.pi/agent/pi-android.token`. |
+| `--port 8945` | Set the listening port; update the app to match. |
+| `--no-session` | Request a temporary Pi session instead of normal persistence. |
+| `--idle-exit 0` | Keep the Pi child running after all clients disconnect. |
+| `--tailscale` | Discover and bind the host's Tailscale IPv4 address; fail if unavailable. |
 
-## Build
+### 3. Connect the app
 
-不使用 Gradle。本机或 CI 都走同一条链：
+Open **Connection profiles** from the top-bar profile chip or Settings. Select the local Termux profile:
+
+| Setting | Value |
+| --- | --- |
+| Host | `127.0.0.1` |
+| Port | `8945` |
+| Token | Contents of `~/.pi/agent/pi-android.token` in Termux |
+
+Return to the conversation screen and send a message. Allow notifications when requested if you want connection status and background extension prompts. Model requests use the provider configured in Pi; running the agent locally does not imply offline inference.
+
+### Optional: automatic Termux startup and updates
+
+Settings includes a connector setup sheet and an **Automatically start Termux connector** option. Before using it:
+
+1. Install Termux from its official F-Droid or GitHub distribution.
+2. Grant pi-android the **Run commands in Termux** permission (`com.termux.permission.RUN_COMMAND`), using the setup sheet or Android application settings.
+3. Set `allow-external-apps=true` in `~/.termux/termux.properties`, then run `termux-reload-settings` in Termux.
+
+For a loopback profile, the app can request background startup through Termux `RUN_COMMAND` without opening Termux's UI. It tries the existing runit service and supported wrapper/script locations, with reconnection backoff. Manual reconnect can also request a connector start. Merely cloning this repository does not register a runit service.
+
+**Update and restart connector** downloads the connector modules from this repository's `master` branch, installs dependencies when required, and restarts it. Review upstream changes before using this action: it executes updated code in Termux. Remote profiles never trigger local Termux startup. Settings also provides connector diagnostics for startup failures.
+
+## Remote setup with Tailscale
+
+Install and sign in to Tailscale on the computer and Android device, with both devices on the same tailnet. Configure Pi and its model provider on the computer. In a checkout of this repository on that computer, install the bridge dependencies and create a token using the commands above. Each host can use its own token; enter the matching token in that host's phone profile.
+
+### Foreground connection
+
+From the repository root on the computer:
 
 ```sh
-# 非 Termux 示例
+tailscale status
+node bridge/pi-rpc-bridge.mjs --tailscale --port 8945 --token-file "$HOME/.pi/agent/pi-android.token"
+```
+
+`--tailscale` uses `tailscale ip -4` or the `tailscale0` interface to discover the address. The host needs working Tailscale address discovery. An explicit `--host <tailscale-ip>` is available when discovery is unsuitable; never use a public or wildcard address.
+
+### Optional: install a computer-side user service
+
+After creating the token and configuring Node.js, npm, Pi, and Tailscale:
+
+```sh
+bash scripts/install-remote.sh
+```
+
+The [installer](scripts/install-remote.sh) installs dependencies and creates/starts a persistent user service: `launchd` on macOS or `systemd --user` on Linux. It defaults to `--tailscale` and `--idle-exit 0`. Use `PI_ANDROID_HOST`, `PI_ANDROID_PORT`, or `PI_ANDROID_TOKEN_FILE` to override the corresponding values. On macOS, logs are written to `~/Library/Logs/pi-rpc-bridge*.log`; on Linux, inspect `systemctl --user status pi-rpc-bridge`. Other host platforms can use the foreground command if their runtime supports it; the service installer only handles macOS and Linux.
+
+### Add the phone profile
+
+1. Open Tailscale on Android and connect to the same tailnet.
+2. In pi-android, open **Connection profiles** and add a profile.
+3. Enter a name, the computer's Tailscale IPv4 address or MagicDNS name, port `8945`, and its bridge token. An optional working directory refers to the remote host, not the phone.
+4. Test the connection and select the profile. Switching profiles reconnects to the selected host. The local Termux profile remains available separately.
+
+Keep the host online and its bridge running. The app does not start a remote computer or establish the VPN itself.
+
+## Build and download
+
+The project uses Android SDK tools directly rather than Gradle. See the [contribution guide](CONTRIBUTING.md) for prerequisites, regression commands, and the [build reference](docs/build-pipeline.md) for implementation details.
+
+From the repository root on a configured build host:
+
+```sh
 export ANDROID_HOME=/path/to/android-sdk
-export PATH="$ANDROID_HOME/build-tools/35.0.0:$PATH"
+export PATH="$ANDROID_HOME/build-tools/35.0.0:$ANDROID_HOME/platform-tools:$PATH"
 export ANDROID_JAR="$ANDROID_HOME/platforms/android-36/android.jar"
-
-make deps    # fetch-aars（含 okhttp）+ axml-package
-make apk     # → app/out/pi-android.apk
+make apk
+adb install -r app/out/pi-android.apk
 ```
 
-依赖 roots 与 CI 完全一致（含 `com.squareup.okhttp3:okhttp:4.12.0`），见
-[`CONTRIBUTING.md`](CONTRIBUTING.md) 与 [`docs/build-pipeline.md`](docs/build-pipeline.md)。
+`make apk` also fetches dependencies and packages the font resources already in the repository. To download a CI build, open the repository's **Actions → Build APK**, select a successful run, and download the **pi-android** artifact. Builds triggered by `v*` tags also attach the APK to a GitHub Release. CI runs isolated regressions before packaging; it does not replace device validation.
 
-## Download APK
+**Signing:** local builds reuse `app/pi-android.jks`; a fresh CI run generates a new key. APKs from different keys cannot update each other in place. Preserve your signing key for repeat local builds, and do not uninstall an existing app without considering the loss of its local settings. Current CI does not provide a stable release-signing identity.
 
-不必本机编译时：
+## Security considerations
 
-1. 仓库 **Actions** → **Build APK** → 选一次成功运行
-2. 页面底部 **Artifacts** → 下载 **`pi-android`** → 解压得 `pi-android.apk`
-3. 或对 `v*` tag：在 **Releases** 直接下载
+- The bridge defaults to `127.0.0.1`. Use `--tailscale` for remote access. It rejects the explicit wildcard addresses `0.0.0.0` and `::`, but an explicit `--host` is not restricted to Tailscale addresses. Do not expose it publicly.
+- A readable, non-empty token is mandatory at startup. Loopback alone does not isolate the bridge from other Android apps; keep token files private, preferably with mode `0600`.
+- The application protocol is plain `ws://`, not TLS. Tailscale provides the encrypted network path for the recommended remote setup. A token alone does not encrypt traffic.
+- Authenticated clients have significant control: direct `bash` / `abort_bash` RPC, agent tools, project files, Git operations, and session deletion are available. `--allow-bash` is not needed to enable shell access. Treat a profile token as a host-control credential.
+- Plan mode adds instructions to prompts; it does not enforce a read-only tool sandbox. Scheduled messages and `/until` checks can perform work on the bridge host.
+- Model services, extensions, and tools retain their own data-access and security implications. Review third-party code and permissions before use.
 
-```sh
-gh workflow run build-apk.yml --ref master
-gh run watch
-```
+## Known limitations
 
-签名为 CI / `build.sh` 自签 keystore，**无需**仓库 Secrets。
-注意：CI 临时 keystore 每次不同，与本机固定 keystore 也不同；这些包不能互相覆盖升级。
-请保留本机 `app/pi-android.jks`（不要提交），不要为绕过签名随意卸载或清除数据。
+- No visual session-tree browser; allowing `get_tree` in the bridge does not provide a corresponding UI.
+- Text widgets are supported, but arbitrary custom terminal interfaces are not reproduced. `set_editor_text` requests are currently ignored.
+- No dedicated foldable or multi-window layouts.
+- Foreground services and notifications do not guarantee uninterrupted background operation. Scheduled execution depends on the bridge process remaining available.
+- Pi RPC changes may require updates to the bridge or app; older connectors may lack newer features.
 
-## Regression tests
+## Documentation
 
-隔离 RPC、真实 Java 状态/连接测试、设备 UI fixture 与本次修复证据，见
-[`docs/debugging-20261010.md`](docs/debugging-20261010.md)。CI 会在打包前运行隔离回归。
+| Topic | English | 简体中文 |
+| --- | --- | --- |
+| Project overview | [README](README.md) | [项目说明](README.zh-CN.md) |
+| Contributing | [Guide](CONTRIBUTING.md) | [贡献指南](CONTRIBUTING.zh-CN.md) |
+| Build pipeline | [Reference](docs/build-pipeline.md) | [构建参考](docs/build-pipeline.zh-CN.md) |
+| Notices and attribution | [Notice](NOTICE.md) | [许可与来源声明](NOTICE.zh-CN.md) |
+| Artwork | [Guide](artwork/README.md) | [图形素材说明](artwork/README.zh-CN.md) |
 
-## Status（已实现 / 待办）
+Additional technical references, maintained in their existing languages:
 
-### 已实现
-
-- WebSocket + token 鉴权 + 按配置签名重连
-- 流式回复、工具气泡、abort（菜单 / 发送钮）
-- 新建会话、模型 / 思考档位切换；`get_state` 状态芯片
-- 前台 `BridgeService`（常驻通知 / 连接器状态，后台不丢连接）
-- 会话列表（`list_sessions` → `switch_session` → `get_messages`）、Fork；可重命名 / 删除
-- 扩展 UI：select / confirm / input / editor（前台按钮行；后台通知；`notify` / `setStatus` / `setTitle`）
-- 首启空状态（无 Token / 未连接引导）、adaptive + monochrome 图标
-- GitHub Actions 自动打 APK
-- 日用聊天打磨：Markdown/代码块、时间戳、断线横幅、粘底滚动、会话重命名/删除
-- Tokyo Night 风格聊天 UI（简洁顶栏 / 无气泡消息 / 工具时间线 / 卡片输入框）；MesloLGLDZ Nerd Font Mono
-- 多连接配置（本机 Termux / Tailscale 远程）、测速、按配置记忆模型与会话；`--tailscale` 远程桥
-- 空态建议 chip：`get_suggestions`（会话 todo / 中断续写 / until·定时 / git 改动；旧连接器自动兜底）
-
-### 已知限制 / 未做
-
-- 会话树可视化（`get_tree` 已在白名单，无 UI）
-- `setWidget` / 大文本编辑体验仍简陋
-- 多窗口 / 折叠专门布局
-- 厂商激进杀进程无法 100% 对抗（依赖前台通知保活）
-
-产品方向与大功能请先讨论，不要在本仓库默默扩 scope。
-
-## 安全边界
-
-- 默认只绑 `127.0.0.1`；远程用 `--tailscale` 或 `--host <100.x>`，**拒绝** `0.0.0.0`/`::`。token 必填（文件权限建议 600）
-- 命令白名单**始终**包含官方 `bash` / `abort_bash`（Pocket `!shell` / `!!shell`）；`--allow-bash` 仍为同义词。若 App 仍报 `命令不允许: bash`，说明 Termux 还在跑旧 bridge —— `sv restart pi-rpc-bridge`。该白名单不限制 prompt 驱动的 agent 工具。桥本地另有 `list_project_files` / `read_project_file` / `git_*` / `get_suggestions`（非 Pi RPC）
-- 依赖 sha256 清单：`app/libs/manifest.json`（重建后核对）
+- [Mobile interaction](docs/mobile-interaction.md)
+- [UI guidelines](docs/ui-guidelines.md)
+- [Regression and debugging notes](docs/debugging-20261010.md)
+- [Attachment protocol](bridge/ATTACHMENTS.md)
 
 ## License
 
-代码：MIT（`LICENSE`）。Pi 的 logo / 商标**不在** MIT 范围内 —— 见 `NOTICE.md`。
+Project code is licensed under the [MIT License](LICENSE). Third-party dependencies and bundled fonts retain their own licenses. Pi names, logos, and other brand assets are not granted under this project's MIT license; see [NOTICE.md](NOTICE.md).

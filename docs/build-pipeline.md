@@ -1,193 +1,176 @@
-# pi-android 构建流水线（无 Gradle）
+# APK build reference
 
-本仓库**故意不用 Gradle**。Termux 场景里往往只有 `aapt2 / javac / d8 / apksigner / python3`；
-桌面 / CI 则用 Android cmdline-tools 提供同样的二进制。Gradle 干的活拆成：
+**English** | [简体中文](build-pipeline.zh-CN.md)
 
-```
-app/tools/fetch-aars.py    ← 替代 gradle 的依赖解析（Google Maven + Maven Central，传递依赖 + 版本择优）
-app/tools/gen-dep-r.py     ← 替代 AGP 的依赖 R 类生成
-app/tools/assemble.py      ← 替代 AGP 的打包（dex + AAR 的 assets/.so 合并）
-app/build.sh               ← 串起来：aapt2 → javac → d8 → assemble → apksigner
-Makefile                   ← 仓库根目录规范入口：make deps / make apk
-```
+This document describes the repository's **no-Gradle** APK pipeline and practical troubleshooting. For initial setup, see [CONTRIBUTING.md](../CONTRIBUTING.md); for app and connector configuration, see [README.md](../README.md). Review [NOTICE.md](../NOTICE.md) before distributing APKs or changing branding.
 
-不可省的工具适配器。`app/tools/lib-resources.py`（把依赖做成 `aapt2 link --static-lib` 静态库）
-**当前不在主构建路径里**，保留它只是作为记录与备用：见下 §3 结论。
+## Build contract
 
-贡献入口与最短路径：[`CONTRIBUTING.md`](../CONTRIBUTING.md)。
+[app/build.sh](../app/build.sh) builds package `dev.pi.android` with minimum API **26 (Android 8.0)** and target API **36**. Use Android SDK Platform 36's `android.jar`. CI uses JDK 17 and Android Build-Tools 35.0.0; `javac` compiles the sources to Java 11 bytecode.
 
-```sh
-make apk                                                 # 或：bash app/build.sh --only-apk
-adb install -r app/out/pi-android.apk
-PHONE_VD_SERIAL=<serial> phone-vd-start --app dev.pi.android   # 虚拟屏验证（可选）
-```
+The host needs Bash, Make, Python 3, `javac`, `keytool`, `aapt2`, `d8`, `apksigner`, and standard Unix utilities. Dependency resolution needs access to Google Maven and Maven Central. `adb` is optional for building, required for the documented installation commands. No Gradle installation or additional Python packages are required.
 
-依赖落在 `app/libs/`（约 59 个构件，含 `manifest.json` 的 sha256 审计清单；以实际拉取为准），
-**不进 git**；任何机器重建都靠下面的 `--root` 命令（与 CI 相同）。
+The isolated regression suite additionally uses Node.js 22/npm, `curl`, and `sha256sum`; see [CONTRIBUTING.md](../CONTRIBUTING.md) for dependency setup and the distinction between CI tests and additional local regressions.
 
-## 非 Termux 环境变量
-
-`app/build.sh` 默认：
-
-```sh
-ANDROID_JAR="${ANDROID_JAR:-$HOME/antdaily/android/android.jar}"   # Termux 布局
-```
-
-并要求 `aapt2` / `d8` / `apksigner` / `python3` 在 `PATH` 上。桌面或 CI 请显式设置：
+All examples run from the repository root:
 
 ```sh
 export ANDROID_HOME=/path/to/android-sdk
-export ANDROID_SDK_ROOT="$ANDROID_HOME"
-export PATH="$ANDROID_HOME/build-tools/35.0.0:$PATH"   # 与 CI BUILD_TOOLS_VERSION 对齐即可
+export PATH="$ANDROID_HOME/build-tools/35.0.0:$ANDROID_HOME/platform-tools:$PATH"
 export ANDROID_JAR="$ANDROID_HOME/platforms/android-36/android.jar"
+make apk
 ```
 
-- **MIN_SDK=26** / **TARGET_SDK=36**（见 `app/build.sh`）
-- 平台 jar 必须来自 `platforms;android-36`
-- 请用 `bash app/build.sh …` 调用（脚本 shebang 指向 Termux 的 bash 路径）
+Use host-compatible tools, including Termux-compatible binaries when building on Android. Set `ANDROID_JAR` explicitly rather than relying on the script's legacy Termux-specific fallback. `ANDROID_HOME` alone is not enough: the script does not use it to locate `android.jar`. Invoke `app/build.sh` with `bash` to avoid its Termux-specific shebang on desktop hosts.
 
-## 依赖清单（一次即可）
+## Commands and outputs
+
+The [Makefile](../Makefile) is the canonical local entry point:
+
+| Command | Effect |
+| --- | --- |
+| `make deps` | Resolve/download dependencies and generate AAR package metadata |
+| `make packages` | Regenerate package metadata from existing AARs |
+| `make apk` / `make build` | Run dependency preparation, then build and sign the APK |
+| `bash app/build.sh --only-apk` | Build from existing dependencies only |
+| `make install` | Run `make apk`, then `adb install -r` |
+| `make clean` | Delete `app/libs/`, `app/build/`, and `app/out/`, but not `app/pi-android.jks` |
+
+The script recreates `app/build/` on each build. Running it without arguments builds an APK but does **not** install it; installation is attempted only with `--install`. Prefer `make install` or an explicit `adb` command so installation failures are visible directly.
+
+| Path | Contents |
+| --- | --- |
+| `app/libs/` | Downloaded and extracted dependencies |
+| `app/libs/manifest.json` | Dependency coordinates, downloaded artifact sizes, and SHA-256 records |
+| `app/libs/graph.json` | Resolved dependency graph |
+| `app/libs/packages.json` | AAR paths mapped to manifest package names |
+| `app/build/` | Compiled resources, generated Java, classes, DEX, and unsigned APK |
+| `app/out/pi-android.apk` | Signed APK |
+| `app/pi-android.jks` | Reused local signing keystore |
+
+These generated paths are excluded from version control. `manifest.json` records downloads; it is not a committed dependency lockfile or a guarantee that cached files are revalidated on every run.
+
+## Pipeline stages
+
+### 1. Resolve dependencies
+
+`make deps` runs [fetch-aars.py](../app/tools/fetch-aars.py), then [axml-package.py](../app/tools/axml-package.py). Root dependencies and exclusions are maintained in the Makefile and repeated in the [CI workflow](../.github/workflows/build-apk.yml); update both lists together.
+
+The resolver reads POM dependencies from Google Maven and Maven Central, chooses a version for each `group:artifact` using its own version comparison, downloads AARs/JARs, and extracts AAR classes, resources, and `R.txt`. It is not a general replacement for Maven or Gradle dependency semantics.
+
+Preserve these invariants when changing dependencies:
+
+- The classpath and DEX inputs need both AAR `classes.jar` files and standalone JAR artifacts.
+- OkHttp is an explicit root dependency for the connector client.
+- Image EXIF rotation uses the platform `android.media.ExifInterface`, available below the app's minimum API level; no `androidx.exifinterface` dependency is required.
+- Kotlin's standard library is included explicitly. The current `kotlin-stdlib-jdk7`, `kotlin-stdlib-jdk8`, and `kotlin-stdlib-common` exclusions prevent overlapping Kotlin artifacts in this dependency set; do not remove them without reviewing the resolved inputs.
+- Read package names from each AAR's manifest, not from Maven coordinates. The package helper handles text XML and binary XML manifests.
+- Changing versions can leave old, non-excluded artifacts in `app/libs/`. Since the build includes every JAR it finds, use `make clean` and rebuild after dependency changes.
+
+### 2. Compile and link resources
+
+`aapt2 compile` processes app resources and each dependency resource directory. `aapt2 link` merges them into `app/build/base.apk`, producing the resource table and `app/build/gen/dev/pi/android/R.java`. Dependency resources are linked into the app package through `-R` inputs.
+
+The app's Meslo font family requires both `app/res/font/meslo_lgldz_nf_regular.ttf` and `meslo_lgldz_nf_bold.ttf`, referenced by `meslo_lgldz_nf.xml`. These files are included in the repository and are not downloaded by `make deps`. Preserve their notices in `app/res/raw/`. If resource linking reports missing `font/meslo_lgldz_nf_*`, restore the required font resources rather than removing theme references. UI changes must also follow the [UI guidelines](ui-guidelines.md) (Chinese), including `AppFonts` fallback and the prohibition on redundant interaction hints.
+
+[gen-dep-r.py](../app/tools/gen-dep-r.py) then generates the dependency packages' `R` classes. It combines package names from `packages.json`, symbol names from each `R.txt`, and final IDs from the app's generated `R.java`. Both scalar `int` fields and `styleable` `int[]` fields matter. AAR bytecode may reference these generated classes even though the AAR does not supply them.
+
+[lib-resources.py](../app/tools/lib-resources.py) is not invoked by the current build. Do not assume a per-library static-resource-linking stage is active.
+
+### 3. Compile Java and generate DEX
+
+The build generates `BuildInfo.java` with a UTC build timestamp and the short Git commit ID (or `none` if unavailable). It compiles app and generated Java sources against `android.jar` and all dependency JARs, then passes the compiled classes and those JARs to `d8 --release --min-api 26`.
+
+`build.sh` uses `set -euo pipefail`: a failed app or dependency `aapt2 compile` stops the build. Java compiler output is saved to `app/build/javac.log`; a failed `javac` prints that log and exits before DEX generation or signing. Warning filtering is applied only after successful compilation.
+
+The packager includes all `classes*.dex` files emitted by D8, not just `classes.dex`. Android API 26 supports native multidex; a method-count increase does not by itself require a legacy `MultiDex` application hook. Inspect the actual D8 error and outputs before changing the DEX configuration.
+
+### 4. Assemble and sign
+
+[assemble.py](../app/tools/assemble.py) starts from `base.apk` and adds:
+
+- Every `classes*.dex` file from the D8 output directory.
+- Assets from dependency AARs and `app/assets/`.
+- AAR native libraries, mapping `jni/<abi>/*.so` or `libs/<abi>/*.so` to APK `lib/<abi>/` entries.
+
+The build creates `app/pi-android.jks` if absent, then uses `apksigner` with v1, v2, and v3 signing enabled to write `app/out/pi-android.apk`. The keystore alias is `piandroid`; its default password is `android`, overridable through `KS_PASS`. An existing keystore must be opened with its existing password.
+
+The script embeds timestamps and uses a generated key when no keystore exists, so this process does not promise byte-for-byte reproducible APKs.
+
+## CI distribution and signing identity
+
+The **Build APK** workflow runs for pushes to `master`, pull requests targeting `master`, `v*` tag pushes, and manual dispatch. It installs the toolchain, prepares dependencies, runs isolated RPC/JVM/build-failure regressions, builds the APK, and uploads an Actions artifact named **`pi-android`**, with a configured retention of **30 days**. Download and extract the artifact to obtain `pi-android.apk`. The regression commands and additional tests not yet in CI are listed in [CONTRIBUTING.md](../CONTRIBUTING.md); CI success does not establish device UI compatibility.
+
+Tag builds also attach the same APK to a GitHub Release. Branch and pull-request builds only publish Actions artifacts. Release publication uses `GITHUB_TOKEN`; no custom signing secret is configured.
+
+**There is no persistent CI signing identity in the current workflow.** Each fresh CI checkout generates a new keystore. A release attachment therefore does not imply a stable release signing key. Local builds reuse `app/pi-android.jks`, and `make clean` preserves it. Keep that file private and back it up if you need compatible updates.
+
+An update normally needs the installed app's signing identity. APKs from separate CI runs, or from local and CI builds, can fail with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`. Use the original key or intentionally uninstall the old app before installing the new APK. Uninstallation removes local app data; do not use it as an automatic troubleshooting step.
+
+## Troubleshooting
+
+### Missing tools, platform JAR, or dependencies
+
+Confirm `ANDROID_JAR` points to the installed API 36 platform JAR and that all required tools are on `PATH`. Check the host architecture when a tool cannot execute. Use `make deps` for a missing dependency tree; use `make packages` when AARs exist but package metadata needs regeneration.
+
+A missing class such as `kotlin.jvm.internal.Intrinsics` or `LifecycleOwner` can indicate missing dependency bytecode. Check the resolved artifacts and both compilation and DEX inputs rather than adding an unrelated UI workaround.
+
+### Duplicate classes or stale dependency versions
+
+For D8 errors such as `Type ... is defined multiple times`, inspect the JAR inputs, versions, and Kotlin exclusions. Rebuild from a clean dependency tree after changing versions:
 
 ```sh
-cd app
-python3 tools/fetch-aars.py \
-  --root androidx.appcompat:appcompat:1.7.0 \
-  --root androidx.recyclerview:recyclerview:1.3.2 \
-  --root androidx.constraintlayout:constraintlayout:2.2.1 \
-  --root com.google.android.material:material:1.12.0 \
-  --root org.jetbrains.kotlin:kotlin-stdlib:1.9.24 \
-  --root com.squareup.okhttp3:okhttp:4.12.0 \
-  --root androidx.swiperefreshlayout:swiperefreshlayout:1.1.0 \
-  --exclude org.jetbrains.kotlin:kotlin-stdlib-jdk7 \
-  --exclude org.jetbrains.kotlin:kotlin-stdlib-jdk8 \
-  --exclude org.jetbrains.kotlin:kotlin-stdlib-common
-python3 tools/axml-package.py --all --libs libs      # 读每个 AAR 的 package（生成 libs/packages.json）
+make clean
+make apk
 ```
 
-`okhttp` 必须显式 `--root`：源码 `BridgeConnection` 直接 `import okhttp3.*`，传递依赖图里
-AndroidX 不会带上它。图片 EXIF 旋正用平台 `android.media.ExifInterface`（minSdk 26 ≥ 24），
-不拉 `androidx.exifinterface`。
+This removes downloaded dependencies and output files but retains the local keystore.
 
-## CI（GitHub Actions）
+### Missing resources or dependency `R` classes
 
-仓库工作流 [`.github/workflows/build-apk.yml`](../.github/workflows/build-apk.yml) 在每次
-**push 到 `master`**、**指向 `master` 的 PR**、**手动 `workflow_dispatch`**、以及 **`v*` tag** 时：
+For `ClassNotFoundException` involving a dependency's `R` class, inspect `packages.json`, that AAR's `R.txt`, and the generated dependency `R.java`. Theme or styleable errors also require checking generated arrays, not just scalar resource IDs.
 
-1. 装 JDK 17 + Android cmdline-tools，拉 `platforms;android-36` 与 `build-tools;35.0.0`
-   （提供 `aapt2` / `d8` / `apksigner` 与 `android.jar`，与 `app/build.sh` 的 TARGET_SDK=36 对齐）；
-2. 按上面的命令拉依赖并跑 `axml-package.py`；
-3. `ANDROID_JAR=…/platforms/android-36/android.jar bash app/build.sh --only-apk`；
-4. 上传产物 **`pi-android` artifact**（路径 `app/out/pi-android.apk`）；tag 推送时额外挂到
-   GitHub Release。
+Resource-compilation and Java-compilation failures now terminate the build; do not rely on older advice that those failures are ignored. Read the complete `aapt2` diagnostics and `app/build/javac.log`. The dependency `R` generator can still skip symbols absent from the merged table, so inspect its missing-field reports and generated classes, then reproduce the affected screen or operation. Packaging success alone is not runtime validation. `python3 tests/test_build_failures.py` checks failure propagation with intentionally failing tool fixtures without building a real APK.
 
-签名用 `build.sh` 现场生成的自签 `pi-android.jks`（默认密码 `android`），**不需要**仓库 Secrets。
+### Device selection and installed version
 
-### 下载 APK
-
-1. 打开仓库 **Actions** → 选中一次成功的 **Build APK** 运行；
-2. 页面底部 **Artifacts** → 下载 `pi-android`（解压得到 `pi-android.apk`）；
-3. 或对 tag：在 **Releases** 页直接下 APK。
-
-手动触发：
+Use an explicit device serial when multiple devices are connected:
 
 ```sh
-gh workflow run build-apk.yml --ref master
-gh run watch   # 或打开 Actions 页看进度
+adb devices
+adb -s SERIAL install -r app/out/pi-android.apk
+adb -s SERIAL shell am force-stop dev.pi.android
+adb -s SERIAL shell am start -n dev.pi.android/.ui.MainActivity
 ```
 
-## 坑目录（全部实证，按被踩顺序）
+Replace `SERIAL` with the intended device identifier. A deliberate stop/start establishes a fresh process for reproduction; it is not a claim that every APK installation leaves the old process running. Check installation errors, signing identity, and device state before assuming the latest APK is running. Generated `app/build/gen/dev/pi/android/BuildInfo.java` records the build timestamp and commit; the Settings screen displays both, allowing the installed build to be checked on-device.
 
-### P1 · AndroidX 是 Kotlin 写的，`kotlin-stdlib` 必须自己加
-POM 依赖图里不声明它（但 bytecode 用了 `kotlin.jvm.internal.Intrinsics`）。
-症状：`ClassNotFoundException: kotlin.jvm.internal.Intrinsics`（发生在 `AppCompatActivity` 构造里）。
-而且 gradle 会把 `kotlin-stdlib-jdk7/jdk8` 提升到同一版本（那两个包 1.8 之后是空壳），
-我们按最高版本择优会留下 1.6.21 的旧版 → d8 报 `Type ... is defined multiple times`，
-所以必须 `--exclude` 掉 `kotlin-stdlib-jdk7/jdk8/common`。
+<a id="p12"></a>
 
-### P2 · 版本号要从两段剥 `[]`，POM 里的版本写成 `[2.6.2]`
-只 `lstrip` 会留下 `2.6.2]`，于是下载目录叫 `libs/.../2.6.2]/`，下次按内存路径找不到
-→ 症状是某个 jar 静默缺失，最后在运行时炸 `NoClassDefFound: LifecycleOwner`。现已 `strip`。
+### Runtime diagnostics (P12)
 
-### P3 · 依赖既有 AAR 也有 JAR，classpath 不能只搜 `classes.jar`
-`androidx.annotation`、`kotlin-stdlib`、`error_prone_annotations` 是纯 jar；
-`find "$LIBS" -name '*.jar'` 才覆盖得到（`classes.jar` 也是 `.jar`，一并被捡到）。
+This section retains the practical diagnostics referenced as “P12” by existing source comments.
 
-### P4 · **最关键**：依赖的 `R` 类不会随 AAR 来，必须补生成
-AAR 的 `classes.jar` 引用 `androidx.appcompat.R`，但 AAR 不带 R 类（Gradle 会按最终合并的
-资源表给每个依赖包生成一份）。没有这一步的运行时症状：
-`ClassNotFoundException: androidx.appcompat.R$drawable` —— 从错误信息完全看不出是资源问题。
-`gen-dep-r.py` 的做法：
+Start with Android's normal diagnostic tools:
 
-1. `libs/packages.json`（由 `axml-package.py` 读 AAR 的 AndroidManifest.xml 得到包名
-   —— 不能靠 groupId 猜：`core` 是 `androidx.core`，`core-ktx` 却是 `androidx.core.ktx`）；
-2. AAR 里的 `R.txt` 给出该库的资源名清单（type + name，忽略其中的旧 id）；
-3. aapt2 link 生成的 `dev/pi/android/R.java` 里有合并后的最终 id；
-4. 按名字取值，写出 `<pkg>.R`。`styleable` 是 `int[]`，必须单独认出来，
-   否则 Material3 会缺 1600+ 个样式数组（表现为主题相关的神秘崩溃）。
+```sh
+adb -s SERIAL logcat -b crash
+adb -s SERIAL shell dumpsys activity activities
+```
 
-### P5 · 包名要真读 manifest，别猜
-见 P4 括号里的两个例子。另外 AndroidX 的 AAR manifest 是**未编译的文本 XML**
-（`<?xml` 开头，不是 `03 00 08 00`），所以 `axml-package.py` 两条路都支持。
+Capture relevant app logs and screenshots where available. A screenshot alone can be stale or fail to show an obscured window; include reproduction steps and activity/window state when diagnosing UI behavior. Device-specific display or logging behavior is not a general Android limitation.
 
-### P6 · 别指望保留各自包名：依赖资源直接 `-R` 给应用 link 的后果
-这条路（每个依赖 `aapt2 compile` 后直接喂给应用的 link）的结果是资源被合并进应用包，
-同时刷出 1200 条 `No package ID 7f found for resource ID 0x7f…`。
-实测：多数资源其实合并成功（应用表里 7233 个 id，material 的 color/dimen/layout/id
-一个不缺），所以这些报错更像"把跨库引用烘成数字 id 时无处查找"的告警，不是资源丢失。
-目前的成品 APK 就是这条路径的产物，已在虚拟屏上验证渲染正确（见 §验证）。
-若后续某个依赖开始出现资源解析失败，再改用 `lib-resources.py` 的静态库路径。
+`BridgeService` also has an opt-in trace channel: it checks for `debug.trace` in the app's private files directory **when the service is created**, then appends to `debug.log` in the same directory. Access requires suitable device privileges; normal non-root installations do not expose those private files through arbitrary shell commands. On an authorized rooted test device, manage the marker in that app data directory and restart the service for changes to take effect. Remove the marker and restart after investigation. Treat trace files as sensitive and redact private content before sharing.
 
-### P7 · 若真走静态库路径，依赖要用 `-I` 而不是 `-R`
-`aapt2 link --static-lib -I android.jar -I dep.apk -R own.zip`。
-用 `-R dep.apk` 会把依赖的资源并入本库包名，反而让 core 引用自己的资源时找不到：
-`resource id/normal (aka androidx.drawerlayout:id/normal) not found`。
-即便如此，`appcompat` 仍会失败：`res/color/*.xml` 里的 `app:alpha` 是一个
-**core 声明的 attr**（`libs/androidx/core/core/1.13.0/res/values/values.xml` 第 117 行），
-res-auto 在本库 link 时解析到 `androidx.appcompat:alpha` 就找不到；
-material 又依赖 appcompat，一并失败。这也是 P6 决定先不走这条路的原因。
+For example, on an authorized rooted test device whose app data is at the standard path:
 
-### P8 · `adb` 本机连了两个 serial，`install` 必须带 `-s`
-`127.0.0.1:5555` 与 `emulator-5554` 都是本机虚拟屏/ADB 自连；phone-* 脚本要用
-`PHONE_VD_SERIAL` 指定，否则报「检测到多个 ADB device」。
+```sh
+adb -s SERIAL shell "su -c 'touch /data/data/dev.pi.android/files/debug.trace'"
+adb -s SERIAL shell am force-stop dev.pi.android
+adb -s SERIAL shell am start -n dev.pi.android/.ui.MainActivity
+# Reproduce the problem, then collect the trace privately.
+adb -s SERIAL shell "su -c 'cat /data/data/dev.pi.android/files/debug.log'"
+adb -s SERIAL shell "su -c 'rm /data/data/dev.pi.android/files/debug.trace'"
+```
 
-### P9 · 单个 dex 目前够用，超过 64K 方法要手动开 multidex
-现在产一棵 `classes.dex`（含全部 AndroidX），没触发上限。真到那一步，
-d8 默认不会自己拆 dex，需要显式切 multi-dex 并在 Application 里挂 `MultiDex`。
-
-### P10 · 虚拟屏上 AlertDialog 可能“存在但不可见”，阻塞式扩展 UI 别用它
-同一个 Activity 里，`AlertDialog.Builder(this).show()` 不抛异常、`isShowing()` 返回 true，
-但屏幕上根本看不到（同一次会话里 RecyclerView 内容正常显示）。为了定位这个坑花了不少轮：
-先把构建时间烘进 UI（`build.sh` 生成 `BuildInfo.java`）确认跑的是新代码，再靠**界面里的可见
-取证**（见 #66：本机 App 的 logcat 收不到，连 `Log.i` 都没有）一步步排除。
-结论：select/confirm/input/editor 这类**会阻塞 Pi** 的请求，UI 改用 Activity 布局里的按钮行，
-不要用 AlertDialog。`list_sessions` 那种“信息型”列表对话框仍可以用 AlertDialog（实测可见）。
-
-### P11 · 验证 Debugging 的时序：改完 APK 要 `am force-stop`
-`adb install -r` 之后，正在运行的进程仍跑旧 dex —— 这不是缓存错觉，是 Android 的加载行为。
-每次验证新构建都要：`install -r` → `am force-stop dev.pi.android` → 重启虚拟屏 → 立刻操作。
-虚拟屏大约 1 分钟内会把窗口息掉、tap 失去响应，验证脚本要把“启动 → 意图 → 抓屏”压在一轮里做完。
-
-### P12 · App 的 logcat 收不到，取证要自己铺一条路
-本机 App 的 logcat **收不到任何本 App 的输出**（连 `Log.i` 都没有，同进程的其它 App 日志正常），
-所以 UI 之外的事实要取证只能靠：
-
-1. 把构建时间/commit 烘进界面（`build.sh` 生成 `BuildInfo.java`）—— 确认设备上跑的是哪一份 APK；
-2. 虚拟屏截图 + `tesseract -l chi_sim+eng` OCR（注意记忆 #56：虚拟屏息屏时可能返回最后一帧，
-   文件大小不再是活性判断；务必同时看 `DisplayInfo.state`）；
-3. **服务端 trace 文件**：App 侧 trace 追加到 `/data/data/dev.pi.android/files/debug.log`，
-   默认关闭，打开方式：`su -c 'touch /data/data/dev.pi.android/files/debug.trace'`，
-   读取：`su -c 'cat /data/data/dev.pi.android/files/debug.log'`。
-   崩溃仍然能从 `adb logcat -b crash` 里拿到。
-4. 通知类的显式证据：`adb shell dumpsys notification --noredact | grep dev.pi.android`
-   —— 这条比截图可靠得多。
-
-另外 `Activity.isResumed()` 是 **final** 的：自定义接口不要叫这个名字，否则运行期
-`LinkageError`（方法冲突，App 直接起不来，只在 `logcat -b crash` 里能看到）。
-
-## 验证（2026-10-10）
-
-安装后在虚拟屏启动 `dev.pi.android`，`dumpsys activity` 显示
-`topResumedActivity=... dev.pi.android/.ui.MainActivity`；
-抓屏 + `tesseract -l chi_sim+eng` 读出屏幕上确有工具栏状态 "Connecting…"、
-INFO 文案与输入框 hint "Message Pi…"。**判断 UI 是否真的渲染出来要用 OCR/窗口 dumpsys 取证，
-不要只凭截图文件大小**（见可见czy记忆 #56：虚拟屏熄屏时最后一帧仍可能很大）。
+Restart the app/service again after removing the marker to disable tracing. The path and `su` access depend on the test device and Android user; these are not instructions for unprivileged installations. If a virtual display is involved, verify its active/ON state before treating screenshots as evidence. The [regression investigation](debugging-20261010.md) and [mobile interaction guide](mobile-interaction.md) (Chinese) document isolated UI fixtures and evidence limitations; they are historical reports, not proof that a new build has been tested.
