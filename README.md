@@ -8,6 +8,14 @@ pi-android connects a Java-based Android app to [Pi](https://github.com/earendil
 
 **Unofficial community project. Not affiliated with or endorsed by Earendil Inc.** No Pi source code is vendored or patched. See [Notices and attribution](NOTICE.md) for third-party branding, UI references, and licensing information.
 
+## Screenshot
+
+<p align="center">
+  <img src="docs/screenshots/home-light.jpg" width="360" alt="pi-android home screen in light theme, showing the local Termux profile, history suggestions, and message composer">
+</p>
+
+Light-theme home screen with the local Termux profile selected. The screenshot shows the Chinese interface.
+
 ## Project scope
 
 Choose between two connection modes:

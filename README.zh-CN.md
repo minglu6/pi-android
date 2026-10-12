@@ -8,6 +8,14 @@ pi-android 通过 Node.js WebSocket 连接器和 Pi 公开文档中的 `pi --mod
 
 **本项目由社区独立维护，并非官方项目，与 Earendil Inc. 没有隶属关系，也未获得其背书。** 仓库未内嵌或修改 Pi 源码。第三方品牌、界面参考及许可说明见[许可与来源声明](NOTICE.zh-CN.md)。
 
+## 界面示例
+
+<p align="center">
+  <img src="docs/screenshots/home-light.jpg" width="360" alt="pi-android 浅色主题首页，展示本机 Termux 连接配置、历史建议和消息输入区">
+</p>
+
+浅色主题下的中文首页，当前选择本机 Termux 连接配置。
+
 ## 项目定位
 
 提供两种连接方式：
