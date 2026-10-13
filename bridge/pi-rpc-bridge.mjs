@@ -12,7 +12,6 @@
  *    便于 runit/前台两种运行方式。
  *  - 能力白名单：默认 read-only + prompt/abort 等，以及 Pocket 所需官方 `bash` / `abort_bash`
  *    （`--allow-bash` 仍为同义词）。白名单不限制 prompt 驱动的 agent 工具。
- *  - 计划模式：仅向 prompt/steer/follow_up 注入只读指令（Pi RPC 无工具 allow-list，无法硬拦截）。
  *
  * 线协议（client → server）：
  *    {"id":"1","rpc":"get_state","params":{}}
@@ -264,8 +263,6 @@ function runUntilShell(command) {
 }
 
 async function maybeRunUntilCheck(source) {
-  // Pocket: in plan mode the check waits until the plan is approved.
-  if (planModeOn) return;
   if (!untilGoal || untilGoal.status !== "working" || untilBusy) return;
   untilBusy = true;
   const command = untilGoal.command;
@@ -488,54 +485,15 @@ function cancelSchedule(id) {
 
 loadSchedules();
 
-// ---------- Plan mode: soft enforcement via injected instruction (Pi RPC has no tool allow-list) ----------
-const PLANNING_INSTRUCTION =
-  "【计划模式已开启】请只阅读与探索，提出计划，暂时不要做任何修改。"
-  + "可用只读命令（如 ls/cat/grep/find、git status/log/diff/show），不要写文件、编辑、跑会改状态的命令或启动子代理。"
-  + "回答末尾用简短编号列表给出计划。"
-  + "\n\n（说明：连接器无法在 Pi RPC 层强制限制工具；本段指令为软约束。真正的安全边界需依赖 Lancet Guard 等防护。）\n\n";
-const APPROVE_PLAN_PROMPT =
-  "计划已批准。请按你提出的计划开始执行；计划模式已关闭，可以修改文件与运行命令。";
-let planModeOn = false;
-
-function planSnapshot() {
-  return { type: "plan_update", on: planModeOn };
-}
-
-function broadcastPlan() {
-  dispatch(planSnapshot());
-}
-
-function setPlanMode(on) {
-  planModeOn = !!on;
-  broadcastPlan();
-  return planSnapshot();
-}
-
-function approvePlan() {
-  planModeOn = false;
-  broadcastPlan();
-  const sent = bridgeOwnedPrompt(APPROVE_PLAN_PROMPT);
-  return { ...planSnapshot(), prompted: sent };
-}
-
-/** Prepend plan-mode + per-session instructions to user-facing agent messages. */
-function applyPlanToParams(command, params) {
+/** Prepend per-session instructions to user-facing agent messages. */
+function applyInstructionsToParams(command, params) {
   if (command !== "prompt" && command !== "steer" && command !== "follow_up") return params;
   const message = params && typeof params.message === "string" ? params.message : "";
-  let prefix = "";
-  if (planModeOn && !message.startsWith(PLANNING_INSTRUCTION) && !message.startsWith("【计划模式")) {
-    prefix += PLANNING_INSTRUCTION;
-  }
   const instr = getSessionInstructions();
-  if (instr) {
-    const block = `【本会话说明】\n${instr}\n\n`;
-    if (!message.includes("【本会话说明】") && !prefix.includes("【本会话说明】")) {
-      prefix += block;
-    }
-  }
-  if (!prefix) return params;
-  return { ...params, message: prefix + message };
+  if (!instr) return params;
+  const block = `【本会话说明】\n${instr}\n\n`;
+  if (message.includes("【本会话说明】")) return params;
+  return { ...params, message: block + message };
 }
 
 // ---------- Per-session instructions (/instructions) ----------
@@ -797,7 +755,6 @@ function routeRecord(rec) {
       currentSessionName = "";
       // New/switched session: drop Done-when so checks never follow the wrong cwd/session.
       if (untilGoal) clearUntilGoal();
-      if (planModeOn) setPlanMode(false);
       if (entry.command === "new_session") {
         currentSessionKey = "default";
       } else if (entry.pendingSessionPath) {
@@ -818,7 +775,6 @@ function routeRecord(rec) {
         ...(rec.data && typeof rec.data === "object" ? rec.data : {}),
         cwd: resolveProjectCwd(),
         until: untilSnapshot(),
-        plan: planSnapshot(),
         instructions: instructionsSnapshot(),
       };
     }
@@ -1454,20 +1410,6 @@ function writeCommand(id, ws, command, params) {
     }
     return;
   }
-  // Pocket plan mode (soft: instruction injection only — no Pi RPC tool allow-list).
-  if (command === "set_plan_mode") {
-    const on = !!(params || {}).on;
-    respond(ws, id, true, "set_plan_mode", setPlanMode(on), null);
-    return;
-  }
-  if (command === "get_plan_mode") {
-    respond(ws, id, true, "get_plan_mode", planSnapshot(), null);
-    return;
-  }
-  if (command === "approve_plan") {
-    respond(ws, id, true, "approve_plan", approvePlan(), null);
-    return;
-  }
   // Pocket Done-when (/until): bridge-local goal check after each agent_settled.
   if (command === "set_until") {
     try {
@@ -1696,7 +1638,7 @@ function forwardCommand(id, ws, command, params) {
     respond(ws, id, false, command, null, "Pi 正在退出，请稍后重试");
     return;
   }
-  params = applyPlanToParams(command, params || {});
+  params = applyInstructionsToParams(command, params || {});
   const internalId = `bridge-${++rpcSeq}`;
   // get_session_name 是兼容别名；名称的权威来源是官方 get_state，不是本地乐观写入。
   const piCommand = command === "get_session_name" ? "get_state" : command;

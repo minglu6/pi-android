@@ -131,19 +131,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private View contextBarFill;
     private TextView diffBadge;
     private ImageButton btnStop;
-    private View planBar;
-    private TextView planStatus;
-    private TextView planApprove;
-    private boolean planModeOn;
     private View untilBar;
     private TextView untilStatus;
     private TextView untilStop;
-    private View steerToggle;
-    private TextView steerModePlan;
     /** Mid-turn follow-ups live here (chips above composer), not as chat bubbles. */
     private LinearLayout queueRow;
     private final MessageQueue messageQueue = new MessageQueue();
-    private String pendingPlanRpc = "";
     private long lastSessionStatsAt;
     /** Optional workspace fields from get_state — empty means hide. */
     private String stateCwd = "";
@@ -332,19 +325,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         statusDot = findViewById(R.id.status_dot);
         generationStatus = findViewById(R.id.generation_status);
-        planBar = findViewById(R.id.plan_bar);
-        planStatus = findViewById(R.id.plan_status);
-        planApprove = findViewById(R.id.plan_approve);
-        if (planStatus != null) planStatus.setTypeface(AppFonts.mono(this, false));
-        if (planApprove != null) {
-            planApprove.setOnClickListener(v -> {
-                if (!isConnected()) {
-                    Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                pendingPlanRpc = rpc("approve_plan", null);
-            });
-        }
         untilBar = findViewById(R.id.until_bar);
         untilStatus = findViewById(R.id.until_status);
         untilStop = findViewById(R.id.until_stop);
@@ -365,8 +345,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         contextBarFill = findViewById(R.id.context_bar_fill);
         diffBadge = findViewById(R.id.diff_badge);
         btnStop = findViewById(R.id.btn_stop);
-        steerToggle = findViewById(R.id.steer_toggle);
-        steerModePlan = findViewById(R.id.steer_mode_plan);
         queueRow = findViewById(R.id.queue_row);
         if (modelChip != null) modelChip.setTypeface(AppFonts.mono(this, false));
         if (profileChip != null) {
@@ -503,10 +481,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         if (cwdChip != null) {
             cwdChip.setOnClickListener(v -> openCwdSheet(null));
         }
-        if (steerModePlan != null) {
-            // 「计划」chip toggles Pocket plan mode (not mid-turn queue).
-            steerModePlan.setOnClickListener(v -> togglePlanMode());
-        }
         if (btnStop != null) {
             btnStop.setOnClickListener(v -> {
                 if (bashRunning) {
@@ -518,9 +492,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 rpc("abort", null);
             });
         }
-        updateSteerUi();
         renderQueueRow();
-        if (steerToggle != null) steerToggle.setVisibility(View.VISIBLE);
         ConnectorController.addListener(connectorListener);
         // status_chip 仍在布局中但已隐藏；保留空安全引用以免旧逻辑 NPE
         View statusChip = findViewById(R.id.status_chip);
@@ -1136,8 +1108,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             generationStatus.setVisibility(on ? View.VISIBLE : View.GONE);
             if (on && (changed || generationStatus.length() == 0)) generationStatus.setText(R.string.generation_active);
         }
-        // Idle/streaming only affects「计划」badge visibility + queue hint.
-        updateSteerUi();
         if (btnStop != null) btnStop.setVisibility(on ? View.VISIBLE : View.GONE);
         if (list != null) {
             list.setItemAnimator(on ? null : chatItemAnimator());
@@ -1516,48 +1486,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         cwdSupported = on;
         refreshCwdChip();
-    }
-
-    private void togglePlanMode() {
-        if (!isConnected()) {
-            Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
-            return;
-        }
-        JSONObject params = new JSONObject();
-        try {
-            params.put("on", !planModeOn);
-        } catch (Exception e) {
-            throw new IllegalStateException("set_plan_mode", e);
-        }
-        pendingPlanRpc = rpc("set_plan_mode", params);
-    }
-
-    private void applyPlanUpdate(boolean on) {
-        planModeOn = on;
-        if (planBar != null) planBar.setVisibility(on ? View.VISIBLE : View.GONE);
-        updateSteerUi();
-    }
-
-    private void updateSteerUi() {
-        int on = R.drawable.bg_segmented_on;
-        int onFg = ContextCompat.getColor(this, R.color.md_theme_onPrimary);
-        int offFg = ContextCompat.getColor(this, R.color.text_muted);
-        if (steerToggle == null || steerModePlan == null) return;
-
-        // 「计划」only: idle always shows the toggle; while streaming show only if plan is on.
-        if (!streaming || planModeOn) {
-            steerToggle.setVisibility(View.VISIBLE);
-            steerModePlan.setVisibility(View.VISIBLE);
-            if (planModeOn) {
-                steerModePlan.setBackgroundResource(on);
-                steerModePlan.setTextColor(onFg);
-            } else {
-                steerModePlan.setBackgroundResource(android.R.color.transparent);
-                steerModePlan.setTextColor(offFg);
-            }
-        } else {
-            steerToggle.setVisibility(View.GONE);
-        }
     }
 
     private void showOverflowMenu(View anchor) {
@@ -2224,13 +2152,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 return;
             }
         }
-        // Pocket plan mode: /plan
-        if (!hasAttach && text.equalsIgnoreCase("/plan")) {
-            hideSlashSuggestions();
-            clearComposerRemembering(text);
-            togglePlanMode();
-            return;
-        }
         // Pocket session instructions: /instructions …
         if (!hasAttach && text.regionMatches(true, 0, "/instructions", 0, 13)
                 && (text.length() == 13 || Character.isWhitespace(text.charAt(13)))) {
@@ -2638,9 +2559,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 || "list_schedules".equals(command)
                 || "add_schedule".equals(command)
                 || "cancel_schedule".equals(command)
-                || "set_plan_mode".equals(command)
-                || "get_plan_mode".equals(command)
-                || "approve_plan".equals(command)
                 || "get_instructions".equals(command)
                 || "set_instructions".equals(command)
                 || "get_version".equals(command)
@@ -3045,10 +2963,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             JSONObject until = data.optJSONObject("until");
             if (until != null) applyUntilUpdate(until);
         }
-        if (data.has("plan")) {
-            JSONObject plan = data.optJSONObject("plan");
-            if (plan != null) applyPlanUpdate(plan.optBoolean("on", false));
-        }
         if (data.has("instructions")) {
             JSONObject instr = data.optJSONObject("instructions");
             if (instr != null) sessionInstructions = instr.optString("text", "");
@@ -3199,10 +3113,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         String type = ev.optString("type");
         if ("bash_execution_update".equals(type)) {
             applyBashDelta(ev);
-            return;
-        }
-        if ("plan_update".equals(type)) {
-            applyPlanUpdate(ev.optBoolean("on", false));
             return;
         }
         if ("instructions_update".equals(type)) {
@@ -3884,16 +3794,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
             return true;
         }
-        if ("set_plan_mode".equals(command) || "get_plan_mode".equals(command)
-                || "approve_plan".equals(command)) {
-            pendingPlanRpc = "";
-            if (resumed && isConnectorCommandRejected(error, command)) {
-                Toast.makeText(this, R.string.plan_connector_required, Toast.LENGTH_LONG).show();
-            } else if (resumed && error != null && !error.isEmpty()) {
-                Toast.makeText(this, error, Toast.LENGTH_LONG).show();
-            }
-            return true;
-        }
         if ("get_instructions".equals(command) || "set_instructions".equals(command)) {
             pendingInstructionsRpc = "";
             if (resumed && isConnectorCommandRejected(error, command)) {
@@ -4019,24 +3919,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 Toast.makeText(this, R.string.schedules_cancelled, Toast.LENGTH_SHORT).show();
             }
             if (data != null) showSchedulesData(data);
-            return true;
-        }
-        if ("set_plan_mode".equals(command) || "get_plan_mode".equals(command)
-                || "approve_plan".equals(command)) {
-            pendingPlanRpc = "";
-            if (data != null) applyPlanUpdate(data.optBoolean("on", false));
-            if (resumed) {
-                if ("approve_plan".equals(command)) {
-                    Toast.makeText(this, R.string.plan_approved_toast, Toast.LENGTH_SHORT).show();
-                } else if ("set_plan_mode".equals(command)) {
-                    Toast.makeText(this,
-                            planModeOn ? R.string.plan_on_toast : R.string.plan_off_toast,
-                            Toast.LENGTH_SHORT).show();
-                    if (planModeOn) {
-                        Toast.makeText(this, R.string.plan_soft_limit, Toast.LENGTH_LONG).show();
-                    }
-                }
-            }
             return true;
         }
         if ("get_instructions".equals(command) || "set_instructions".equals(command)) {

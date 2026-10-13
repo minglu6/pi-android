@@ -33,7 +33,7 @@ The bridge uses the Pi configuration available on its host, normally under `~/.p
 - Image and file attachments, project-file references, file/Git views, and direct shell interactions.
 - Tables, inline images, and SVG/HTML reply previews. HTML/SVG previews use a restricted WebView with JavaScript and network access disabled.
 - Extension interactions: select, confirm, input, editor, notifications, status updates, titles, and text widgets.
-- Plan mode, per-session instructions, scheduled messages, and command-based completion checks through `/until`.
+- Per-session instructions, scheduled messages, and command-based completion checks through `/until`.
 - Multiple connection profiles with status/latency checks and per-profile model/session state; local Termux connector startup and updates from Settings.
 - Foreground connection service, background interaction notifications, and text sharing through Android `ACTION_SEND` with `text/plain`.
 - History-derived empty-state suggestions, with fallback behavior for older connectors.
@@ -194,7 +194,7 @@ adb install -r app/out/pi-android.apk
 - A readable, non-empty token is mandatory at startup. Loopback alone does not isolate the bridge from other Android apps; keep token files private, preferably with mode `0600`.
 - The application protocol is plain `ws://`, not TLS. Tailscale provides the encrypted network path for the recommended remote setup. A token alone does not encrypt traffic.
 - Authenticated clients have significant control: direct `bash` / `abort_bash` RPC, agent tools, project files, Git operations, and session deletion are available. `--allow-bash` is not needed to enable shell access. Treat a profile token as a host-control credential.
-- Plan mode adds instructions to prompts; it does not enforce a read-only tool sandbox. Scheduled messages and `/until` checks can perform work on the bridge host.
+- Scheduled messages and `/until` checks can perform work on the bridge host.
 - Model services, extensions, and tools retain their own data-access and security implications. Review third-party code and permissions before use.
 
 ## Known limitations
