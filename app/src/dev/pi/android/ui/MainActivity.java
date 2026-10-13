@@ -19,6 +19,7 @@ import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.BaseInputConnection;
 import android.widget.EditText;
 import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -56,6 +57,7 @@ import dev.pi.android.bridge.AgentState;
 import dev.pi.android.bridge.BridgeService;
 import dev.pi.android.bridge.ModelRpc;
 import dev.pi.android.model.ChatMessage;
+import dev.pi.android.model.MessageQueue;
 import dev.pi.android.model.PickerItem;
 import dev.pi.android.model.SlashCommand;
 import dev.pi.android.termux.ConnectorController;
@@ -138,10 +140,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private TextView untilStop;
     private View steerToggle;
     private TextView steerModePlan;
-    private TextView steerModeSteer;
-    private TextView steerModeQueue;
-    /** 1=steer, 2=queue；流式发送时 queue → follow_up，steer → steer。「计划」chip 单独控制 planModeOn。 */
-    private int composerMode = 1;
+    /** Mid-turn follow-ups live here (chips above composer), not as chat bubbles. */
+    private LinearLayout queueRow;
+    private final MessageQueue messageQueue = new MessageQueue();
     private String pendingPlanRpc = "";
     private long lastSessionStatsAt;
     /** Optional workspace fields from get_state — empty means hide. */
@@ -366,8 +367,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         btnStop = findViewById(R.id.btn_stop);
         steerToggle = findViewById(R.id.steer_toggle);
         steerModePlan = findViewById(R.id.steer_mode_plan);
-        steerModeSteer = findViewById(R.id.steer_mode_steer);
-        steerModeQueue = findViewById(R.id.steer_mode_queue);
+        queueRow = findViewById(R.id.queue_row);
         if (modelChip != null) modelChip.setTypeface(AppFonts.mono(this, false));
         if (profileChip != null) {
             profileChip.setTypeface(AppFonts.mono(this, false));
@@ -504,22 +504,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             cwdChip.setOnClickListener(v -> openCwdSheet(null));
         }
         if (steerModePlan != null) {
-            // 「计划」chip toggles Pocket plan mode (not follow_up).
+            // 「计划」chip toggles Pocket plan mode (not mid-turn queue).
             steerModePlan.setOnClickListener(v -> togglePlanMode());
-        }
-        if (steerModeSteer != null) {
-            steerModeSteer.setOnClickListener(v -> {
-                composerMode = 1;
-                updateSteerUi();
-                updateSendEnabled();
-            });
-        }
-        if (steerModeQueue != null) {
-            steerModeQueue.setOnClickListener(v -> {
-                composerMode = 2;
-                updateSteerUi();
-                updateSendEnabled();
-            });
         }
         if (btnStop != null) {
             btnStop.setOnClickListener(v -> {
@@ -527,11 +513,13 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                     abortShell(pendingBashRpc);
                     return;
                 }
+                // Stop cancels the active turn only; local follow-ups stay and drain after settle.
                 rpc("clear_queue", null);
                 rpc("abort", null);
             });
         }
         updateSteerUi();
+        renderQueueRow();
         if (steerToggle != null) steerToggle.setVisibility(View.VISIBLE);
         ConnectorController.addListener(connectorListener);
         // status_chip 仍在布局中但已隐藏；保留空安全引用以免旧逻辑 NPE
@@ -554,8 +542,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         renderAttachmentDrafts();
         send.setAlpha(0.45f);
         composer.setOnEditorActionListener((v, actionId, event) -> {
-            if (!streaming && actionId == EditorInfo.IME_ACTION_SEND && event == null
-                    && BaseInputConnection.getComposingSpanStart(composer.getText()) < 0) return submitComposer();
+            if (actionId == EditorInfo.IME_ACTION_SEND && event == null
+                    && BaseInputConnection.getComposingSpanStart(composer.getText()) < 0) {
+                return submitComposer();
+            }
             return false;
         });
         composer.setOnKeyListener((v, keyCode, event) -> {
@@ -563,7 +553,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             InputDevice device = event.getDevice();
             boolean physicalKeyboard = device != null && !device.isVirtual()
                     && device.getKeyboardType() == InputDevice.KEYBOARD_TYPE_ALPHABETIC;
-            if (!streaming && physicalKeyboard && keyCode == KeyEvent.KEYCODE_ENTER
+            if (physicalKeyboard && keyCode == KeyEvent.KEYCODE_ENTER
                     && !event.isShiftPressed()
                     && BaseInputConnection.getComposingSpanStart(composer.getText()) < 0) {
                 return submitComposer();
@@ -1146,13 +1136,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             generationStatus.setVisibility(on ? View.VISIBLE : View.GONE);
             if (on && (changed || generationStatus.length() == 0)) generationStatus.setText(R.string.generation_active);
         }
-        // Idle → only「计划」; streaming →「引导|排队」(default 引导). Animate chip swap.
-        if (changed) {
-            composerMode = 1; // always reset segment to 引导 on enter/exit stream
-            animateSteerModeSwap();
-        } else {
-            updateSteerUi();
-        }
+        // Idle/streaming only affects「计划」badge visibility + queue hint.
+        updateSteerUi();
         if (btnStop != null) btnStop.setVisibility(on ? View.VISIBLE : View.GONE);
         if (list != null) {
             list.setItemAnimator(on ? null : chatItemAnimator());
@@ -1164,29 +1149,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         updateSendEnabled();
     }
 
-    /** Short fade when swapping idle「计划」↔ streaming「引导|排队」. */
-    private void animateSteerModeSwap() {
-        if (steerToggle == null) {
-            updateSteerUi();
-            return;
-        }
-        steerToggle.animate().cancel();
-        steerToggle.animate()
-                .alpha(0f)
-                .setDuration(90)
-                .withEndAction(() -> {
-                    updateSteerUi();
-                    steerToggle.setAlpha(0f);
-                    steerToggle.animate().alpha(1f).setDuration(140).start();
-                })
-                .start();
-    }
-
     private void settleStreaming(boolean refreshState) {
         main.removeCallbacks(settleAfterAgentEnd);
         setStreaming(false);
         restoreStatusChip();
         if (refreshState) rpc("get_state", null);
+        drainQueuedIfIdle();
     }
 
     private void restoreStatusChip() {
@@ -1245,10 +1213,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         boolean hasText = draft.length() > 0 || hasAttach;
         composer.setEnabled(connected || streaming);
         if (streaming) {
-            // 引导 vs 排队 hints driven by composerMode (1=steer, 2=queue).
-            composer.setHint(getString(composerMode == 2
-                    ? R.string.hint_message_queue
-                    : R.string.hint_message_streaming));
+            // Mid-turn send always queues locally (chips above composer).
+            composer.setHint(getString(R.string.hint_message_queue));
         } else {
             composer.setHint(getString(connected ? R.string.hint_message : R.string.hint_disconnected));
         }
@@ -1256,7 +1222,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             attach.setEnabled(connected && !streaming && !busyAttach);
             attach.setAlpha(connected && !streaming && !busyAttach ? 1f : 0.4f);
         }
-        // 流式中 stop 独立；send 仅在有正文时发 steer/follow_up
+        // 流式中 stop 独立；send 有正文时入本地排队（不进聊天气泡）
         send.setImageResource(R.drawable.ic_send);
         send.setContentDescription(getString(R.string.action_send));
         boolean canSend = streaming
@@ -1576,48 +1542,21 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         int on = R.drawable.bg_segmented_on;
         int onFg = ContextCompat.getColor(this, R.color.md_theme_onPrimary);
         int offFg = ContextCompat.getColor(this, R.color.text_muted);
-        if (steerToggle != null) steerToggle.setVisibility(View.VISIBLE);
+        if (steerToggle == null || steerModePlan == null) return;
 
-        if (!streaming) {
-            // Idle: only「计划」toggle (off by default). Hide 引导/排队.
-            if (steerModePlan != null) {
-                steerModePlan.setVisibility(View.VISIBLE);
-                if (planModeOn) {
-                    steerModePlan.setBackgroundResource(on);
-                    steerModePlan.setTextColor(onFg);
-                } else {
-                    steerModePlan.setBackgroundResource(android.R.color.transparent);
-                    steerModePlan.setTextColor(offFg);
-                }
-            }
-            if (steerModeSteer != null) steerModeSteer.setVisibility(View.GONE);
-            if (steerModeQueue != null) steerModeQueue.setVisibility(View.GONE);
-            return;
-        }
-
-        // Streaming: 2-way 引导|排队. Compact「计划」badge only while plan mode is on.
-        if (steerModePlan != null) {
+        // 「计划」only: idle always shows the toggle; while streaming show only if plan is on.
+        if (!streaming || planModeOn) {
+            steerToggle.setVisibility(View.VISIBLE);
+            steerModePlan.setVisibility(View.VISIBLE);
             if (planModeOn) {
-                steerModePlan.setVisibility(View.VISIBLE);
                 steerModePlan.setBackgroundResource(on);
                 steerModePlan.setTextColor(onFg);
             } else {
-                steerModePlan.setVisibility(View.GONE);
+                steerModePlan.setBackgroundResource(android.R.color.transparent);
+                steerModePlan.setTextColor(offFg);
             }
-        }
-        if (steerModeSteer != null) steerModeSteer.setVisibility(View.VISIBLE);
-        if (steerModeQueue != null) steerModeQueue.setVisibility(View.VISIBLE);
-        TextView[] modes = {null, steerModeSteer, steerModeQueue};
-        for (int i = 0; i < modes.length; i++) {
-            TextView tv = modes[i];
-            if (tv == null) continue;
-            if (i == composerMode) {
-                tv.setBackgroundResource(on);
-                tv.setTextColor(onFg);
-            } else {
-                tv.setBackground(null);
-                tv.setTextColor(offFg);
-            }
+        } else {
+            steerToggle.setVisibility(View.GONE);
         }
     }
 
@@ -1961,7 +1900,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         if (streaming) {
             String text = composer.getText().toString().trim();
             if (!text.isEmpty()) {
-                dispatchSteerOrFollowUp(text);
+                enqueueFollowUp(text);
                 return;
             }
             // 空正文时 stop 由独立按钮处理；此处仍兼容旧点击
@@ -1972,27 +1911,150 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         submit();
     }
 
-    /** 流式中有正文：steer → steer；plan/queue → follow_up。 */
-    private void dispatchSteerOrFollowUp(String text) {
+    /** Mid-turn send: hold locally above the composer; drain after the turn settles. */
+    private void enqueueFollowUp(@NonNull String text) {
+        hideSlashSuggestions();
+        messageQueue.enqueue(text);
+        clearComposerRemembering(text);
+        renderQueueRow();
+        updateSendEnabled();
+    }
+
+    /** Inject into the current turn now (steer). Does not wait for settle. */
+    private void dispatchSteer(@NonNull String text) {
         if (!isConnected()) {
             Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
             return;
         }
+        if (!streaming) {
+            dispatchPrompt(text, null, null);
+            return;
+        }
         hideSlashSuggestions();
-        clearComposerRemembering(text);
         adapter.add(new ChatMessage(ChatMessage.Role.USER, text));
         JSONObject params = new JSONObject();
         try {
             params.put("message", text);
         } catch (Exception e) {
-            throw new IllegalStateException("steer/follow_up params", e);
+            throw new IllegalStateException("steer params", e);
         }
-        String cmd = composerMode == 1 ? "steer" : "follow_up"; // 2=queue→follow_up
-        pendingPromptRpcId = rpc(cmd, params);
+        pendingPromptRpcId = rpc("steer", params);
         pendingComposerText = text;
         stickToBottom = true;
         maybeScrollToBottom(true);
         updateSendEnabled();
+    }
+
+    private void clearMessageQueue() {
+        if (messageQueue.isEmpty()) return;
+        messageQueue.clear();
+        renderQueueRow();
+    }
+
+    /** After the active turn settles, send the next queued item as a normal prompt. */
+    private void drainQueuedIfIdle() {
+        if (streaming || !isConnected() || messageQueue.isEmpty()) return;
+        MessageQueue.Item next = messageQueue.poll();
+        if (next == null) return;
+        renderQueueRow();
+        dispatchPrompt(next.text, null, null);
+    }
+
+    private void renderQueueRow() {
+        if (queueRow == null) return;
+        queueRow.removeAllViews();
+        List<MessageQueue.Item> items = messageQueue.snapshot();
+        if (items.isEmpty()) {
+            queueRow.setVisibility(View.GONE);
+            return;
+        }
+        queueRow.setVisibility(View.VISIBLE);
+        float d = getResources().getDisplayMetrics().density;
+        int padH = Math.round(10 * d);
+        int padV = Math.round(6 * d);
+        int btn = Math.round(28 * d);
+        int gap = Math.round(4 * d);
+        for (MessageQueue.Item item : items) {
+            LinearLayout chip = new LinearLayout(this);
+            chip.setOrientation(LinearLayout.HORIZONTAL);
+            chip.setGravity(Gravity.CENTER_VERTICAL);
+            chip.setBackgroundResource(R.drawable.bg_queue_chip);
+            chip.setPadding(padH, padV, Math.round(4 * d), padV);
+            LinearLayout.LayoutParams chipLp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            chipLp.bottomMargin = gap;
+            chip.setLayoutParams(chipLp);
+
+            TextView body = new TextView(this);
+            body.setText(item.text);
+            body.setTypeface(AppFonts.mono(this, false));
+            body.setTextColor(ContextCompat.getColor(this, R.color.text_secondary));
+            body.setTextSize(12.5f);
+            body.setMaxLines(2);
+            body.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams bodyLp = new LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+            body.setLayoutParams(bodyLp);
+            body.setOnClickListener(v -> editQueuedItem(item.id));
+            chip.addView(body);
+
+            ImageButton steerBtn = new ImageButton(this);
+            steerBtn.setBackgroundResource(android.R.color.transparent);
+            steerBtn.setImageResource(R.drawable.ic_queue_steer);
+            steerBtn.setColorFilter(ContextCompat.getColor(this, R.color.pi_blue));
+            steerBtn.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            steerBtn.setPadding(Math.round(4 * d), Math.round(4 * d), Math.round(4 * d), Math.round(4 * d));
+            steerBtn.setContentDescription(getString(R.string.queue_steer_cd));
+            steerBtn.setLayoutParams(new LinearLayout.LayoutParams(btn, btn));
+            steerBtn.setOnClickListener(v -> steerQueuedItem(item.id));
+            chip.addView(steerBtn);
+
+            ImageButton removeBtn = new ImageButton(this);
+            removeBtn.setBackgroundResource(android.R.color.transparent);
+            removeBtn.setImageResource(R.drawable.ic_close);
+            removeBtn.setColorFilter(ContextCompat.getColor(this, R.color.text_muted));
+            removeBtn.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            removeBtn.setPadding(Math.round(4 * d), Math.round(4 * d), Math.round(4 * d), Math.round(4 * d));
+            removeBtn.setContentDescription(getString(R.string.queue_remove_cd));
+            removeBtn.setLayoutParams(new LinearLayout.LayoutParams(btn, btn));
+            removeBtn.setOnClickListener(v -> {
+                messageQueue.remove(item.id);
+                renderQueueRow();
+            });
+            chip.addView(removeBtn);
+
+            queueRow.addView(chip);
+        }
+    }
+
+    private void editQueuedItem(long id) {
+        MessageQueue.Item item = messageQueue.get(id);
+        if (item == null) return;
+        new EditorSheet(this, R.string.queue_edit_title, R.string.queue_edit_hint, item.text,
+                new EditorSheet.Listener() {
+                    @Override
+                    public void onSave(@NonNull String text) {
+                        if (text.isEmpty()) {
+                            messageQueue.remove(id);
+                        } else {
+                            messageQueue.update(id, text);
+                        }
+                        renderQueueRow();
+                    }
+
+                    @Override
+                    public void onClear() {
+                        messageQueue.remove(id);
+                        renderQueueRow();
+                    }
+                }).show();
+    }
+
+    private void steerQueuedItem(long id) {
+        MessageQueue.Item item = messageQueue.take(id);
+        if (item == null) return;
+        renderQueueRow();
+        dispatchSteer(item.text);
     }
 
     /** 重试：把最近一条用户正文填回输入框，便于再发。 */
@@ -2667,11 +2729,30 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 ensureSessionsSheet().showError(error);
                 return;
             }
-            if ("prompt".equals(command) || "steer".equals(command) || "follow_up".equals(command)) {
+            if ("prompt".equals(command)) {
                 // 静默 Toast 会把 UI 留在「思考中」+ stop；必须回 idle 并露出错误
                 boolean ours = id.equals(pendingPromptRpcId) && !pendingPromptRpcId.isEmpty();
                 if (ours) restoreFailedPrompt();
                 failPrompt(error != null && !error.isEmpty() ? error : getString(R.string.prompt_failed));
+                return;
+            }
+            if ("steer".equals(command) || "follow_up".equals(command)) {
+                // Steer/follow-up failure must not tear down an in-flight turn.
+                boolean ours = id.equals(pendingPromptRpcId) && !pendingPromptRpcId.isEmpty();
+                if (ours) {
+                    pendingComposerText = "";
+                    pendingPromptRpcId = "";
+                }
+                String detail = error != null && !error.isEmpty() ? error : getString(R.string.prompt_failed);
+                if (adapter != null) {
+                    adapter.add(ChatMessage.notice(new ChatMessage.NoticeData(
+                            ChatMessage.NoticeData.LEVEL_ERROR,
+                            getString(R.string.notice_prompt_failed),
+                            detail, "", "")));
+                } else {
+                    Toast.makeText(this, detail, Toast.LENGTH_LONG).show();
+                }
+                updateSendEnabled();
                 return;
             }
             if ("set_model".equals(command) || "set_thinking_level".equals(command)
@@ -2709,6 +2790,13 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             //（已在上方按 pendingPromptRpcId 清理附件草稿）
             String disp = data != null ? data.optString("disposition", "started") : "started";
             if ("handled".equals(disp)) settleStreaming(false);
+            return;
+        }
+        if ("steer".equals(command) || "follow_up".equals(command)) {
+            if (id.equals(pendingPromptRpcId) && !pendingPromptRpcId.isEmpty()) {
+                pendingComposerText = "";
+                pendingPromptRpcId = "";
+            }
             return;
         }
         if ("set_model".equals(command)) {
@@ -3499,12 +3587,15 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             return;
         }
         MaterialDialogs.confirm(this, 0, messageRes, R.string.session_interrupt_continue, () -> {
+            // Drop local follow-ups before abort/switch so settle-drain cannot fire them.
+            clearMessageQueue();
             proceed.run();
             Toast.makeText(this, toastRes, Toast.LENGTH_SHORT).show();
         });
     }
 
     private void syncSessionAfterChange() {
+        clearMessageQueue();
         resetTranscript();
         historyRequest = "";
         historyNeedsSync = true;
