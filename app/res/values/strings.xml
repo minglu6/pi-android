@@ -4,8 +4,11 @@
     <string name="app_name_cd">Pi</string>
     <string name="app_subtitle">Unofficial</string>
     <string name="hint_message">问 Pi 任何问题…</string>
-    <string name="hint_message_streaming">引导当前运行…</string>
     <string name="hint_message_queue">排队，本轮结束后发送…</string>
+    <string name="queue_edit_title">编辑排队消息</string>
+    <string name="queue_edit_hint">本轮结束后发送…</string>
+    <string name="queue_steer_cd">立即引导</string>
+    <string name="queue_remove_cd">移除排队</string>
     <string name="hint_disconnected">连接器未连接</string>
     <string name="action_send">发送</string>
     <string name="action_stop">停止</string>
@@ -245,8 +248,6 @@
     <string name="prompt_failed_restore">发送失败，内容和附件已还原</string>
     <string name="action_copy">复制</string>
     <string name="action_retry">重试</string>
-    <string name="composer_steer">引导</string>
-    <string name="composer_queue">排队</string>
     <string name="composer_plan">计划</string>
     <string name="action_discuss">讨论</string>
     <string name="tool_state_pending">待确认</string>

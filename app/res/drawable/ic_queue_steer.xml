@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Compact north-east arrow: convert a queued item into steer-now. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M6.4,17.89 L16.17,8.12 L11,8.12 C10.45,8.12 10,7.67 10,7.12 C10,6.57 10.45,6.12 11,6.12 L18.5,6.12 C19.05,6.12 19.5,6.57 19.5,7.12 L19.5,14.62 C19.5,15.17 19.05,15.62 18.5,15.62 C17.95,15.62 17.5,15.17 17.5,14.62 L17.5,9.45 L7.71,19.24 C7.32,19.63 6.68,19.63 6.29,19.24 C5.9,18.85 5.9,18.21 6.29,17.82 Z" />
+</vector>
