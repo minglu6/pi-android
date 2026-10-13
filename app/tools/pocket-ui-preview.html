@@ -124,9 +124,6 @@
     min-width: 0; flex: 1 1 0%; max-width: 100%;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .seg { display: flex; background: var(--chip); border-radius: 7px; overflow: hidden; flex: 0 0 auto; }
-  .seg span { font-family: ui-monospace, monospace; font-size: 10px; padding: 4px 5px; color: var(--muted); }
-  .seg .on { background: var(--accent); color: var(--on-accent); }
   .send {
     width: 32px; height: 32px; border-radius: 16px; border: 0;
     background: var(--accent); color: var(--on-accent); font-size: 14px; flex: 0 0 32px;
@@ -210,7 +207,6 @@
         <div class="crow">
           <button class="icon">📎</button>
           <span class="chip">opus 5.5 high</span>
-          <div class="seg"><span>计划</span><span class="on">引导</span><span>排队</span></div>
           <button class="send">↑</button>
         </div>
       </div>
@@ -240,18 +236,17 @@
     </div>
     <div class="composer-wrap">
       <div class="composer">
-        <textarea placeholder="引导当前运行…" rows="1">别改测试，只动路由</textarea>
+        <textarea placeholder="排队下一条…" rows="1">别改测试，只动路由</textarea>
         <div class="crow">
           <button class="icon">📎</button>
           <span class="chip">opus 5.5 high</span>
-          <div class="seg"><span>计划</span><span class="on">引导</span><span>排队</span></div>
           <button class="stop">■</button>
           <button class="send">↑</button>
         </div>
       </div>
       <div class="footer">
         <span class="dot"></span>
-        <span class="fstatus">已连接 · 引导下一句</span>
+        <span class="fstatus">已连接 · 生成中</span>
         <span>·</span>
         <span class="cbar"><i style="width:12%"></i></span>
         <span class="fstats">3% · cache 73% · $0.84</span>
@@ -281,7 +276,6 @@
         <div class="crow">
           <button class="icon">📎</button>
           <span class="chip">opus medium</span>
-          <div class="seg"><span class="on">计划</span><span>引导</span><span>排队</span></div>
           <button class="send">↑</button>
         </div>
       </div>

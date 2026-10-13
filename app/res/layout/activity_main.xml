@@ -432,79 +432,6 @@
         android:textSize="11sp"
         android:visibility="gone" />
 
-    <!-- Plan mode bar — notice-card chrome above composer -->
-    <LinearLayout
-        android:id="@+id/plan_bar"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:paddingStart="10dp"
-        android:paddingTop="2dp"
-        android:paddingEnd="10dp"
-        android:paddingBottom="2dp"
-        android:visibility="gone">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@drawable/bg_approval_card"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingStart="0dp"
-            android:paddingEnd="8dp">
-
-            <View
-                android:layout_width="3dp"
-                android:layout_height="match_parent"
-                android:background="@color/pi_amber"
-                android:minHeight="40dp" />
-
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:orientation="vertical"
-                android:paddingStart="10dp"
-                android:paddingTop="8dp"
-                android:paddingBottom="8dp">
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="@string/plan_bar_title"
-                    android:textColor="@color/text_primary"
-                    android:textSize="12.5sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/plan_status"
-                    style="@style/MonoMetaText.Line"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp"
-                    android:ellipsize="end"
-                    android:maxLines="2"
-                    android:text="@string/plan_bar_body"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="11.5sp" />
-            </LinearLayout>
-
-            <TextView
-                android:id="@+id/plan_approve"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:background="@drawable/bg_notice_action"
-                android:paddingStart="12dp"
-                android:paddingTop="6dp"
-                android:paddingEnd="12dp"
-                android:paddingBottom="6dp"
-                android:text="@string/plan_approve"
-                android:textColor="@color/status_online"
-                android:textSize="12sp"
-                android:textStyle="bold" />
-        </LinearLayout>
-    </LinearLayout>
-
     <!-- Done-when (/until) — notice-card chrome above composer -->
     <LinearLayout
         android:id="@+id/until_bar"
@@ -642,7 +569,7 @@
                 android:paddingEnd="10dp"
                 android:paddingBottom="2dp" />
 
-            <!-- attach · cwd · Plan/Steer/Queue · stop · send(trailing right edge) -->
+            <!-- attach · cwd · stop · send(trailing right edge) -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="36dp"
@@ -690,29 +617,6 @@
                         android:textSize="11sp"
                         android:visibility="gone" />
                 </FrameLayout>
-
-                <!-- Idle:「计划」toggle only. Streaming mid-turn send defaults to queue (chips above). -->
-                <LinearLayout
-                    android:id="@+id/steer_toggle"
-                    android:layout_width="wrap_content"
-                    android:layout_height="26dp"
-                    android:layout_marginEnd="2dp"
-                    android:background="@drawable/bg_segmented"
-                    android:orientation="horizontal"
-                    android:visibility="gone">
-
-                    <TextView
-                        android:id="@+id/steer_mode_plan"
-                        style="@style/MonoMetaText.Line"
-                        android:layout_width="wrap_content"
-                        android:layout_height="match_parent"
-                        android:gravity="center"
-                        android:paddingStart="5dp"
-                        android:paddingEnd="5dp"
-                        android:text="@string/composer_plan"
-                        android:textColor="@color/text_muted"
-                        android:textSize="10sp" />
-                </LinearLayout>
 
                 <ImageButton
                     android:id="@+id/btn_stop"

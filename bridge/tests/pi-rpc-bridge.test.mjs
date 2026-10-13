@@ -227,26 +227,6 @@ test('Pocket session instructions: set/get prepended on prompt', async t => {
   assert.equal((await c.response('clear')).data.text, '');
 });
 
-test('Pocket plan mode: set/approve injects instruction on prompt', async t => {
-  const h = await harness(t), c = await h.connect();
-  c.rpc('on', 'set_plan_mode', {on: true});
-  const on = await c.response('on');
-  assert.equal(on.ok, true);
-  assert.equal(on.data.on, true);
-  c.rpc('p', 'prompt', {message: 'look around'});
-  await c.response('p');
-  const cmds = await h.commands();
-  const prompt = cmds.filter(r => r.type === 'prompt').pop();
-  assert.ok(prompt?.message?.includes('计划模式') || prompt?.message?.includes('Plan mode'));
-  assert.ok(prompt.message.includes('look around'));
-  c.rpc('ap', 'approve_plan', {});
-  const ap = await c.response('ap');
-  assert.equal(ap.ok, true);
-  assert.equal(ap.data.on, false);
-  c.rpc('g', 'get_plan_mode', {});
-  assert.equal((await c.response('g')).data.on, false);
-});
-
 test('Pocket schedules: add / list / cancel + parse when', async t => {
   const h = await harness(t), c = await h.connect();
   c.rpc('bad', 'add_schedule', {when: 'in 2h'});
