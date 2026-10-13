@@ -19,7 +19,6 @@ import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.BaseInputConnection;
 import android.widget.EditText;
 import android.widget.ImageButton;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -112,7 +111,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private TextView statusText;
     private TextView generationStatus;
     private View statusDot;
-    private ImageView brandLogo;
     private TextView sessionTitle;
     private TextView modelChip;
     private TextView profileChip;
@@ -356,7 +354,6 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 applyUntilUpdate(null);
             });
         }
-        brandLogo = findViewById(R.id.brand_logo);
         sessionTitle = findViewById(R.id.session_title);
         modelChip = findViewById(R.id.model_chip);
         profileChip = findViewById(R.id.profile_chip);
@@ -1418,9 +1415,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private void applySessionTitle() {
-        // Brand mark is always the colorful π logo; named sessions show text beside it.
+        // Named sessions show title beside the history control; no brand mark in the top bar.
         // No subtitle under the model chip — model lives only on the chip.
-        if (brandLogo != null) brandLogo.setVisibility(View.VISIBLE);
         if (sessionTitle == null) return;
         String title = displaySessionTitle(currentSessionName);
         if (title != null) {

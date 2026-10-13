@@ -6,7 +6,7 @@
     android:background="@color/bg_base"
     android:orientation="vertical">
 
-    <!-- Top bar: sessions · logo [title] · model · profile · diff · new · overflow (single row). -->
+    <!-- Top bar: sessions · [title] · model · profile · diff · new · overflow (single row). -->
     <LinearLayout
         android:id="@+id/top_bar"
         android:layout_width="match_parent"
@@ -34,7 +34,7 @@
                 android:src="@drawable/ic_history"
                 android:tint="@color/text_secondary" />
 
-            <!-- Brand + optional user session title + model/profile chips (no subtitle meta). -->
+            <!-- Optional user session title + model/profile chips (no brand mark, no subtitle meta). -->
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
@@ -44,23 +44,13 @@
                 android:orientation="horizontal"
                 android:paddingEnd="4dp">
 
-                <!-- Official colorful π mark (ic_pi_logo); replaces text「Pi」. -->
-                <ImageView
-                    android:id="@+id/brand_logo"
-                    android:layout_width="22dp"
-                    android:layout_height="22dp"
-                    android:contentDescription="@string/app_name_cd"
-                    android:importantForAccessibility="yes"
-                    android:scaleType="fitCenter"
-                    android:src="@drawable/ic_pi_logo" />
-
                 <!-- User-named session only; hidden when empty / redundant with chip. -->
                 <TextView
                     android:id="@+id/session_title"
                     style="@style/ToolbarTitle"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="6dp"
+                    android:layout_marginStart="4dp"
                     android:ellipsize="end"
                     android:maxLines="1"
                     android:maxWidth="100dp"
