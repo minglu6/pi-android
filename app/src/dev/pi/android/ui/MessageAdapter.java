@@ -467,8 +467,8 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
         TextView noticeDetail;
         TextView noticeAction;
         TextView noticeExpand;
-        androidx.core.widget.NestedScrollView noticeDetailScroll;
-        View toolOutputVScroll;
+        MaxHeightNestedScrollView noticeDetailScroll;
+        MaxHeightNestedScrollView toolOutputVScroll;
 
         VH(@NonNull View itemView, int type) {
             super(itemView);
@@ -1202,18 +1202,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                     String shown = (!foldable || expanded) ? detail
                             : firstNLines(detail, NOTICE_PREVIEW_LINES);
                     noticeDetail.setText(shown);
-                    // Cap expanded long bodies so the list stays scrollable with IME open.
-                    int maxH = cardScrollMaxPx();
-                    ViewGroup.LayoutParams lp = noticeDetailScroll.getLayoutParams();
-                    if (expanded && foldable && lines > NOTICE_PREVIEW_LINES) {
-                        lp.height = maxH;
-                        noticeDetailScroll.setLayoutParams(lp);
-                        noticeDetailScroll.setNestedScrollingEnabled(true);
-                    } else {
-                        lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
-                        noticeDetailScroll.setLayoutParams(lp);
-                        noticeDetailScroll.setNestedScrollingEnabled(false);
-                    }
+                    hugOrCapCardScroll(noticeDetailScroll);
                 }
             }
 
@@ -1255,6 +1244,15 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
         private int cardScrollMaxPx() {
             return Math.max(dp(160),
                     Math.round(ctx.getResources().getDisplayMetrics().heightPixels * CARD_SCROLL_MAX_SCREEN));
+        }
+
+        /** wrap_content 贴合内容；仅超长输出由 {@link MaxHeightNestedScrollView} 封顶内滚。 */
+        private void hugOrCapCardScroll(MaxHeightNestedScrollView scroll) {
+            ViewGroup.LayoutParams lp = scroll.getLayoutParams();
+            lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
+            scroll.setLayoutParams(lp);
+            scroll.setMaxHeight(cardScrollMaxPx());
+            scroll.setNestedScrollingEnabled(true);
         }
 
         private int noticeAccentColor(String level) {
@@ -1407,15 +1405,13 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
             toolOutputScroll.setVisibility(showBody ? View.VISIBLE : View.GONE);
             toolCommand.setVisibility(showCommand ? View.VISIBLE : View.GONE);
             if (showCommand) toolCommand.setText(command);
-            if (toolOutputVScroll != null) {
-                toolOutputVScroll.setVisibility(expanded && hasOutput ? View.VISIBLE : View.GONE);
+            if (toolOutputVScroll == null) {
+                throw new IllegalStateException("tool_output_vscroll missing");
             }
+            toolOutputVScroll.setVisibility(expanded && hasOutput ? View.VISIBLE : View.GONE);
             toolOutput.setVisibility(expanded && hasOutput ? View.VISIBLE : View.GONE);
             int outLines = countLines(output);
             if (expanded && hasOutput) {
-                // Preview first PREVIEW_LINES when collapsed-into-card; full text when user
-                // already expanded the tool row. Cap height so IME-open lists stay scrollable.
-                boolean longOut = outLines > PREVIEW_LINES;
                 String shownOut = output;
                 // Always show full text inside the nested scroll — never hard-clip mid-line.
                 boolean isEdit = "edit".equals(name) || "write".equals(name);
@@ -1435,20 +1431,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                 }
                 toolOutput.setMaxLines(Integer.MAX_VALUE);
                 toolOutput.setEllipsize(null);
-                if (toolOutputVScroll != null) {
-                    ViewGroup.LayoutParams lp = toolOutputVScroll.getLayoutParams();
-                    if (longOut) {
-                        lp.height = cardScrollMaxPx();
-                        toolOutputVScroll.setLayoutParams(lp);
-                        if (toolOutputVScroll instanceof androidx.core.widget.NestedScrollView) {
-                            ((androidx.core.widget.NestedScrollView) toolOutputVScroll)
-                                    .setNestedScrollingEnabled(true);
-                        }
-                    } else {
-                        lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
-                        toolOutputVScroll.setLayoutParams(lp);
-                    }
-                }
+                hugOrCapCardScroll(toolOutputVScroll);
             }
 
             boolean expandable = outLines > 0 || !command.isEmpty();
