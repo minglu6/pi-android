@@ -125,7 +125,7 @@
                     android:visibility="gone" />
             </HorizontalScrollView>
 
-            <androidx.core.widget.NestedScrollView
+            <dev.pi.android.ui.MaxHeightNestedScrollView
                 android:id="@+id/tool_output_vscroll"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -154,7 +154,7 @@
                         android:textIsSelectable="true"
                         android:textSize="11sp" />
                 </HorizontalScrollView>
-            </androidx.core.widget.NestedScrollView>
+            </dev.pi.android.ui.MaxHeightNestedScrollView>
         </LinearLayout>
 
         <LinearLayout

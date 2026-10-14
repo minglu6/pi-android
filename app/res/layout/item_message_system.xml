@@ -63,7 +63,7 @@
             </LinearLayout>
 
             <!-- Nested scroll so long detail / fenced code never hard-clips the card. -->
-            <androidx.core.widget.NestedScrollView
+            <dev.pi.android.ui.MaxHeightNestedScrollView
                 android:id="@+id/notice_detail_scroll"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -91,7 +91,7 @@
                         android:textIsSelectable="true"
                         android:textSize="11.5sp" />
                 </LinearLayout>
-            </androidx.core.widget.NestedScrollView>
+            </dev.pi.android.ui.MaxHeightNestedScrollView>
 
             <!-- Legacy plain text fallback (hidden when structured notice binds) -->
             <TextView
