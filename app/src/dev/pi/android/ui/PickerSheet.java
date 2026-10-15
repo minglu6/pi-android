@@ -1,10 +1,15 @@
 package dev.pi.android.ui;
 
 import android.app.Activity;
+import android.graphics.Rect;
+import android.os.IBinder;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -110,26 +115,32 @@ public final class PickerSheet {
             });
         }
 
+        Window window = dialog.getWindow();
+        if (window == null) {
+            throw new IllegalStateException("PickerSheet dialog window");
+        }
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN
+                | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+
         dialog.setOnShowListener(d -> {
+            hideActivitySoftInput();
             FrameLayout sheet = dialog.findViewById(com.google.android.material.R.id.design_bottom_sheet);
-            if (sheet == null) return;
+            if (sheet == null) {
+                throw new IllegalStateException("PickerSheet missing design_bottom_sheet");
+            }
             sheet.setBackgroundResource(android.R.color.transparent);
             BottomSheetBehavior<FrameLayout> behavior = BottomSheetBehavior.from(sheet);
             behavior.setSkipCollapsed(true);
             behavior.setState(BottomSheetBehavior.STATE_EXPANDED);
-            int h = (int) (activity.getResources().getDisplayMetrics().heightPixels * 0.78f);
+            int h = expandedHeightPx();
             behavior.setPeekHeight(h);
-            android.view.ViewGroup.LayoutParams lp = sheet.getLayoutParams();
+            ViewGroup.LayoutParams lp = sheet.getLayoutParams();
             lp.height = h;
             sheet.setLayoutParams(lp);
             int sel = adapter.indexOfSelected();
             if (sel >= 0) list.post(() -> list.scrollToPosition(sel));
-            if (searchable && search.getVisibility() == View.VISIBLE) {
-                search.requestFocus();
-                InputMethodManager imm = (InputMethodManager)
-                        activity.getSystemService(Activity.INPUT_METHOD_SERVICE);
-                if (imm != null) imm.showSoftInput(search, InputMethodManager.SHOW_IMPLICIT);
-            }
+            if (search.hasFocus()) search.clearFocus();
+            root.requestFocus();
         });
     }
 
@@ -162,7 +173,47 @@ public final class PickerSheet {
     }
 
     public void show() {
+        hideActivitySoftInput();
         dialog.show();
+    }
+
+    /** Dismiss composer (or any current-focus) IME so the sheet is not squeezed above the keyboard. */
+    private void hideActivitySoftInput() {
+        InputMethodManager imm = (InputMethodManager)
+                activity.getSystemService(Activity.INPUT_METHOD_SERVICE);
+        if (imm == null) {
+            throw new IllegalStateException("InputMethodManager missing");
+        }
+        View focus = activity.getCurrentFocus();
+        View tokenView = focus != null ? focus : activity.getWindow().getDecorView();
+        IBinder token = tokenView.getWindowToken();
+        if (token == null) {
+            throw new IllegalStateException("no window token to hide IME");
+        }
+        imm.hideSoftInputFromWindow(token, 0);
+        if (focus != null) focus.clearFocus();
+    }
+
+    private int expandedHeightPx() {
+        int screen = activity.getResources().getDisplayMetrics().heightPixels;
+        Window dialogWindow = dialog.getWindow();
+        if (dialogWindow == null) {
+            throw new IllegalStateException("PickerSheet dialog window");
+        }
+        int visibleH = Math.min(
+                visibleFrameHeight(activity.getWindow()),
+                visibleFrameHeight(dialogWindow));
+        return SheetHeight.pickerExpandedPx(screen, visibleH);
+    }
+
+    private static int visibleFrameHeight(@NonNull Window window) {
+        Rect visible = new Rect();
+        window.getDecorView().getWindowVisibleDisplayFrame(visible);
+        int h = visible.height();
+        if (h <= 0) {
+            throw new IllegalStateException("visible display frame height=" + h);
+        }
+        return h;
     }
 
     public void dismiss() {

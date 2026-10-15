@@ -15,6 +15,29 @@ public final class SheetHeightTest {
         if (large != 1800) {
             throw new AssertionError("75% of 2400 must be 1800, got " + large);
         }
+        if (SheetHeight.PICKER != 0.78f) {
+            throw new AssertionError("PICKER ratio must stay 0.78, got " + SheetHeight.PICKER);
+        }
+        int pickerFull = SheetHeight.pickerExpandedPx(screen, screen);
+        if (pickerFull != 1872) {
+            throw new AssertionError("78% of 2400 must be 1872, got " + pickerFull);
+        }
+        int imeVisible = 1400;
+        int pickerIme = SheetHeight.pickerExpandedPx(screen, imeVisible);
+        if (pickerIme != 1092) {
+            throw new AssertionError("picker must use 78% of visible frame above IME, got " + pickerIme);
+        }
+        if (pickerIme >= imeVisible) {
+            throw new AssertionError("picker must fit in the IME-shrunk frame, got " + pickerIme);
+        }
+        if (pickerIme > pickerFull) {
+            throw new AssertionError("IME-visible picker must not exceed full-screen picker");
+        }
+        int statusBarVisible = 2320;
+        int pickerStatus = SheetHeight.pickerExpandedPx(screen, statusBarVisible);
+        if (pickerStatus != Math.round(statusBarVisible * 0.78f)) {
+            throw new AssertionError("visible frame below screen must be the basis, got " + pickerStatus);
+        }
         if (large >= screen) {
             throw new AssertionError("capped height must leave tappable scrim");
         }
@@ -77,6 +100,14 @@ public final class SheetHeightTest {
             throw new AssertionError("parentPx=0 must throw");
         } catch (IllegalArgumentException expected) {
             if (!expected.getMessage().contains("parentPx=0")) {
+                throw new AssertionError(expected);
+            }
+        }
+        try {
+            SheetHeight.pickerExpandedPx(screen, 0);
+            throw new AssertionError("visiblePx=0 must throw");
+        } catch (IllegalArgumentException expected) {
+            if (!expected.getMessage().contains("visiblePx=0")) {
                 throw new AssertionError(expected);
             }
         }

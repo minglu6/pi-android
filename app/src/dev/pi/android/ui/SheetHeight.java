@@ -9,6 +9,9 @@ final class SheetHeight {
     /** 70–80% 屏高区间的取值：溢出安全上限，不是 slash 的有效高度。 */
     static final float LARGE = 0.75f;
 
+    /** PickerSheet 展开高度：相对可见区域（IME 之上），不是 raw heightPixels。 */
+    static final float PICKER = 0.78f;
+
     /** Pi TUI Editor.autocompleteMaxVisible 默认值（官方 clamp 3–20）。 */
     static final int SLASH_MAX_VISIBLE = 5;
 
@@ -26,6 +29,17 @@ final class SheetHeight {
             throw new IllegalArgumentException("capPx=" + cap);
         }
         return cap;
+    }
+
+    /**
+     * Picker 展开高度：78% × min(屏高, 可见 display frame)。
+     * 可见区域被 IME 挤矮时必须按可见高度算，否则 78% 全屏会高出窗口，留下中间灰带。
+     */
+    static int pickerExpandedPx(int screenPx, int visiblePx) {
+        if (visiblePx <= 0) {
+            throw new IllegalArgumentException("visiblePx=" + visiblePx);
+        }
+        return capPx(Math.min(screenPx, visiblePx), PICKER);
     }
 
     static int hugOrCap(int screenPx, int contentPx, float ratio) {
