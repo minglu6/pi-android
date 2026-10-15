@@ -221,7 +221,7 @@
         </LinearLayout>
     </LinearLayout>
 
-    <androidx.coordinatorlayout.widget.CoordinatorLayout
+    <FrameLayout
         android:id="@+id/chat_host"
         android:layout_width="match_parent"
         android:layout_height="0dp"
@@ -312,23 +312,42 @@
         </LinearLayout>
 
         <View
-            android:id="@+id/slash_scrim"
+            android:id="@+id/slash_dismiss_hit"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:background="@color/slash_scrim"
             android:clickable="true"
-            android:elevation="6dp"
             android:focusable="false"
             android:visibility="gone" />
+    </FrameLayout>
 
-        <include
-            android:id="@+id/slash_sheet_root"
-            layout="@layout/sheet_slash_commands"
+    <dev.pi.android.ui.SwipeDownLayout
+        android:id="@+id/slash_panel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/bg_slash_panel"
+        android:elevation="2dp"
+        android:orientation="vertical"
+        android:paddingTop="4dp"
+        android:paddingBottom="2dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/slash_sheet_title"
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:layout_gravity="bottom"
-            android:elevation="8dp" />
-    </androidx.coordinatorlayout.widget.CoordinatorLayout>
+            android:layout_height="wrap_content"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="2dp"
+            android:text="@string/slash_hint_title"
+            android:textColor="@color/text_muted"
+            android:textSize="11sp" />
+
+        <dev.pi.android.ui.MaxHeightRecyclerView
+            android:id="@+id/slash_list"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:overScrollMode="never" />
+    </dev.pi.android.ui.SwipeDownLayout>
 
     <!-- Extension / approval card -->
     <LinearLayout
