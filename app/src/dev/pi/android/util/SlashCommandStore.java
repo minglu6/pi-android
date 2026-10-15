@@ -14,52 +14,56 @@ import java.util.List;
 
 import dev.pi.android.model.SlashCommand;
 
-/** 斜杠命令：内存 + SharedPreferences 缓存；与 get_commands 同步。 */
+/** 斜杠命令目录：内存 + SharedPreferences 缓存；只同步 {@code get_commands}。 */
 public final class SlashCommandStore {
     private static final String PREF = "pi_slash_commands";
     private static final String K_JSON = "commands_json";
 
     private final SharedPreferences prefs;
-    private List<SlashCommand> merged = Collections.emptyList();
+    private List<SlashCommand> catalog = Collections.emptyList();
     private List<SlashCommand> server = Collections.emptyList();
 
     public SlashCommandStore(Context ctx) {
         prefs = ctx.getApplicationContext().getSharedPreferences(PREF, Context.MODE_PRIVATE);
         List<SlashCommand> cached = SlashCommand.fromCacheJson(prefs.getString(K_JSON, null));
         server = cached;
-        merged = SlashCommand.merge(cached);
+        catalog = SlashCommand.bindAppActions(cached);
     }
 
+    /** 当前桥目录（含同名 App 拦截），不含 overlay 独有项。 */
     @NonNull
     public List<SlashCommand> current() {
-        return merged;
+        return catalog;
     }
 
-    /** 用 get_commands 响应更新；返回是否有变化。 */
+    /** 用 get_commands 响应更新。 */
     public boolean applyServerResponse(@Nullable JSONObject data) {
         List<SlashCommand> next = SlashCommand.parseServerCommands(data);
         server = next;
-        merged = SlashCommand.merge(next);
+        catalog = SlashCommand.bindAppActions(next);
         prefs.edit().putString(K_JSON, SlashCommand.toCacheJson(next).toString()).apply();
         return true;
     }
 
-    /** 仅 App overlay（离线且无缓存时的降级）。 */
-    public void useOverlayOnly() {
-        if (!server.isEmpty()) {
-            merged = SlashCommand.merge(server);
-        } else {
-            merged = SlashCommand.merge(Collections.emptyList());
-        }
-    }
-
     @NonNull
     public List<SlashCommand> filter(@Nullable String typed) {
-        List<SlashCommand> out = new ArrayList<>();
-        for (SlashCommand c : merged) {
-            if (c.matches(typed)) out.add(c);
+        return SlashCommand.filterCatalog(catalog, typed);
+    }
+
+    /**
+     * 发送时的精确匹配：先桥目录，再 overlay 拦截（用户打完整 {@code /model} 等）。
+     */
+    @Nullable
+    public SlashCommand lookupExact(@Nullable String typed) {
+        if (typed == null) throw new IllegalArgumentException("typed");
+        String t = typed.trim();
+        if (t.isEmpty()) return null;
+        for (SlashCommand c : catalog) {
+            if (c.name.equalsIgnoreCase(t) || c.rawName.equalsIgnoreCase(stripSlash(t))) {
+                return c;
+            }
         }
-        return out;
+        return SlashCommand.appActionFor(t);
     }
 
     /** Skills from last get_commands (source=skill), including cached. */
@@ -73,6 +77,11 @@ public final class SlashCommandStore {
     }
 
     public boolean hasServerCommands() {
-        return server != null && !server.isEmpty();
+        return !server.isEmpty();
+    }
+
+    @NonNull
+    private static String stripSlash(@NonNull String typed) {
+        return typed.startsWith("/") ? typed.substring(1) : typed;
     }
 }

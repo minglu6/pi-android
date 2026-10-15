@@ -532,6 +532,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             }
             // Pocket: ↑/↓ browse what this device sent before (DPAD or arrow keys).
             if ((keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN)
+                    && slashPanelVisible()) {
+                return slashSheet.moveSelection(keyCode == KeyEvent.KEYCODE_DPAD_DOWN ? 1 : -1);
+            }
+            if ((keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN)
                     && browseComposerHistory(keyCode == KeyEvent.KEYCODE_DPAD_UP)) {
                 return true;
             }
@@ -669,8 +673,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     private boolean submitComposer() {
         if (slashPanelVisible() && slashSheet != null && !slashSheet.isEmpty()) {
-            SlashCommand first = slashSheet.first();
-            if (first != null) { applySlashCommand(first); return true; }
+            SlashCommand picked = slashSheet.selected();
+            if (picked != null) { applySlashCommand(picked); return true; }
         }
         onSendOrStop();
         return true;
@@ -1737,12 +1741,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         });
     }
 
-    /** 向连接器拉 get_commands；失败静默，沿用缓存 / App overlay。 */
+    /** 向连接器拉 get_commands；失败沿用上次桥缓存，不本地展开 overlay。 */
     private void refreshSlashCommands() {
-        if (!isConnected()) {
-            if (slashStore != null) slashStore.useOverlayOnly();
-            return;
-        }
+        if (!isConnected()) return;
         rpc("get_commands", null);
     }
 
@@ -2226,11 +2227,10 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         // 完整匹配已知斜杠命令 → App 动作或 prompt /name
         if (slashStore != null && text.startsWith("/") && !hasAttach) {
-            for (SlashCommand c : slashStore.current()) {
-                if (c.name.equalsIgnoreCase(text)) {
-                    applySlashCommand(c);
-                    return;
-                }
+            SlashCommand exact = slashStore.lookupExact(text);
+            if (exact != null) {
+                applySlashCommand(exact);
+                return;
             }
         }
         if (!isConnected()) {

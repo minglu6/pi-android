@@ -178,7 +178,7 @@
     <string name="model_ref_invalid">模型参数无效，请重新选择</string>
     <string name="streaming_marker"> ▍</string>
     <string name="slash_hint_title">命令</string>
-    <string name="slash_no_desc">无说明</string>
+    <string name="slash_hint_count">命令  (%1$d/%2$d)</string>
     <string name="picker_search_hint">搜索…</string>
     <string name="picker_empty">没有匹配项</string>
     <string name="picker_selected">已选中</string>

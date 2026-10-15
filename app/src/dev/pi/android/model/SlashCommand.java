@@ -12,18 +12,20 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import dev.pi.android.util.FuzzyFilter;
+
 /**
- * 作曲框 "/" 提示条目。
- * <p>主体来自 Pi {@code get_commands}（扩展 / prompt 模板 / skill）；
- * App 仅对少量同名命令叠一层本地 UI 动作（不作为命令表来源）。
+ * 作曲框斜杠菜单条目。
+ * <p>目录只来自桥接 {@code get_commands}（extension / prompt / skill），顺序与描述原样展示。
+ * App overlay 只给同名命令挂本地 UI 拦截，不作为命令表来源、不在「仅 /」时本地展开。
  */
 public final class SlashCommand {
 
     /** 本地 UI 拦截键；null 表示发给连接器 {@code prompt /name}。 */
     @Nullable public final String appAction;
-    /** 显示名，含前导 `/`（skill 可能是 `/skill:foo`）。 */
+    /** 显示名，含前导 {@code /}（skill 可能是 {@code /skill:foo}）。 */
     @NonNull public final String name;
-    /** 不含前导 `/` 的原始名（发给 prompt 用）。 */
+    /** 不含前导 {@code /} 的原始名（发给 prompt 用）。 */
     @NonNull public final String rawName;
     @Nullable public final String description;
     @Nullable public final String source; // extension | prompt | skill | app
@@ -57,21 +59,13 @@ public final class SlashCommand {
         return rawName;
     }
 
-    public boolean matches(@Nullable String typed) {
-        if (typed == null || typed.isEmpty()) return true;
-        String q = typed.toLowerCase(Locale.ROOT);
-        if (!q.startsWith("/")) q = "/" + q;
-        return name.toLowerCase(Locale.ROOT).startsWith(q)
-                || (description != null && description.toLowerCase(Locale.ROOT).contains(q.substring(1)));
-    }
-
     public boolean isAppAction() {
         return appAction != null && !appAction.isEmpty();
     }
 
     /**
-     * App 叠加层：TUI 内置命令不在 get_commands 里，由客户端拦截。
-     * key = raw name（无斜杠）。
+     * App 拦截表：TUI 内置命令不在 get_commands 里，发送完整名时由客户端拦截。
+     * 不进入斜杠菜单目录。
      */
     public static Map<String, SlashCommand> appOverlay() {
         Map<String, SlashCommand> m = new LinkedHashMap<>();
@@ -86,11 +80,19 @@ public final class SlashCommand {
         return m;
     }
 
+    @Nullable
+    public static SlashCommand appActionFor(@Nullable String typed) {
+        if (typed == null) throw new IllegalArgumentException("typed");
+        String key = typed.startsWith("/") ? typed.substring(1) : typed;
+        if (key.isEmpty()) return null;
+        return appOverlay().get(key.toLowerCase(Locale.ROOT));
+    }
+
     private static void putApp(Map<String, SlashCommand> m, String raw, String zh, String action) {
         m.put(raw, new SlashCommand(raw, zh, "app", action));
     }
 
-    /** 解析 get_commands 响应；失败返回空列表（不抛）。 */
+    /** 解析 get_commands 响应；data/commands 缺失则空列表。 */
     @NonNull
     public static List<SlashCommand> parseServerCommands(@Nullable JSONObject data) {
         List<SlashCommand> out = new ArrayList<>();
@@ -120,49 +122,44 @@ public final class SlashCommand {
     }
 
     /**
-     * 合并：App overlay 在前（可被同名服务端描述覆盖文案），再追加服务端独有命令。
+     * 按 get_commands 顺序保留条目；同名才挂 App 拦截，不追加 overlay 独有命令。
      */
     @NonNull
-    public static List<SlashCommand> merge(@Nullable List<SlashCommand> server) {
+    public static List<SlashCommand> bindAppActions(@NonNull List<SlashCommand> server) {
+        if (server == null) throw new IllegalArgumentException("server");
         Map<String, SlashCommand> overlay = appOverlay();
-        List<SlashCommand> out = new ArrayList<>();
-        Map<String, SlashCommand> byRaw = new LinkedHashMap<>();
-
-        if (server != null) {
-            for (SlashCommand s : server) {
-                SlashCommand app = overlay.get(s.rawName.toLowerCase(Locale.ROOT));
-                if (app != null) {
-                    // 同名：保留 App 动作，优先用服务端描述
-                    String desc = (s.description != null && !s.description.isEmpty())
-                            ? s.description : app.description;
-                    byRaw.put(app.rawName.toLowerCase(Locale.ROOT),
-                            new SlashCommand(app.rawName, desc, s.source != null ? s.source : "app",
-                                    app.appAction, s.location));
-                } else {
-                    byRaw.put(s.rawName.toLowerCase(Locale.ROOT), s);
-                }
+        List<SlashCommand> out = new ArrayList<>(server.size());
+        for (SlashCommand s : server) {
+            SlashCommand app = overlay.get(s.rawName.toLowerCase(Locale.ROOT));
+            if (app == null) {
+                out.add(s);
+                continue;
             }
+            out.add(new SlashCommand(s.rawName, s.description, s.source, app.appAction, s.location));
         }
-        // overlay 中服务端没有的，仍然展示（降级）
-        for (Map.Entry<String, SlashCommand> e : overlay.entrySet()) {
-            if (!byRaw.containsKey(e.getKey())) {
-                byRaw.put(e.getKey(), e.getValue());
-            }
-        }
-        // 稳定顺序：先 overlay 顺序，再其余服务端命令
-        for (String key : overlay.keySet()) {
-            SlashCommand c = byRaw.remove(key);
-            if (c != null) out.add(c);
-        }
-        out.addAll(byRaw.values());
         return out;
+    }
+
+    /**
+     * Pi CombinedAutocompleteProvider：{@code /} 后的前缀对 {@code name} 做 fuzzyFilter；
+     * 空前缀（仅 {@code /}）返回桥目录原序，不截断、不另造子集。
+     */
+    @NonNull
+    public static List<SlashCommand> filterCatalog(@NonNull List<SlashCommand> catalog,
+                                                   @Nullable String typed) {
+        if (catalog == null) throw new IllegalArgumentException("catalog");
+        String q = typed == null ? "" : typed;
+        if (q.startsWith("/")) q = q.substring(1);
+        return FuzzyFilter.filter(catalog, q, c -> c.rawName);
     }
 
     @NonNull
     public static JSONArray toCacheJson(@NonNull List<SlashCommand> list) {
         JSONArray arr = new JSONArray();
         for (SlashCommand c : list) {
-            if (c.isAppAction() && "app".equals(c.source)) continue; // overlay 不缓存
+            if (c.isAppAction() && "app".equals(c.source)) {
+                throw new IllegalStateException("overlay-only command must not be cached: " + c.name);
+            }
             try {
                 JSONObject o = new JSONObject();
                 o.put("name", c.rawName);
@@ -170,7 +167,8 @@ public final class SlashCommand {
                 if (c.source != null) o.put("source", c.source);
                 if (c.location != null) o.put("location", c.location);
                 arr.put(o);
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                throw new IllegalStateException("slash cache json", e);
             }
         }
         return arr;
@@ -178,15 +176,14 @@ public final class SlashCommand {
 
     @NonNull
     public static List<SlashCommand> fromCacheJson(@Nullable String json) {
-        List<SlashCommand> out = new ArrayList<>();
-        if (json == null || json.isEmpty()) return out;
+        if (json == null || json.isEmpty()) return new ArrayList<>();
         try {
             JSONArray arr = new JSONArray(json);
             JSONObject wrap = new JSONObject();
             wrap.put("commands", arr);
             return parseServerCommands(wrap);
         } catch (Exception e) {
-            return out;
+            throw new IllegalStateException("slash cache parse", e);
         }
     }
 
