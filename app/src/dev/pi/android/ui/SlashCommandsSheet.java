@@ -1,19 +1,12 @@
 package dev.pi.android.ui;
 
-import android.view.Gravity;
 import android.view.View;
-import android.view.ViewGroup;
-import android.view.ViewParent;
 
 import androidx.activity.OnBackPressedCallback;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.coordinatorlayout.widget.CoordinatorLayout;
 import androidx.recyclerview.widget.LinearLayoutManager;
-import androidx.recyclerview.widget.RecyclerView;
-
-import com.google.android.material.bottomsheet.BottomSheetBehavior;
 
 import java.util.List;
 
@@ -22,75 +15,46 @@ import dev.pi.android.model.SlashCommand;
 import dev.pi.android.util.AppFonts;
 
 /**
- * 斜杠命令菜单：锚在 composer 上方的 Tokyo Night BottomSheet。
- * 大半屏展开，点遮罩 / 系统返回 / 下滑关闭；不盖住输入框、不抢焦点。
+ * 斜杠命令菜单：旧 slash_panel 外观（11sp 标题、无圆角抬高层、无 dim），
+ * 锚在 composer 上方，最高约 75% 屏高；点上方区域 / 返回 / 下滑关闭。
  */
 public final class SlashCommandsSheet {
 
     public interface Listener {
         void onPick(@NonNull SlashCommand cmd);
 
-        /** 用户点外部、系统返回或下滑关闭（不是选中条目 / 编程 dismiss）。 */
         void onDismissedByUser();
     }
 
     private final AppCompatActivity activity;
     private final Listener listener;
-    private final View sheet;
-    private final View scrim;
+    private final SwipeDownLayout panel;
+    private final View dismissHit;
+    private final View title;
+    private final MaxHeightRecyclerView list;
     private final SlashCommandAdapter adapter;
-    private final BottomSheetBehavior<View> behavior;
     private final OnBackPressedCallback backCallback;
-    private boolean programmaticDismiss;
-    private boolean picking;
 
     public SlashCommandsSheet(@NonNull AppCompatActivity activity, @NonNull Listener listener) {
         this.activity = activity;
         this.listener = listener;
-        sheet = activity.findViewById(R.id.slash_sheet_root);
-        scrim = activity.findViewById(R.id.slash_scrim);
-        RecyclerView list = activity.findViewById(R.id.slash_list);
-        if (sheet == null || scrim == null || list == null) {
-            throw new IllegalStateException("slash sheet views missing");
+        panel = activity.findViewById(R.id.slash_panel);
+        dismissHit = activity.findViewById(R.id.slash_dismiss_hit);
+        title = activity.findViewById(R.id.slash_sheet_title);
+        list = activity.findViewById(R.id.slash_list);
+        if (panel == null || dismissHit == null || title == null || list == null) {
+            throw new IllegalStateException("slash panel views missing");
         }
-        AppFonts.applyTree(sheet);
+        AppFonts.applyTree(panel);
         list.setLayoutManager(new LinearLayoutManager(activity));
         adapter = new SlashCommandAdapter(cmd -> {
-            picking = true;
-            hideSheet();
+            hidePanel();
             listener.onPick(cmd);
         });
         list.setAdapter(adapter);
-        behavior = attachBehavior(sheet);
-        behavior.setFitToContents(false);
-        behavior.setSkipCollapsed(true);
-        behavior.setHideable(true);
-        behavior.setDraggable(true);
-        behavior.setState(BottomSheetBehavior.STATE_HIDDEN);
-        behavior.addBottomSheetCallback(new BottomSheetBehavior.BottomSheetCallback() {
-            @Override
-            public void onStateChanged(@NonNull View bottomSheet, int newState) {
-                if (newState != BottomSheetBehavior.STATE_HIDDEN) return;
-                scrim.setVisibility(View.GONE);
-                backCallback.setEnabled(false);
-                boolean user = !programmaticDismiss && !picking;
-                programmaticDismiss = false;
-                picking = false;
-                if (user) listener.onDismissedByUser();
-            }
-
-            @Override
-            public void onSlide(@NonNull View bottomSheet, float slideOffset) {}
-        });
-        scrim.setOnClickListener(v -> dismissByUser());
-        ViewParent parent = sheet.getParent();
-        if (parent instanceof View) {
-            ((View) parent).addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
-                if (!isShowing()) return;
-                if ((b - t) == (ob - ot)) return;
-                applyExpandedOffset(false);
-            });
-        }
+        panel.setList(list);
+        panel.setOnDismiss(this::dismissByUser);
+        dismissHit.setOnClickListener(v -> dismissByUser());
         backCallback = new OnBackPressedCallback(false) {
             @Override
             public void handleOnBackPressed() {
@@ -98,26 +62,24 @@ public final class SlashCommandsSheet {
             }
         };
         activity.getOnBackPressedDispatcher().addCallback(activity, backCallback);
+        hidePanel();
     }
 
     public void show(@NonNull List<SlashCommand> items) {
         adapter.replaceAll(items);
-        if (isShowing()) return;
-        scrim.setVisibility(View.VISIBLE);
-        expand();
+        capListHeight();
+        panel.setTranslationY(0f);
+        panel.setVisibility(View.VISIBLE);
+        dismissHit.setVisibility(View.VISIBLE);
+        backCallback.setEnabled(true);
     }
 
     public void dismiss() {
-        if (!isShowing()) return;
-        programmaticDismiss = true;
-        hideSheet();
+        hidePanel();
     }
 
     public boolean isShowing() {
-        int state = behavior.getState();
-        return state == BottomSheetBehavior.STATE_EXPANDED
-                || state == BottomSheetBehavior.STATE_SETTLING
-                || state == BottomSheetBehavior.STATE_DRAGGING;
+        return panel.getVisibility() == View.VISIBLE;
     }
 
     public boolean isEmpty() {
@@ -131,52 +93,30 @@ public final class SlashCommandsSheet {
 
     private void dismissByUser() {
         if (!isShowing()) return;
-        programmaticDismiss = false;
-        picking = false;
-        hideSheet();
+        hidePanel();
+        listener.onDismissedByUser();
     }
 
-    private void hideSheet() {
-        behavior.setState(BottomSheetBehavior.STATE_HIDDEN);
+    private void hidePanel() {
+        panel.setVisibility(View.GONE);
+        panel.setTranslationY(0f);
+        dismissHit.setVisibility(View.GONE);
+        backCallback.setEnabled(false);
     }
 
-    private void expand() {
-        applyExpandedOffset(true);
-    }
-
-    private void applyExpandedOffset(boolean thenExpand) {
-        ViewParent parent = sheet.getParent();
-        if (!(parent instanceof View)) {
-            throw new IllegalStateException("slash sheet parent is not a view");
-        }
-        View host = (View) parent;
-        int parentH = host.getHeight();
-        if (parentH <= 0) {
-            host.post(() -> applyExpandedOffset(thenExpand));
-            return;
-        }
+    private void capListHeight() {
         int screen = activity.getResources().getDisplayMetrics().heightPixels;
-        int minScrim = Math.round(48 * activity.getResources().getDisplayMetrics().density);
-        behavior.setExpandedOffset(SheetHeight.expandedOffsetPx(parentH, screen, minScrim));
-        if (thenExpand) {
-            backCallback.setEnabled(true);
-            behavior.setState(BottomSheetBehavior.STATE_EXPANDED);
+        int maxPanel = SheetHeight.capPx(screen, SheetHeight.LARGE);
+        int width = panel.getWidth();
+        if (width <= 0) width = screen;
+        title.measure(
+                View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+        int header = title.getMeasuredHeight() + panel.getPaddingTop() + panel.getPaddingBottom();
+        int listMax = maxPanel - header;
+        if (listMax <= 0) {
+            throw new IllegalStateException("slash list maxHeight=" + listMax);
         }
-    }
-
-    private static BottomSheetBehavior<View> attachBehavior(View sheet) {
-        ViewGroup.LayoutParams raw = sheet.getLayoutParams();
-        CoordinatorLayout.LayoutParams lp;
-        if (raw instanceof CoordinatorLayout.LayoutParams) {
-            lp = (CoordinatorLayout.LayoutParams) raw;
-        } else {
-            lp = new CoordinatorLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
-            lp.gravity = Gravity.BOTTOM;
-        }
-        BottomSheetBehavior<View> next = new BottomSheetBehavior<>();
-        lp.setBehavior(next);
-        sheet.setLayoutParams(lp);
-        return next;
+        list.setMaxHeight(listMax);
     }
 }
