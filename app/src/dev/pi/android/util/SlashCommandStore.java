@@ -14,7 +14,7 @@ import java.util.List;
 
 import dev.pi.android.model.SlashCommand;
 
-/** 斜杠命令目录：内存 + SharedPreferences 缓存；只同步 {@code get_commands}。 */
+/** 斜杠命令目录：内存合并 App builtins ∪ {@code get_commands}；prefs 只缓存服务端 JSON。 */
 public final class SlashCommandStore {
     private static final String PREF = "pi_slash_commands";
     private static final String K_JSON = "commands_json";
@@ -30,7 +30,7 @@ public final class SlashCommandStore {
         catalog = SlashCommand.bindAppActions(cached);
     }
 
-    /** 当前桥目录（含同名 App 拦截），不含 overlay 独有项。 */
+    /** 当前菜单目录（overlay builtins ∪ 桥命令，同名已合并）。 */
     @NonNull
     public List<SlashCommand> current() {
         return catalog;
@@ -51,7 +51,7 @@ public final class SlashCommandStore {
     }
 
     /**
-     * 发送时的精确匹配：先桥目录，再 overlay 拦截（用户打完整 {@code /model} 等）。
+     * 发送时的精确匹配：先菜单目录，再 overlay 拦截（目录未就绪时仍能打完整 {@code /model}）。
      */
     @Nullable
     public SlashCommand lookupExact(@Nullable String typed) {
