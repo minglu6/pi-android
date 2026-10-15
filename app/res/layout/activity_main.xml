@@ -221,7 +221,8 @@
         </LinearLayout>
     </LinearLayout>
 
-    <FrameLayout
+    <androidx.coordinatorlayout.widget.CoordinatorLayout
+        android:id="@+id/chat_host"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1">
@@ -309,7 +310,25 @@
                 android:orientation="vertical"
                 android:visibility="gone" />
         </LinearLayout>
-    </FrameLayout>
+
+        <View
+            android:id="@+id/slash_scrim"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@color/slash_scrim"
+            android:clickable="true"
+            android:elevation="6dp"
+            android:focusable="false"
+            android:visibility="gone" />
+
+        <include
+            android:id="@+id/slash_sheet_root"
+            layout="@layout/sheet_slash_commands"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_gravity="bottom"
+            android:elevation="8dp" />
+    </androidx.coordinatorlayout.widget.CoordinatorLayout>
 
     <!-- Extension / approval card -->
     <LinearLayout
