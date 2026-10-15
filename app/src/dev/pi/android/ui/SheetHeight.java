@@ -1,12 +1,16 @@
 package dev.pi.android.ui;
 
 /**
- * 命令面板高度：占大半屏（约 70–80%），并在输入框上方留出可点遮罩。
+ * 面板高度：其它 sheet / 溢出安全上限约 70–80% 屏高；
+ * 斜杠命令列表视口对齐 Pi TUI {@code autocompleteMaxVisible} 默认 5 行。
  */
 final class SheetHeight {
 
-    /** 70–80% 屏高区间的取值。 */
+    /** 70–80% 屏高区间的取值：溢出安全上限，不是 slash 的有效高度。 */
     static final float LARGE = 0.75f;
+
+    /** Pi TUI Editor.autocompleteMaxVisible 默认值（官方 clamp 3–20）。 */
+    static final int SLASH_MAX_VISIBLE = 5;
 
     private SheetHeight() {}
 
@@ -45,5 +49,47 @@ final class SheetHeight {
             throw new IllegalArgumentException("expandedOffset=" + offset + " parentPx=" + parentPx);
         }
         return offset;
+    }
+
+    /** Slash 列表可视行数上限；adapter 仍持有完整过滤结果。 */
+    static int slashVisibleRowCap() {
+        return SLASH_MAX_VISIBLE;
+    }
+
+    /**
+     * Slash 列表视口高度 = 一行实测高度 × {@link #SLASH_MAX_VISIBLE} + list padding。
+     * 不截断目录数据。
+     */
+    static int slashListViewportPx(int rowHeightPx, int listPaddingPx) {
+        if (rowHeightPx <= 0) {
+            throw new IllegalArgumentException("rowHeightPx=" + rowHeightPx);
+        }
+        if (listPaddingPx < 0) {
+            throw new IllegalArgumentException("listPaddingPx=" + listPaddingPx);
+        }
+        int viewport = Math.multiplyExact(rowHeightPx, SLASH_MAX_VISIBLE) + listPaddingPx;
+        if (viewport <= 0) {
+            throw new IllegalStateException("slash viewport=" + viewport);
+        }
+        return viewport;
+    }
+
+    /**
+     * 斜杠列表 maxHeight：5 行视口，且不超过 LARGE 屏高减去标题（溢出安全）。
+     */
+    static int slashListMaxPx(int screenPx, int headerPx, int rowHeightPx, int listPaddingPx) {
+        if (headerPx < 0) {
+            throw new IllegalArgumentException("headerPx=" + headerPx);
+        }
+        int viewport = slashListViewportPx(rowHeightPx, listPaddingPx);
+        int safety = capPx(screenPx, LARGE) - headerPx;
+        if (safety <= 0) {
+            throw new IllegalStateException("slash list safety=" + safety);
+        }
+        int max = Math.min(viewport, safety);
+        if (max <= 0) {
+            throw new IllegalStateException("slash list maxHeight=" + max);
+        }
+        return max;
     }
 }
