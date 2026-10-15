@@ -1,12 +1,12 @@
 package dev.pi.android.ui;
 
 /**
- * Modal bottom sheet 高度：矮内容贴合，高内容按屏幕比例封顶。
- * 命令菜单默认半屏，必须留出可点的外部区域。
+ * 命令面板高度：占大半屏（约 70–80%），并在输入框上方留出可点遮罩。
  */
 final class SheetHeight {
 
-    static final float HALF = 0.5f;
+    /** 70–80% 屏高区间的取值。 */
+    static final float LARGE = 0.75f;
 
     private SheetHeight() {}
 
@@ -29,5 +29,21 @@ final class SheetHeight {
             throw new IllegalArgumentException("contentPx=" + contentPx);
         }
         return Math.min(contentPx, capPx(screenPx, ratio));
+    }
+
+    static int expandedOffsetPx(int parentPx, int screenPx, int minScrimPx) {
+        if (parentPx <= 0) {
+            throw new IllegalArgumentException("parentPx=" + parentPx);
+        }
+        if (minScrimPx <= 0) {
+            throw new IllegalArgumentException("minScrimPx=" + minScrimPx);
+        }
+        int target = capPx(screenPx, LARGE);
+        int offset = parentPx - target;
+        if (offset < minScrimPx) offset = minScrimPx;
+        if (offset >= parentPx) {
+            throw new IllegalArgumentException("expandedOffset=" + offset + " parentPx=" + parentPx);
+        }
+        return offset;
     }
 }

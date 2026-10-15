@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/slash_sheet_root"
+    android:id="@+id/slash_sheet_panel"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:background="@color/bg_elevated"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_slash_sheet"
+    android:clickable="true"
+    android:focusable="true"
     android:orientation="vertical"
     android:paddingBottom="8dp">
 
@@ -27,10 +29,11 @@
         android:textSize="18sp"
         android:textStyle="bold" />
 
-    <dev.pi.android.ui.MaxHeightRecyclerView
+    <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/slash_list"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="0dp"
+        android:layout_weight="1"
         android:clipToPadding="false"
         android:overScrollMode="never"
         android:paddingBottom="4dp" />

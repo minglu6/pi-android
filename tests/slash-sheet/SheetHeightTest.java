@@ -3,30 +3,41 @@ package dev.pi.android.ui;
 public final class SheetHeightTest {
     public static void main(String[] args) {
         int screen = 2400;
-        if (SheetHeight.HALF != 0.5f) {
-            throw new AssertionError("command menu cap must be half screen");
+        if (SheetHeight.LARGE < 0.70f || SheetHeight.LARGE > 0.80f) {
+            throw new AssertionError("command menu must occupy ~70–80% screen, got " + SheetHeight.LARGE);
         }
 
-        int half = SheetHeight.capPx(screen, SheetHeight.HALF);
-        if (half != 1200) {
-            throw new AssertionError("half of 2400 must be 1200, got " + half);
+        int large = SheetHeight.capPx(screen, SheetHeight.LARGE);
+        if (large != 1800) {
+            throw new AssertionError("75% of 2400 must be 1800, got " + large);
         }
-
-        int shortList = SheetHeight.hugOrCap(screen, 320, SheetHeight.HALF);
-        if (shortList != 320) {
-            throw new AssertionError("short list must hug content, got " + shortList);
-        }
-
-        int longList = SheetHeight.hugOrCap(screen, 2200, SheetHeight.HALF);
-        if (longList != half) {
-            throw new AssertionError("long list must cap at half screen, got " + longList);
-        }
-        if (longList >= screen) {
+        if (large >= screen) {
             throw new AssertionError("capped height must leave tappable scrim");
         }
 
+        int shortList = SheetHeight.hugOrCap(screen, 320, SheetHeight.LARGE);
+        if (shortList != 320) {
+            throw new AssertionError("short list hug still works, got " + shortList);
+        }
+
+        int parent = 2000;
+        int minScrim = 96;
+        int offset = SheetHeight.expandedOffsetPx(parent, screen, minScrim);
+        if (parent - offset != large) {
+            throw new AssertionError("sheet should be 75% of screen when parent is tall enough, offset=" + offset);
+        }
+
+        int smallParent = 1000;
+        int imeOffset = SheetHeight.expandedOffsetPx(smallParent, screen, minScrim);
+        if (imeOffset != minScrim) {
+            throw new AssertionError("IME-shrunk host must keep min scrim, got " + imeOffset);
+        }
+        if (imeOffset >= smallParent) {
+            throw new AssertionError("offset must leave a visible sheet");
+        }
+
         try {
-            SheetHeight.capPx(0, SheetHeight.HALF);
+            SheetHeight.capPx(0, SheetHeight.LARGE);
             throw new AssertionError("screenPx=0 must throw");
         } catch (IllegalArgumentException expected) {
             if (!expected.getMessage().contains("screenPx=0")) {
@@ -34,26 +45,10 @@ public final class SheetHeightTest {
             }
         }
         try {
-            SheetHeight.hugOrCap(screen, -1, SheetHeight.HALF);
-            throw new AssertionError("contentPx<0 must throw");
+            SheetHeight.expandedOffsetPx(0, screen, minScrim);
+            throw new AssertionError("parentPx=0 must throw");
         } catch (IllegalArgumentException expected) {
-            if (!expected.getMessage().contains("contentPx=-1")) {
-                throw new AssertionError(expected);
-            }
-        }
-        try {
-            SheetHeight.capPx(screen, 0f);
-            throw new AssertionError("ratio=0 must throw");
-        } catch (IllegalArgumentException expected) {
-            if (!expected.getMessage().contains("ratio=0")) {
-                throw new AssertionError(expected);
-            }
-        }
-        try {
-            SheetHeight.capPx(screen, 1.2f);
-            throw new AssertionError("ratio>1 must throw");
-        } catch (IllegalArgumentException expected) {
-            if (!expected.getMessage().contains("ratio=1.2")) {
+            if (!expected.getMessage().contains("parentPx=0")) {
                 throw new AssertionError(expected);
             }
         }

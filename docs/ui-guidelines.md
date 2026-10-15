@@ -17,7 +17,7 @@
 
 ## 组件怎么选
 
-1. **列表选择 / 搜索** → `PickerSheet`（模型、思考、会话动作、输入历史、cwd…）。**斜杠命令菜单** → `SlashCommandsSheet`（半高 Modal BottomSheet，点外部 / 返回 / 下滑关闭；禁止全屏 Dialog 或撑满聊天区的内嵌列表）
+1. **列表选择 / 搜索** → `PickerSheet`（模型、思考、会话动作、输入历史、cwd…）。**斜杠命令菜单** → `SlashCommandsSheet`（锚在输入框上方的大半屏 BottomSheet，约 70–80% 屏高；点外部 / 返回 / 下滑关闭；禁止 Dialog 盖住 composer）
 2. **多行编辑** → `EditorSheet`（会话说明等）；禁止用 `MaterialDialogs.promptText` 做多行
 3. **定时消息** → `SchedulesSheet`（空态 = logo + 标题 + 说明 + 主 CTA + 示例 chip）
 4. **查找** → `FindSheet`
