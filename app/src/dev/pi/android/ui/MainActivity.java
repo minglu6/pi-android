@@ -1741,7 +1741,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         });
     }
 
-    /** 向连接器拉 get_commands；失败沿用上次桥缓存，不本地展开 overlay。 */
+    /** 向连接器拉 get_commands；失败沿用上次桥缓存，内存中再与 App builtins 合并。 */
     private void refreshSlashCommands() {
         if (!isConnected()) return;
         rpc("get_commands", null);

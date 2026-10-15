@@ -16,8 +16,9 @@ import dev.pi.android.util.FuzzyFilter;
 
 /**
  * 作曲框斜杠菜单条目。
- * <p>目录只来自桥接 {@code get_commands}（extension / prompt / skill），顺序与描述原样展示。
- * App overlay 只给同名命令挂本地 UI 拦截，不作为命令表来源、不在「仅 /」时本地展开。
+ * <p>目录 = App 已实现的 Pi TUI builtins（{@link #appOverlay}）∪ 桥 {@code get_commands}。
+ * builtins 按 overlay 顺序在前，其后为非同名服务端命令；同名只留一行并挂 App intercept。
+ * overlay-only builtins 只走 {@code appAction}，不经 {@code prompt} 发送。
  */
 public final class SlashCommand {
 
@@ -64,8 +65,8 @@ public final class SlashCommand {
     }
 
     /**
-     * App 拦截表：TUI 内置命令不在 get_commands 里，发送完整名时由客户端拦截。
-     * 不进入斜杠菜单目录。
+     * App 已实现的 Pi TUI 内置命令（对应 interactive 的 {@code BUILTIN_SLASH_COMMANDS} 子集）。
+     * 进入斜杠菜单目录，并在发送完整名时由客户端拦截；不经 {@code prompt} 发给连接器。
      */
     public static Map<String, SlashCommand> appOverlay() {
         Map<String, SlashCommand> m = new LinkedHashMap<>();
@@ -122,27 +123,44 @@ public final class SlashCommand {
     }
 
     /**
-     * 按 get_commands 顺序保留条目；同名才挂 App 拦截，不追加 overlay 独有命令。
+     * 菜单目录：overlay builtins 在前，再接 {@code get_commands} 中尚未出现的名字。
+     * 同名只留一行：App {@code appAction} + 描述优先服务端（缺则用 overlay）。
      */
     @NonNull
     public static List<SlashCommand> bindAppActions(@NonNull List<SlashCommand> server) {
         if (server == null) throw new IllegalArgumentException("server");
         Map<String, SlashCommand> overlay = appOverlay();
-        List<SlashCommand> out = new ArrayList<>(server.size());
+        Map<String, SlashCommand> firstServer = new LinkedHashMap<>();
         for (SlashCommand s : server) {
-            SlashCommand app = overlay.get(s.rawName.toLowerCase(Locale.ROOT));
-            if (app == null) {
-                out.add(s);
+            String key = s.rawName.toLowerCase(Locale.ROOT);
+            if (!firstServer.containsKey(key)) firstServer.put(key, s);
+        }
+        List<SlashCommand> out = new ArrayList<>(overlay.size() + server.size());
+        for (SlashCommand app : overlay.values()) {
+            SlashCommand s = firstServer.get(app.rawName.toLowerCase(Locale.ROOT));
+            if (s == null) {
+                out.add(app);
                 continue;
             }
-            out.add(new SlashCommand(s.rawName, s.description, s.source, app.appAction, s.location));
+            String desc = descriptionOrOverlay(s, app);
+            out.add(new SlashCommand(s.rawName, desc, s.source, app.appAction, s.location));
+        }
+        for (SlashCommand s : server) {
+            if (overlay.containsKey(s.rawName.toLowerCase(Locale.ROOT))) continue;
+            out.add(s);
         }
         return out;
     }
 
+    @Nullable
+    private static String descriptionOrOverlay(@NonNull SlashCommand server, @NonNull SlashCommand overlay) {
+        if (server.description != null && !server.description.isEmpty()) return server.description;
+        return overlay.description;
+    }
+
     /**
      * Pi CombinedAutocompleteProvider：{@code /} 后的前缀对 {@code name} 做 fuzzyFilter；
-     * 空前缀（仅 {@code /}）返回桥目录原序，不截断、不另造子集。
+     * 空前缀（仅 {@code /}）返回合并目录原序，不截断、不另造子集。
      */
     @NonNull
     public static List<SlashCommand> filterCatalog(@NonNull List<SlashCommand> catalog,
