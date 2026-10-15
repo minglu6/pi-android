@@ -1,6 +1,7 @@
 package dev.pi.android.ui;
 
 import android.view.View;
+import android.widget.TextView;
 
 import androidx.activity.OnBackPressedCallback;
 import androidx.annotation.NonNull;
@@ -17,6 +18,7 @@ import dev.pi.android.util.AppFonts;
 /**
  * 斜杠命令菜单：旧 slash_panel 外观（11sp 标题、无圆角抬高层、无 dim），
  * 锚在 composer 上方，最高约 75% 屏高；点上方区域 / 返回 / 下滑关闭。
+ * 标题计数为 Pi SelectList 语义：选中序号 / 当前命中数。
  */
 public final class SlashCommandsSheet {
 
@@ -30,7 +32,7 @@ public final class SlashCommandsSheet {
     private final Listener listener;
     private final SwipeDownLayout panel;
     private final View dismissHit;
-    private final View title;
+    private final TextView title;
     private final MaxHeightRecyclerView list;
     private final SlashCommandAdapter adapter;
     private final OnBackPressedCallback backCallback;
@@ -66,12 +68,26 @@ public final class SlashCommandsSheet {
     }
 
     public void show(@NonNull List<SlashCommand> items) {
+        if (items == null) throw new IllegalArgumentException("items");
+        if (items.isEmpty()) {
+            throw new IllegalArgumentException("slash items empty");
+        }
         adapter.replaceAll(items);
+        renderTitle();
         capListHeight();
         panel.setTranslationY(0f);
         panel.setVisibility(View.VISIBLE);
         dismissHit.setVisibility(View.VISIBLE);
         backCallback.setEnabled(true);
+        list.scrollToPosition(adapter.selectedIndex());
+    }
+
+    public boolean moveSelection(int delta) {
+        if (!isShowing() || adapter.isEmpty()) return false;
+        adapter.moveSelection(delta);
+        renderTitle();
+        list.scrollToPosition(adapter.selectedIndex());
+        return true;
     }
 
     public void dismiss() {
@@ -87,8 +103,14 @@ public final class SlashCommandsSheet {
     }
 
     @Nullable
-    public SlashCommand first() {
-        return adapter.first();
+    public SlashCommand selected() {
+        return adapter.selected();
+    }
+
+    private void renderTitle() {
+        int total = adapter.getItemCount();
+        int index = adapter.selectedIndex() + 1;
+        title.setText(activity.getString(R.string.slash_hint_count, index, total));
     }
 
     private void dismissByUser() {

@@ -6,6 +6,7 @@ import android.view.ViewGroup;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.ArrayList;
@@ -23,19 +24,37 @@ public class SlashCommandAdapter extends RecyclerView.Adapter<SlashCommandAdapte
 
     private final List<SlashCommand> items = new ArrayList<>();
     private final Listener listener;
+    private int selectedIndex;
 
     public SlashCommandAdapter(Listener listener) {
         this.listener = listener;
     }
 
     public void replaceAll(List<SlashCommand> next) {
+        if (next == null) throw new IllegalArgumentException("items");
         items.clear();
-        if (next != null) items.addAll(next);
+        items.addAll(next);
+        selectedIndex = 0;
         notifyDataSetChanged();
     }
 
-    public SlashCommand first() {
-        return items.isEmpty() ? null : items.get(0);
+    public int selectedIndex() {
+        return selectedIndex;
+    }
+
+    public void moveSelection(int delta) {
+        if (items.isEmpty()) {
+            throw new IllegalStateException("slash selection empty");
+        }
+        int n = items.size();
+        selectedIndex = Math.floorMod(selectedIndex + delta, n);
+        notifyDataSetChanged();
+    }
+
+    @Nullable
+    public SlashCommand selected() {
+        if (items.isEmpty()) return null;
+        return items.get(selectedIndex);
     }
 
     public boolean isEmpty() {
@@ -57,8 +76,10 @@ public class SlashCommandAdapter extends RecyclerView.Adapter<SlashCommandAdapte
         holder.cmd.setText(cmd.name);
         String desc = cmd.description;
         if (desc == null || desc.isEmpty()) {
-            holder.desc.setText(R.string.slash_no_desc);
+            holder.desc.setVisibility(View.GONE);
+            holder.desc.setText("");
         } else {
+            holder.desc.setVisibility(View.VISIBLE);
             holder.desc.setText(desc);
         }
         holder.itemView.setOnClickListener(v -> {
