@@ -1,10 +1,14 @@
 package dev.pi.android.ui;
 
 import android.app.Activity;
+import android.graphics.Rect;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -14,6 +18,9 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.StringRes;
 import androidx.core.content.ContextCompat;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -57,6 +64,7 @@ public final class PickerSheet {
     @Nullable private OnSegment segmentListener;
     @Nullable private Runnable footerListener;
     @Nullable private PickerItem lastPicked;
+    private boolean heightTracking;
 
     public PickerSheet(@NonNull Activity activity, @StringRes int titleRes, boolean searchable,
                        @NonNull OnPick onPick) {
@@ -110,25 +118,48 @@ public final class PickerSheet {
             });
         }
 
+        Window window = dialog.getWindow();
+        if (window == null) {
+            throw new IllegalStateException("PickerSheet dialog window");
+        }
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+
         dialog.setOnShowListener(d -> {
             FrameLayout sheet = dialog.findViewById(com.google.android.material.R.id.design_bottom_sheet);
-            if (sheet == null) return;
+            if (sheet == null) {
+                throw new IllegalStateException("PickerSheet missing design_bottom_sheet");
+            }
             sheet.setBackgroundResource(android.R.color.transparent);
             BottomSheetBehavior<FrameLayout> behavior = BottomSheetBehavior.from(sheet);
             behavior.setSkipCollapsed(true);
             behavior.setState(BottomSheetBehavior.STATE_EXPANDED);
-            int h = (int) (activity.getResources().getDisplayMetrics().heightPixels * 0.78f);
-            behavior.setPeekHeight(h);
-            android.view.ViewGroup.LayoutParams lp = sheet.getLayoutParams();
-            lp.height = h;
-            sheet.setLayoutParams(lp);
+            applyExpandedHeight(sheet, behavior);
+            if (!heightTracking) {
+                heightTracking = true;
+                View parent = (View) sheet.getParent();
+                if (parent == null) {
+                    throw new IllegalStateException("PickerSheet parent");
+                }
+                View.OnLayoutChangeListener relayout = (v, l, t, r, b, ol, ot, or, ob) ->
+                        applyExpandedHeight(sheet, behavior);
+                sheet.addOnLayoutChangeListener(relayout);
+                parent.addOnLayoutChangeListener(relayout);
+                ViewCompat.setOnApplyWindowInsetsListener(sheet, (v, insets) -> {
+                    applyExpandedHeight(sheet, behavior);
+                    return insets;
+                });
+            }
+            ViewCompat.requestApplyInsets(sheet);
             int sel = adapter.indexOfSelected();
             if (sel >= 0) list.post(() -> list.scrollToPosition(sel));
             if (searchable && search.getVisibility() == View.VISIBLE) {
                 search.requestFocus();
                 InputMethodManager imm = (InputMethodManager)
                         activity.getSystemService(Activity.INPUT_METHOD_SERVICE);
-                if (imm != null) imm.showSoftInput(search, InputMethodManager.SHOW_IMPLICIT);
+                if (imm == null) {
+                    throw new IllegalStateException("InputMethodManager missing");
+                }
+                imm.showSoftInput(search, InputMethodManager.SHOW_IMPLICIT);
             }
         });
     }
@@ -163,6 +194,80 @@ public final class PickerSheet {
 
     public void show() {
         dialog.show();
+    }
+
+    /** Keep IME; size the sheet to the space above the keyboard so no gray mid-gap remains. */
+    private void applyExpandedHeight(@NonNull FrameLayout sheet,
+                                     @NonNull BottomSheetBehavior<FrameLayout> behavior) {
+        int h = expandedHeightPx(sheet);
+        ViewGroup.LayoutParams lp = sheet.getLayoutParams();
+        if (lp.height == h && behavior.getPeekHeight() == h) return;
+        behavior.setPeekHeight(h);
+        lp.height = h;
+        sheet.setLayoutParams(lp);
+        behavior.setState(BottomSheetBehavior.STATE_EXPANDED);
+    }
+
+    private int expandedHeightPx(@NonNull View sheet) {
+        int screen = activity.getResources().getDisplayMetrics().heightPixels;
+        return SheetHeight.pickerExpandedPx(screen, visibleAboveImePx(sheet));
+    }
+
+    /**
+     * Space above the IME: visible display frame of the dialog/activity, IME WindowInsets,
+     * and the adjustResize parent height — the tightest positive measurement.
+     */
+    private int visibleAboveImePx(@NonNull View sheet) {
+        Window dialogWindow = dialog.getWindow();
+        if (dialogWindow == null) {
+            throw new IllegalStateException("PickerSheet dialog window");
+        }
+        int visibleH = Math.min(
+                visibleFrameHeight(activity.getWindow()),
+                visibleFrameHeight(dialogWindow));
+        View parent = (View) sheet.getParent();
+        if (parent != null && parent.getHeight() > 0) {
+            visibleH = Math.min(visibleH, parent.getHeight());
+        }
+        int insetH = imeInsetVisiblePx(dialogWindow.getDecorView(), screenHeightPx());
+        if (insetH <= 0) {
+            insetH = imeInsetVisiblePx(activity.getWindow().getDecorView(), screenHeightPx());
+        }
+        if (insetH > 0) {
+            visibleH = Math.min(visibleH, insetH);
+        }
+        if (visibleH <= 0) {
+            throw new IllegalStateException("visible above IME=" + visibleH);
+        }
+        return visibleH;
+    }
+
+    private int screenHeightPx() {
+        int screen = activity.getResources().getDisplayMetrics().heightPixels;
+        if (screen <= 0) {
+            throw new IllegalStateException("screen heightPixels=" + screen);
+        }
+        return screen;
+    }
+
+    private static int imeInsetVisiblePx(@NonNull View host, int screenPx) {
+        WindowInsetsCompat insets = ViewCompat.getRootWindowInsets(host);
+        if (insets == null) return 0;
+        Insets ime = insets.getInsets(WindowInsetsCompat.Type.ime());
+        Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+        int top = bars.top;
+        int bottom = Math.max(ime.bottom, bars.bottom);
+        return screenPx - top - bottom;
+    }
+
+    private static int visibleFrameHeight(@NonNull Window window) {
+        Rect visible = new Rect();
+        window.getDecorView().getWindowVisibleDisplayFrame(visible);
+        int h = visible.height();
+        if (h <= 0) {
+            throw new IllegalStateException("visible display frame height=" + h);
+        }
+        return h;
     }
 
     public void dismiss() {
