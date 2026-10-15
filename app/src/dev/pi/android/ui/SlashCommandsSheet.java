@@ -17,7 +17,8 @@ import dev.pi.android.util.AppFonts;
 
 /**
  * 斜杠命令菜单：旧 slash_panel 外观（11sp 标题、无圆角抬高层、无 dim），
- * 锚在 composer 上方，最高约 75% 屏高；点上方区域 / 返回 / 下滑关闭。
+ * 锚在 composer 上方；列表视口约 5 行（Pi autocompleteMaxVisible），
+ * 完整过滤结果仍可滚动。点上方区域 / 返回 / 下滑关闭。
  * 标题计数为 Pi SelectList 语义：选中序号 / 当前命中数。
  */
 public final class SlashCommandsSheet {
@@ -128,17 +129,36 @@ public final class SlashCommandsSheet {
 
     private void capListHeight() {
         int screen = activity.getResources().getDisplayMetrics().heightPixels;
-        int maxPanel = SheetHeight.capPx(screen, SheetHeight.LARGE);
         int width = panel.getWidth();
         if (width <= 0) width = screen;
         title.measure(
                 View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
         int header = title.getMeasuredHeight() + panel.getPaddingTop() + panel.getPaddingBottom();
-        int listMax = maxPanel - header;
-        if (listMax <= 0) {
-            throw new IllegalStateException("slash list maxHeight=" + listMax);
+        int rowHeight = measureSlashRowHeight(width);
+        int listPadding = list.getPaddingTop() + list.getPaddingBottom();
+        list.setMaxHeight(SheetHeight.slashListMaxPx(screen, header, rowHeight, listPadding));
+    }
+
+    /** 测一行 {@code item_slash_command} 的单行高度，供视口 × {@link SheetHeight#SLASH_MAX_VISIBLE}。 */
+    private int measureSlashRowHeight(int width) {
+        View row = activity.getLayoutInflater().inflate(R.layout.item_slash_command, list, false);
+        TextView cmd = row.findViewById(R.id.slash_cmd);
+        TextView desc = row.findViewById(R.id.slash_desc);
+        if (cmd == null || desc == null) {
+            throw new IllegalStateException("slash row views missing");
         }
-        list.setMaxHeight(listMax);
+        cmd.setTypeface(AppFonts.mono(activity, false));
+        desc.setTypeface(AppFonts.mono(activity, false));
+        cmd.setText("/cmd");
+        desc.setText("desc");
+        row.measure(
+                View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+        int h = row.getMeasuredHeight();
+        if (h <= 0) {
+            throw new IllegalStateException("slash row height=" + h);
+        }
+        return h;
     }
 }

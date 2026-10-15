@@ -38,7 +38,7 @@ public final class SlashCommandMenuTest {
 
         List<SlashCommand> slashOnly = SlashCommand.filterCatalog(catalog, "/");
         if (slashOnly.size() != 3) {
-            throw new AssertionError("/ must show full get_commands catalog, got " + slashOnly.size());
+            throw new AssertionError("/ must keep full get_commands catalog in data, got " + slashOnly.size());
         }
         if (!slashOnly.get(0).rawName.equals("compact")
                 || !slashOnly.get(1).rawName.equals("fix-tests")
