@@ -80,6 +80,8 @@ bash tests/model-state/run.sh
 bash tests/extension-ui/run.sh
 bash tests/ansi/run.sh
 bash tests/message-queue/run.sh
+bash tests/card-scroll/run.sh
+bash tests/slash-sheet/run.sh
 python3 tests/test_build_failures.py
 node --test bridge/tests/pi-rpc-bridge.test.mjs bridge/tests/suggestions.test.mjs
 ```
