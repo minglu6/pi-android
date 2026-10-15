@@ -24,19 +24,21 @@ public final class SheetHeightTest {
         }
         int imeVisible = 1400;
         int pickerIme = SheetHeight.pickerExpandedPx(screen, imeVisible);
-        if (pickerIme != 1092) {
-            throw new AssertionError("picker must use 78% of visible frame above IME, got " + pickerIme);
-        }
-        if (pickerIme >= imeVisible) {
-            throw new AssertionError("picker must fit in the IME-shrunk frame, got " + pickerIme);
+        if (pickerIme != imeVisible) {
+            throw new AssertionError("IME-visible picker must fill space above keyboard, got " + pickerIme);
         }
         if (pickerIme > pickerFull) {
             throw new AssertionError("IME-visible picker must not exceed full-screen picker");
         }
+        int justBelowPreferred = 1800;
+        int filled = SheetHeight.pickerExpandedPx(screen, justBelowPreferred);
+        if (filled != justBelowPreferred) {
+            throw new AssertionError("visible below 78% screen must fill, got " + filled);
+        }
         int statusBarVisible = 2320;
         int pickerStatus = SheetHeight.pickerExpandedPx(screen, statusBarVisible);
-        if (pickerStatus != Math.round(statusBarVisible * 0.78f)) {
-            throw new AssertionError("visible frame below screen must be the basis, got " + pickerStatus);
+        if (pickerStatus != pickerFull) {
+            throw new AssertionError("status-bar-only inset must keep 78% screen, got " + pickerStatus);
         }
         if (large >= screen) {
             throw new AssertionError("capped height must leave tappable scrim");
