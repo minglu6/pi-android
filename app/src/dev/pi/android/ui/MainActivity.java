@@ -249,9 +249,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private View topBar;
     private View composerBar;
     private LinearLayout suggestRow;
-    private View slashPanel;
-    private SlashCommandAdapter slashAdapter;
+    private SlashCommandsSheet slashSheet;
     private SlashCommandStore slashStore;
+    private boolean slashSheetSuppress;
     private BridgeService service;
     private boolean serviceBound;
     private boolean resumed;
@@ -668,8 +668,8 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private boolean submitComposer() {
-        if (slashPanelVisible() && slashAdapter != null && !slashAdapter.isEmpty()) {
-            SlashCommand first = slashAdapter.first();
+        if (slashPanelVisible() && slashSheet != null && !slashSheet.isEmpty()) {
+            SlashCommand first = slashSheet.first();
             if (first != null) { applySlashCommand(first); return true; }
         }
         onSendOrStop();
@@ -1723,13 +1723,18 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
 
     private void setupSlashCommands() {
         slashStore = new SlashCommandStore(this);
-        slashPanel = findViewById(R.id.slash_panel);
-        RecyclerView slashList = findViewById(R.id.slash_list);
-        if (slashList == null) return;
-        slashList.setLayoutManager(new LinearLayoutManager(this));
-        slashAdapter = new SlashCommandAdapter(this::applySlashCommand);
-        slashList.setAdapter(slashAdapter);
-        hideSlashSuggestions();
+        slashSheet = new SlashCommandsSheet(this, new SlashCommandsSheet.Listener() {
+            @Override
+            public void onPick(@NonNull SlashCommand cmd) {
+                applySlashCommand(cmd);
+            }
+
+            @Override
+            public void onDismissedByUser() {
+                slashSheetSuppress = true;
+                if (composer != null) composer.requestFocus();
+            }
+        });
     }
 
     /** 向连接器拉 get_commands；失败静默，沿用缓存 / App overlay。 */
@@ -1742,13 +1747,14 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private boolean slashPanelVisible() {
-        return slashPanel != null && slashPanel.getVisibility() == View.VISIBLE;
+        return slashSheet != null && slashSheet.isShowing();
     }
 
     private void updateSlashSuggestions(String text) {
         String t = text == null ? "" : text;
         // 仅当整段输入以 / 开头且尚未含空白（还在敲命令名）时展示
         if (!t.startsWith("/") || t.contains(" ") || t.contains("\n")) {
+            slashSheetSuppress = false;
             hideSlashSuggestions();
             return;
         }
@@ -1758,12 +1764,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             hideSlashSuggestions();
             return;
         }
-        if (slashAdapter != null) slashAdapter.replaceAll(matched);
-        if (slashPanel != null) slashPanel.setVisibility(View.VISIBLE);
+        if (slashSheetSuppress) return;
+        if (slashSheet != null) slashSheet.show(matched);
     }
 
     private void hideSlashSuggestions() {
-        if (slashPanel != null) slashPanel.setVisibility(View.GONE);
+        if (slashSheet != null) slashSheet.dismiss();
     }
 
     private void applySlashCommand(SlashCommand cmd) {
@@ -1815,10 +1821,9 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_ESCAPE || keyCode == KeyEvent.KEYCODE_BACK) {
             if (slashPanelVisible()) {
+                slashSheetSuppress = true;
                 hideSlashSuggestions();
-                if (keyCode == KeyEvent.KEYCODE_ESCAPE) return true;
-                // BACK：只收起提示，不退出 Activity（再按一次才退）
-                if (keyCode == KeyEvent.KEYCODE_BACK) return true;
+                return true;
             }
         }
         return super.onKeyDown(keyCode, event);
