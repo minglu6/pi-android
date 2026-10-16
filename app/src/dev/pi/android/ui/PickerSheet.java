@@ -5,6 +5,9 @@ import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -14,6 +17,11 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.StringRes;
 import androidx.core.content.ContextCompat;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsAnimationCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -57,6 +65,10 @@ public final class PickerSheet {
     @Nullable private OnSegment segmentListener;
     @Nullable private Runnable footerListener;
     @Nullable private PickerItem lastPicked;
+    private int appliedHeight = Integer.MIN_VALUE;
+    private int appliedPadBottom = Integer.MIN_VALUE;
+    private int appliedPadTop = Integer.MIN_VALUE;
+    private boolean imeBound;
 
     public PickerSheet(@NonNull Activity activity, @StringRes int titleRes, boolean searchable,
                        @NonNull OnPick onPick) {
@@ -65,6 +77,12 @@ public final class PickerSheet {
         View root = LayoutInflater.from(activity).inflate(R.layout.sheet_picker, null, false);
         dev.pi.android.util.AppFonts.applyTree(root);
         dialog.setContentView(root);
+        Window window = dialog.getWindow();
+        if (window == null) {
+            throw new IllegalStateException("PickerSheet dialog window");
+        }
+        WindowCompat.setDecorFitsSystemWindows(window, false);
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
 
         TextView title = root.findViewById(R.id.picker_title);
         title.setText(titleRes);
@@ -112,25 +130,118 @@ public final class PickerSheet {
 
         dialog.setOnShowListener(d -> {
             FrameLayout sheet = dialog.findViewById(com.google.android.material.R.id.design_bottom_sheet);
-            if (sheet == null) return;
+            if (sheet == null) {
+                throw new IllegalStateException("PickerSheet missing design_bottom_sheet");
+            }
             sheet.setBackgroundResource(android.R.color.transparent);
             BottomSheetBehavior<FrameLayout> behavior = BottomSheetBehavior.from(sheet);
             behavior.setSkipCollapsed(true);
             behavior.setState(BottomSheetBehavior.STATE_EXPANDED);
-            int h = (int) (activity.getResources().getDisplayMetrics().heightPixels * 0.78f);
-            behavior.setPeekHeight(h);
-            android.view.ViewGroup.LayoutParams lp = sheet.getLayoutParams();
-            lp.height = h;
-            sheet.setLayoutParams(lp);
+            bindImeHeight(sheet, behavior);
+            applyImeHeight(sheet, behavior, ViewCompat.getRootWindowInsets(sheet));
             int sel = adapter.indexOfSelected();
             if (sel >= 0) list.post(() -> list.scrollToPosition(sel));
             if (searchable && search.getVisibility() == View.VISIBLE) {
                 search.requestFocus();
                 InputMethodManager imm = (InputMethodManager)
                         activity.getSystemService(Activity.INPUT_METHOD_SERVICE);
-                if (imm != null) imm.showSoftInput(search, InputMethodManager.SHOW_IMPLICIT);
+                if (imm == null) {
+                    throw new IllegalStateException("InputMethodManager missing");
+                }
+                imm.showSoftInput(search, InputMethodManager.SHOW_IMPLICIT);
             }
         });
+    }
+
+    /**
+     * 键盘可保留。用 IME inset 做 sheet 底 padding，内容贴齐键盘上沿；
+     * 高度随 inset / 动画更新。不使用 visibleDisplayFrame + ADJUST_RESIZE（#63）。
+     */
+    private void bindImeHeight(@NonNull FrameLayout sheet,
+                               @NonNull BottomSheetBehavior<FrameLayout> behavior) {
+        if (imeBound) return;
+        imeBound = true;
+        View parent = (View) sheet.getParent();
+        if (parent == null) {
+            throw new IllegalStateException("PickerSheet parent");
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(sheet, (v, insets) -> {
+            applyImeHeight(sheet, behavior, insets);
+            return insets;
+        });
+        ViewCompat.setWindowInsetsAnimationCallback(sheet,
+                new WindowInsetsAnimationCompat.Callback(
+                        WindowInsetsAnimationCompat.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
+                    @NonNull
+                    @Override
+                    public WindowInsetsCompat onProgress(@NonNull WindowInsetsCompat insets,
+                            @NonNull java.util.List<WindowInsetsAnimationCompat> running) {
+                        applyImeHeight(sheet, behavior, insets);
+                        return insets;
+                    }
+                });
+        parent.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) ->
+                applyImeHeight(sheet, behavior, ViewCompat.getRootWindowInsets(sheet)));
+        ViewCompat.requestApplyInsets(sheet);
+    }
+
+    private void applyImeHeight(@NonNull FrameLayout sheet,
+                                @NonNull BottomSheetBehavior<FrameLayout> behavior,
+                                @Nullable WindowInsetsCompat insets) {
+        View parent = (View) sheet.getParent();
+        if (parent == null) {
+            throw new IllegalStateException("PickerSheet parent");
+        }
+        int host = parent.getHeight();
+        if (host <= 0) {
+            return;
+        }
+        WindowInsetsCompat resolved = insets != null ? insets : ViewCompat.getRootWindowInsets(sheet);
+        if (resolved == null) {
+            resolved = ViewCompat.getRootWindowInsets(parent);
+        }
+        int imeBottom = 0;
+        int sysBottom = 0;
+        int sysTop = 0;
+        int sysLeft = 0;
+        int sysRight = 0;
+        if (resolved != null) {
+            Insets ime = resolved.getInsets(WindowInsetsCompat.Type.ime());
+            Insets bars = resolved.getInsets(WindowInsetsCompat.Type.systemBars());
+            imeBottom = ime.bottom;
+            sysBottom = bars.bottom;
+            sysTop = bars.top;
+            sysLeft = bars.left;
+            sysRight = bars.right;
+        }
+        Window activityWindow = activity.getWindow();
+        if (activityWindow != null) {
+            WindowInsetsCompat activityInsets =
+                    ViewCompat.getRootWindowInsets(activityWindow.getDecorView());
+            if (activityInsets != null) {
+                imeBottom = Math.max(imeBottom,
+                        activityInsets.getInsets(WindowInsetsCompat.Type.ime()).bottom);
+            }
+        }
+        int screen = activity.getResources().getDisplayMetrics().heightPixels;
+        if (screen <= 0) {
+            throw new IllegalStateException("screen heightPixels=" + screen);
+        }
+        int height = SheetHeight.pickerSheetHeightPx(screen, host, imeBottom, sysBottom);
+        int padBottom = SheetHeight.pickerBottomPaddingPx(imeBottom, sysBottom);
+        int padTop = SheetHeight.pickerTopPaddingPx(host, height, sysTop);
+        if (height == appliedHeight && padBottom == appliedPadBottom && padTop == appliedPadTop) {
+            return;
+        }
+        appliedHeight = height;
+        appliedPadBottom = padBottom;
+        appliedPadTop = padTop;
+        sheet.setPadding(sysLeft, padTop, sysRight, padBottom);
+        ViewGroup.LayoutParams lp = sheet.getLayoutParams();
+        lp.height = height;
+        sheet.setLayoutParams(lp);
+        behavior.setPeekHeight(height);
+        behavior.setState(BottomSheetBehavior.STATE_EXPANDED);
     }
 
     public void enableSegments(@NonNull String labelA, @NonNull String labelB,

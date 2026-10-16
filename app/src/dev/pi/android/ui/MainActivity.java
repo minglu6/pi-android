@@ -8,6 +8,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.os.IBinder;
 import android.os.Bundle;
 import android.text.Editable;
+import android.text.InputFilter;
 import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -15,8 +16,9 @@ import android.view.InputDevice;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
-import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.BaseInputConnection;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.ImageView;
@@ -252,6 +254,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private SlashCommandsSheet slashSheet;
     private SlashCommandStore slashStore;
     private boolean slashSheetSuppress;
+    private boolean slashConfirming;
     private BridgeService service;
     private boolean serviceBound;
     private boolean resumed;
@@ -508,26 +511,48 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         askNotificationPermission();
         if (attachmentsCtl != null) attachmentsCtl.setListener(draftListener);
 
-        send.setOnClickListener(v -> onSendOrStop());
+        send.setOnClickListener(v -> {
+            if (confirmSlashSelection()) return;
+            onSendOrStop();
+        });
         if (attach != null) attach.setOnClickListener(v -> launchAttachmentPicker());
         send.setEnabled(false);
         renderAttachmentDrafts();
         send.setAlpha(0.45f);
+        composer.setFilters(new InputFilter[] {
+                (source, start, end, dest, dstart, dend) -> {
+                    if (!slashPanelVisible() || composerComposing()) return null;
+                    if (!ComposerIme.slashConfirmNewline(source, start, end)) return null;
+                    composer.post(this::confirmSlashSelection);
+                    return "";
+                }
+        });
         composer.setOnEditorActionListener((v, actionId, event) -> {
+            if (slashPanelVisible() && !composerComposing()
+                    && ComposerIme.slashConfirmEditorAction(
+                            actionId, event != null,
+                            event == null ? 0 : event.getAction(),
+                            event == null ? 0 : event.getKeyCode())) {
+                return confirmSlashSelection();
+            }
             if (actionId == EditorInfo.IME_ACTION_SEND && event == null
-                    && BaseInputConnection.getComposingSpanStart(composer.getText()) < 0) {
+                    && !composerComposing()) {
                 return submitComposer();
             }
             return false;
         });
         composer.setOnKeyListener((v, keyCode, event) -> {
             if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
+            if (slashPanelVisible() && !composerComposing()
+                    && ComposerIme.slashConfirmKey(keyCode, event.getAction(), event.isShiftPressed())) {
+                return confirmSlashSelection();
+            }
             InputDevice device = event.getDevice();
             boolean physicalKeyboard = device != null && !device.isVirtual()
                     && device.getKeyboardType() == InputDevice.KEYBOARD_TYPE_ALPHABETIC;
             if (physicalKeyboard && keyCode == KeyEvent.KEYCODE_ENTER
                     && !event.isShiftPressed()
-                    && BaseInputConnection.getComposingSpanStart(composer.getText()) < 0) {
+                    && !composerComposing()) {
                 return submitComposer();
             }
             // Pocket: ↑/↓ browse what this device sent before (DPAD or arrow keys).
@@ -672,12 +697,38 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     }
 
     private boolean submitComposer() {
-        if (slashPanelVisible() && slashSheet != null && !slashSheet.isEmpty()) {
-            SlashCommand picked = slashSheet.selected();
-            if (picked != null) { applySlashCommand(picked); return true; }
-        }
+        if (confirmSlashSelection()) return true;
         onSendOrStop();
         return true;
+    }
+
+    private boolean composerComposing() {
+        return composer != null
+                && BaseInputConnection.getComposingSpanStart(composer.getText()) >= 0;
+    }
+
+    /** 斜杠候选项可见时，回车 / 发送 = 点击当前高亮项。 */
+    private boolean confirmSlashSelection() {
+        if (slashConfirming) return true;
+        if (slashSheet == null || !slashSheet.isShowing()) return false;
+        slashConfirming = true;
+        try {
+            return slashSheet.confirmSelection();
+        } finally {
+            slashConfirming = false;
+        }
+    }
+
+    private void syncComposerImeForSlash(boolean slashVisible) {
+        if (composer == null) return;
+        int want = slashVisible ? ComposerIme.imeOptionsSlash() : ComposerIme.imeOptionsCompose();
+        if (composer.getImeOptions() == want) return;
+        composer.setImeOptions(want);
+        InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+        if (imm == null) {
+            throw new IllegalStateException("InputMethodManager missing");
+        }
+        imm.restartInput(composer);
     }
 
     /** Remember sent text and reset ↑ browse state. */
@@ -1736,6 +1787,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             @Override
             public void onDismissedByUser() {
                 slashSheetSuppress = true;
+                syncComposerImeForSlash(false);
                 if (composer != null) composer.requestFocus();
             }
         });
@@ -1767,10 +1819,12 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         if (slashSheetSuppress) return;
         if (slashSheet != null) slashSheet.show(matched);
+        syncComposerImeForSlash(true);
     }
 
     private void hideSlashSuggestions() {
         if (slashSheet != null) slashSheet.dismiss();
+        syncComposerImeForSlash(false);
     }
 
     private void applySlashCommand(SlashCommand cmd) {
