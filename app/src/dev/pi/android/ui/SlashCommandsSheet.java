@@ -91,6 +91,21 @@ public final class SlashCommandsSheet {
         return true;
     }
 
+    /** IME 回车 / 发送：等同点击当前高亮项。 */
+    public boolean confirmSelection() {
+        if (!isShowing()) return false;
+        if (adapter.isEmpty()) {
+            throw new IllegalStateException("slash confirm with empty menu");
+        }
+        SlashCommand cmd = adapter.selected();
+        if (cmd == null) {
+            throw new IllegalStateException("slash confirm without selection");
+        }
+        hidePanel();
+        listener.onPick(cmd);
+        return true;
+    }
+
     public void dismiss() {
         hidePanel();
     }
