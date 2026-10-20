@@ -1007,24 +1007,16 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
             if (agentActionMore != null) {
                 agentActionMore.setOnClickListener(v -> {
                     PopupMenu menu = new PopupMenu(ctx, v);
-                    menu.getMenu().add(0, 1, 0, R.string.action_copy);
                     menu.getMenu().add(0, 2, 1, R.string.retry_same);
                     menu.getMenu().add(0, 3, 2, R.string.retry_other);
-                    menu.getMenu().add(0, 4, 3, R.string.action_fork_short);
                     menu.setOnMenuItemClickListener(item -> {
                         if (MessageAdapter.this.agentActions == null) return false;
                         switch (item.getItemId()) {
-                            case 1:
-                                copyPlain(copyText);
-                                return true;
                             case 2:
                                 MessageAdapter.this.agentActions.onRetry(msg);
                                 return true;
                             case 3:
                                 MessageAdapter.this.agentActions.onRetryOtherModel(msg);
-                                return true;
-                            case 4:
-                                MessageAdapter.this.agentActions.onFork(msg);
                                 return true;
                             default:
                                 return false;

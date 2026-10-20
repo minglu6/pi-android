@@ -413,7 +413,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
                 retryWithPrompt(findPrecedingUserText(message), true);
             }
             @Override public void onFork(@NonNull ChatMessage message) {
-                forkFromMessage(message);
+                forkCurrentSession();
             }
             @Override public void onEditResend(@NonNull ChatMessage userMessage) {
                 editResendUser(userMessage);
@@ -1052,7 +1052,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private String rpc(String command, @Nullable JSONObject params) {
         if (service == null) return "";
         if ("prompt".equals(command) || "new_session".equals(command)
-                || "switch_session".equals(command) || "fork".equals(command)
+                || "switch_session".equals(command) || "fork".equals(command) || "clone".equals(command)
                 || "abort".equals(command)) historyRequest = "";
         return service.rpc(command, params);
     }
@@ -2103,57 +2103,15 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         updateSendEnabled();
     }
 
-    private void forkFromMessage(@NonNull ChatMessage message) {
+    private void forkCurrentSession() {
         if (!isConnected()) {
             Toast.makeText(this, R.string.bridge_not_connected, Toast.LENGTH_SHORT).show();
             return;
         }
-        // Prefer entryId on the message or preceding user; else open fork picker via RPC.
-        String entryId = message.entryId;
-        if (entryId == null || entryId.isEmpty()) {
-            java.util.List<ChatMessage> snap = adapter.snapshot();
-            for (int i = snap.size() - 1; i >= 0; i--) {
-                if (snap.get(i).role == ChatMessage.Role.USER
-                        && snap.get(i).entryId != null && !snap.get(i).entryId.isEmpty()) {
-                    // Use nearest user entry before/at this point when forking from a reply.
-                    entryId = snap.get(i).entryId;
-                    // Keep scanning upward until we pass the agent message
-                    for (int j = i; j < snap.size(); j++) {
-                        if (snap.get(j) == message) break;
-                    }
-                    break;
-                }
-            }
-            // Better: walk back from message index
-            int at = -1;
-            for (int i = 0; i < snap.size(); i++) {
-                if (snap.get(i) == message) { at = i; break; }
-            }
-            if (at >= 0) {
-                for (int i = at; i >= 0; i--) {
-                    if (snap.get(i).role == ChatMessage.Role.USER
-                            && snap.get(i).entryId != null && !snap.get(i).entryId.isEmpty()) {
-                        entryId = snap.get(i).entryId;
-                        break;
-                    }
-                    if (snap.get(i).entryId != null && !snap.get(i).entryId.isEmpty()) {
-                        entryId = snap.get(i).entryId;
-                        break;
-                    }
-                }
-            }
-        }
-        if (entryId != null && !entryId.isEmpty()) {
-            JSONObject params = new JSONObject();
-            try {
-                params.put("entryId", entryId);
-            } catch (Exception e) {
-                throw new IllegalStateException("fork params", e);
-            }
-            rpc("fork", params);
-            return;
-        }
-        showForkPicker();
+        // Pi's clone forks at the current leaf, preserving the complete session.
+        confirmIfBusy(R.string.session_interrupt_new_message,
+                R.string.session_interrupt_new_toast,
+                () -> rpc("clone", null));
     }
 
     private void showFindSheet() {
@@ -2890,12 +2848,14 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
             });
             return;
         }
-        if ("fork".equals(command) && data != null) {
+        if (("fork".equals(command) || "clone".equals(command)) && data != null) {
             if (data.optBoolean("cancelled", false)) {
                 Toast.makeText(this, R.string.rpc_failed, Toast.LENGTH_SHORT).show();
             } else {
                 syncSessionAfterChange();
-                if (composer != null) composer.setText(data.optString("text", ""));
+                if ("fork".equals(command) && composer != null) {
+                    composer.setText(data.optString("text", ""));
+                }
             }
             return;
         }
