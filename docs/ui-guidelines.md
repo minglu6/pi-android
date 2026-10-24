@@ -64,3 +64,11 @@
 - [ ] `AppFonts.applyTree` 或 `mono()` 已覆盖
 - [ ] 色与间距对齐 notice / picker（不是 Material 默认 lavender）
 - [ ] 字符串进 `strings.xml`，中文用户可见文案不用「桥」而用「连接器」
+
+## 供应商矢量图验收
+
+SVG 的圆弧标志允许紧凑连写（如 `00`、`01`），Android `PathParser` 不支持这种写法。导入图标时先用 SVG 解析器规范化 `pathData`，保留每个圆弧的七个独立参数；不要直接复制压缩路径。`aapt2` 编译成功不能证明运行时可加载。
+
+连接测试设备后执行 `ANDROID_SERIAL=<设备序列号> ANDROID_JAR=<平台 android.jar> bash tests/provider-icons/run.sh`（`d8` 需在 PATH）。测试使用 Android 真正的路径解析器及原生几何运算遍历所有供应商图标，不安装应用或切换前台；完整启动与主题布局仍需另行验收。
+
+2026-10-24 修复验证：旧路径在 Android 运行时复现 `ArrayIndexOutOfBoundsException`，规范化后 8 个图标、11 条路径通过。修复 APK 在 Android 15 模拟器上分别恢复 8 个品牌及 1 个自定义供应商的模型缓存，9 次冷启动均正常，模型、logo、`xhigh` 显示正确，崩溃日志为空。
