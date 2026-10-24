@@ -77,6 +77,21 @@
                     android:textSize="11sp" />
 
                 <TextView
+                    android:id="@+id/thinking_chip"
+                    style="@style/MonoMetaText.Line"
+                    android:layout_width="wrap_content"
+                    android:layout_height="22dp"
+                    android:layout_marginStart="4dp"
+                    android:background="@drawable/bg_status_chip"
+                    android:gravity="center_vertical"
+                    android:paddingStart="6dp"
+                    android:paddingEnd="6dp"
+                    android:singleLine="true"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="11sp"
+                    android:visibility="gone" />
+
+                <TextView
                     android:id="@+id/profile_chip"
                     style="@style/MonoMetaText.Line"
                     android:layout_width="wrap_content"

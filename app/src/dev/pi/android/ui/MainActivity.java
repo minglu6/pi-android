@@ -117,6 +117,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private View statusDot;
     private TextView sessionTitle;
     private TextView modelChip;
+    private TextView thinkingChip;
     private TextView profileChip;
     @Nullable private ProfilesSheet profilesSheet;
     /** Last setConnectionVisual state: online|starting|connecting|offline — for profile dots. */
@@ -340,6 +341,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         }
         sessionTitle = findViewById(R.id.session_title);
         modelChip = findViewById(R.id.model_chip);
+        thinkingChip = findViewById(R.id.thinking_chip);
         profileChip = findViewById(R.id.profile_chip);
         cwdChip = findViewById(R.id.cwd_chip);
         footerStats = findViewById(R.id.footer_stats);
@@ -350,6 +352,7 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
         btnStop = findViewById(R.id.btn_stop);
         queueRow = findViewById(R.id.queue_row);
         if (modelChip != null) modelChip.setTypeface(AppFonts.mono(this, false));
+        if (thinkingChip != null) thinkingChip.setTypeface(AppFonts.mono(this, false));
         if (profileChip != null) {
             profileChip.setTypeface(AppFonts.mono(this, false));
             profileChip.setOnClickListener(v -> openProfilesSheet());
@@ -1477,21 +1480,46 @@ public class MainActivity extends AppCompatActivity implements BridgeService.UiH
     private void refreshModelChip() {
         if (modelChip == null) return;
         AgentState st = AgentState.get();
-        String name = !st.modelLabel().isEmpty() ? st.modelLabel()
-                : (!modelStatus.isEmpty() ? modelStatus.split(" · ")[0] : getString(R.string.action_model));
-        String think = !st.thinking().isEmpty() ? st.thinking() : currentThinking;
-        String text = think.isEmpty() ? name : name + " " + think;
-        modelChip.setText(text);
-        fitModelChipText(text);
+        String name = st.modelLabel().isEmpty() ? getString(R.string.action_model) : st.modelLabel();
+        int logo = providerLogo(st.provider());
+        String prefix = st.provider() + " / ";
+        if (logo != 0 && name.startsWith(prefix)) name = name.substring(prefix.length());
+        modelChip.setText(name);
+        modelChip.setContentDescription(st.modelLabel().isEmpty() ? name : st.modelLabel());
+        modelChip.setCompoundDrawablesRelativeWithIntrinsicBounds(logo, 0, 0, 0);
+        modelChip.setCompoundDrawablePadding(Math.round(4 * getResources().getDisplayMetrics().density));
+        String think = st.thinking();
+        thinkingChip.setText(think);
+        thinkingChip.setContentDescription(getString(R.string.action_thinking) + ": " + think);
+        thinkingChip.setVisibility(think.isEmpty() ? View.GONE : View.VISIBLE);
+        fitModelChipText(name);
     }
 
-    /** Shrink chip text (max ~11.5sp → min ~10sp) so provider+model+thinking fit on one line. */
+    private static int providerLogo(String provider) {
+        switch (provider.toLowerCase(java.util.Locale.ROOT)) {
+            case "openai":
+            case "openai-codex": return R.drawable.ic_provider_openai;
+            case "anthropic": return R.drawable.ic_provider_anthropic;
+            case "google":
+            case "google-gemini-cli":
+            case "google-antigravity":
+            case "google-vertex": return R.drawable.ic_provider_google;
+            case "deepseek": return R.drawable.ic_provider_deepseek;
+            case "qwen": return R.drawable.ic_provider_qwen;
+            case "ollama": return R.drawable.ic_provider_ollama;
+            case "openrouter": return R.drawable.ic_provider_openrouter;
+            case "xai": return R.drawable.ic_provider_xai;
+            default: return 0;
+        }
+    }
+
+    /** Shrink only the model label; reasoning keeps its own trailing space. */
     private void fitModelChipText(String text) {
         if (modelChip == null || text == null) return;
         final String sample = text;
         modelChip.post(() -> {
             if (modelChip == null) return;
-            int avail = modelChip.getWidth() - modelChip.getPaddingStart() - modelChip.getPaddingEnd();
+            int avail = modelChip.getWidth() - modelChip.getCompoundPaddingLeft() - modelChip.getCompoundPaddingRight();
             if (avail <= 0) {
                 modelChip.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 11.5f);
                 return;

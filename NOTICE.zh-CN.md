@@ -46,3 +46,7 @@ Pi Press Kit 将该标志描述为“Vector logo for light/dark usage and editor
 - 随附的[字体来源声明](app/res/raw/meslo_nerd_notice.txt)记录了来源及本地字形子集化处理；中日韩文字回退到系统字体。
 
 再次分发这些素材时，应保留适用的字体许可证和署名声明。本项目的 MIT 许可证不能替代其许可条款。
+
+## 供应商图标
+
+`app/res/drawable/ic_provider_*.xml` 改编自 [Lobe Icons](https://github.com/lobehub/lobe-icons) 的单色 SVG，Copyright (c) 2023 LobeHub，采用随附的 [MIT 许可证](app/res/raw/lobe_icons_mit.txt)。每份矢量资源注明了上游来源 URL。图标仅用于识别当前供应商；商标归各自权利人所有，不代表背书。

@@ -46,3 +46,7 @@ The application bundles **MesloLGLDZ Nerd Font Mono**, Regular and Bold, in `app
 - The bundled [font provenance notice](app/res/raw/meslo_nerd_notice.txt) records the source and local glyph subsetting; CJK text falls back to system fonts.
 
 Retain the applicable font license and attribution notices when redistributing these assets. The project's MIT License does not replace their licensing terms.
+
+## Provider icons
+
+The `app/res/drawable/ic_provider_*.xml` assets adapt monochrome SVGs from [Lobe Icons](https://github.com/lobehub/lobe-icons), Copyright (c) 2023 LobeHub, under the [bundled MIT License](app/res/raw/lobe_icons_mit.txt). Each drawable records its upstream source URL. They identify the selected provider only; trademarks remain with their respective owners and do not imply endorsement.
