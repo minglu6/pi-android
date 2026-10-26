@@ -1,9 +1,15 @@
 package dev.pi.android.ui;
 
 import org.json.JSONObject;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** 展示层专用摘要，不修改 Pi 保存的消息或发给模型的上下文。 */
 public final class HistoryPresentation {
+    private static final Pattern TIMESTAMP_PREFIX = Pattern.compile(
+            "\\A(?:[\\t \\r\\n]*<!--pi-timestamp:\\d{4}-\\d{2}-\\d{2} "
+                    + "\\d{2}:\\d{2}:\\d{2}-->[\\t ]*(?:\\r?\\n)?)+");
+
     private HistoryPresentation() {}
 
     public static boolean hidden(JSONObject message) {
@@ -22,6 +28,13 @@ public final class HistoryPresentation {
         }
         return rawText;
     }
+    /** 仅去掉正文前缀元数据，不处理正文或代码示例中的同名注释。 */
+    public static String bodyText(String rawText) {
+        if (rawText == null || rawText.isEmpty()) return "";
+        Matcher prefix = TIMESTAMP_PREFIX.matcher(rawText);
+        return prefix.find() ? rawText.substring(prefix.end()) : rawText;
+    }
+
 
     /**
      * Footer status under the composer: connection / activity only.

@@ -180,10 +180,26 @@ public final class TranscriptTest {
         // 再确认历史行没有被覆盖。
         equal("旧问题", rows.get(0).text); equal("旧正文", rows.get(1).text);
     }
+    static void timestampPresentation() {
+        String marker = "<!--pi-timestamp:2026-10-26 15:00:53-->";
+        equal("你好", HistoryPresentation.bodyText(marker + "\n你好"));
+        equal("  缩进正文\n", HistoryPresentation.bodyText(" \r\n" + marker + "\r\n  缩进正文\n"));
+        equal("正文", HistoryPresentation.bodyText(marker + "\n" + marker + "\n正文"));
+        equal("", HistoryPresentation.bodyText(marker));
+        equal("", HistoryPresentation.bodyText(null));
+        String example = "```html\n" + marker + "\n```";
+        equal(example, HistoryPresentation.bodyText(example));
+        String quoted = "示例：" + marker;
+        equal(quoted, HistoryPresentation.bodyText(quoted));
+        String comment = "<!--ordinary comment-->\n正文";
+        equal(comment, HistoryPresentation.bodyText(comment));
+        equal("正文\n" + marker, HistoryPresentation.bodyText(marker + "\n正文\n" + marker));
+    }
     public static void main(String[] args) {
         new TranscriptTest().textDeltas(); new TranscriptTest().toolDeltas();
         new TranscriptTest().thinkingStream(); new TranscriptTest().errorsAndAbort(); history();
         new TranscriptTest().reconnectBackfill(); new TranscriptTest().mergeThenShift();
+        timestampPresentation();
         System.out.println("TranscriptTest: " + assertions + " assertions passed");
     }
 }

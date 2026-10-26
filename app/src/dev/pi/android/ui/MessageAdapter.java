@@ -548,8 +548,9 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                                 : ctx.getString(R.string.user_you) + " · " + when);
                         userHeader.setVisibility(View.VISIBLE);
                     }
-                    text.setText(msg.text);
-                    text.setVisibility(msg.text.isEmpty() ? View.GONE : View.VISIBLE);
+                    String userBody = HistoryPresentation.bodyText(msg.text);
+                    text.setText(userBody);
+                    text.setVisibility(userBody.isEmpty() ? View.GONE : View.VISIBLE);
                     bindAttachments(msg);
                     break;
                 case TYPE_TOOL:
@@ -561,7 +562,8 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
                 case TYPE_AGENT:
                 default: {
                     if (msg.streaming) {
-                        CharSequence body = MarkdownLite.render(ctx, msg.text, codeBg, codeFg);
+                        CharSequence body = MarkdownLite.render(ctx,
+                                HistoryPresentation.bodyText(msg.text), codeBg, codeFg);
                         SpannableStringBuilder sb = new SpannableStringBuilder(body);
                         sb.append(ctx.getString(R.string.streaming_marker));
                         if (text != null) {
@@ -637,12 +639,13 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.VH> {
         }
 
         private void bindAgentBody(ChatMessage msg, int codeBg, int codeFg) {
+            String body = HistoryPresentation.bodyText(msg.text);
             if (agentBody == null || text == null) {
-                if (text != null) text.setText(MarkdownLite.render(ctx, msg.text, codeBg, codeFg));
+                if (text != null) text.setText(MarkdownLite.render(ctx, body, codeBg, codeFg));
                 return;
             }
             clearExtraAgentViews();
-            List<Seg> segs = splitMarkdown(msg.text == null ? "" : msg.text);
+            List<Seg> segs = splitMarkdown(body);
             boolean firstText = true;
             for (int si = 0; si < segs.size(); si++) {
                 Seg seg = segs.get(si);
